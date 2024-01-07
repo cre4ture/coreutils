@@ -1,0 +1,25 @@
+# Version 0.3.0 - 2023-08-31
+- [add][minor] Expose error details publically.
+- [fix][minor] Fix panic when processing multibyte UTF-8 escape sequence.
+- [change][major] Require a valid UTF-8 `&str` for `Error::print_source_highlighting()`.
+
+# Version 0.2.3 - 2023-07-26
+- [add][minor] Support unsized `VariableMap` objects, such as `&dyn VariableMap`.
+
+# Version 0.2.2 - 2022-09-19
+- [change][minor] Have `NoSubstitution` return an uninhibated `NeverType` as value.
+
+# Version 0.2.1 - 2022-09-19
+- [add][minor] Add a `NoSubstitution` map to allow disabling substitution in generic code.
+
+# Version 0.2.0 - 2022-09-19
+- [change][major] Update `serde_yaml` to version `0.9`.
+
+# Version 0.1.2 - 2022-03-03
+- [change][minor] Remove use of new features to be compatible with older Rust versions.
+
+# Version 0.1.1 - 2022-03-01
+- [add][minor] Add support for substitution in all string values of YAML data.
+
+# Version 0.1.0 - 2022-02-22
+- [add][major] Initial release.
