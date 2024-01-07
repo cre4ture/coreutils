@@ -390,7 +390,7 @@ fn test_read_backwards_bytes_proc_fs_version() {
 
     let args = ["-c", "-1", "/proc/version"];
     let result = ts.ucmd().args(&args).succeeds();
-    assert!(result.stdout().len() > 0);
+    assert!(!result.stdout().is_empty());
 }
 
 #[cfg(all(
@@ -404,7 +404,7 @@ fn test_read_backwards_bytes_proc_fs_modules() {
 
     let args = ["-c", "-1", "/proc/modules"];
     let result = ts.ucmd().args(&args).succeeds();
-    assert!(result.stdout().len() > 0);
+    assert!(!result.stdout().is_empty());
 }
 
 #[cfg(all(
@@ -418,7 +418,7 @@ fn test_read_backwards_lines_proc_fs_modules() {
 
     let args = ["--lines", "-1", "/proc/modules"];
     let result = ts.ucmd().args(&args).succeeds();
-    assert!(result.stdout().len() > 0);
+    assert!(!result.stdout().is_empty());
 }
 
 #[cfg(all(
