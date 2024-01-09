@@ -12,7 +12,6 @@ use pretty_assertions::assert_eq;
 use rlimit::prlimit;
 #[cfg(feature = "sleep")]
 use rstest::rstest;
-#[cfg(unix)]
 use std::borrow::Cow;
 use std::collections::VecDeque;
 #[cfg(not(windows))]

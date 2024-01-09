@@ -20,6 +20,8 @@ use std::io::{self, Write};
 use std::iter::Iterator;
 use std::ops::Deref;
 #[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
+#[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 use std::process::{self};
 use uucore::display::Quotable;
@@ -251,7 +253,11 @@ impl EnvAppData {
     ) -> UResult<Vec<std::ffi::OsString>> {
         let mut all_args: Vec<std::ffi::OsString> = Vec::new();
         for arg in original_args {
-            match arg.as_encoded_bytes() {
+            #[cfg(not(windows))]
+            let arg_bytes = arg.as_bytes();
+            #[cfg(windows)]
+            let arg_bytes = arg.as_encoded_bytes();
+            match arg_bytes {
                 b if check_and_handle_string_args(b, "--split-string", &mut all_args, None)? => {
                     self.had_string_argument = true;
                 }
