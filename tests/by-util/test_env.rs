@@ -5,7 +5,8 @@
 // spell-checker:ignore (words) bamf chdir rlimit prlimit COMSPEC
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
-use crate::common::util::{expected_result, TestScenario};
+use crate::common::util::expected_result;
+use crate::common::util::TestScenario;
 use std::env;
 use std::path::Path;
 use tempfile::tempdir;
