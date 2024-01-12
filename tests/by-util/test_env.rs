@@ -768,7 +768,10 @@ mod tests_split_iterator {
         );
         assert_eq!(
             split(r#""$""#),
-            Err(ParseError::ParsingOfVariableNameFailed { pos: 2, msg: "Missing variable name".into() }),
+            Err(ParseError::ParsingOfVariableNameFailed {
+                pos: 2,
+                msg: "Missing variable name".into()
+            }),
         );
     }
 
@@ -932,8 +935,7 @@ mod test_raw_string_parser {
     }
 
     #[test]
-    fn test_multi_byte_codes_skip_one_take_one_skip_until_ascii_char_or_end()
-    {
+    fn test_multi_byte_codes_skip_one_take_one_skip_until_ascii_char_or_end() {
         let input = "🦉🦉🦉x🦉🦉x🦉x🦉🦉🦉🦉";
         let mut uut = env::raw_string_parser::RawStringParser::new(input);
 

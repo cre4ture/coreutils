@@ -11,9 +11,9 @@
 //! Even though it looks quite like a POSIX syntax, the original
 //! "shell_words" implementation had to be adapted significantly.
 //!
-//! Apart from the grammar differences, there is a new feature integrated: $VARIABLE expansion by subst crate.
+//! Apart from the grammar differences, there is a new feature integrated: $VARIABLE expansion.
 //!
-//! [GNU env] https://www.gnu.org/software/coreutils/manual/html_node/env-invocation.html#g_t_002dS_002f_002d_002dsplit_002dstring-syntax
+//! [GNU env] <https://www.gnu.org/software/coreutils/manual/html_node/env-invocation.html#g_t_002dS_002f_002d_002dsplit_002dstring-syntax>
 
 #![forbid(unsafe_code)]
 
@@ -196,7 +196,8 @@ impl<'a> SplitIterator<'a> {
         if pos_end == pos_start {
             return Err(ParseError::ParsingOfVariableNameFailed {
                 pos: pos_start,
-                msg: "Missing variable name".into() });
+                msg: "Missing variable name".into(),
+            });
         }
 
         Ok(self.raw_parser.get_substring(&Range {
