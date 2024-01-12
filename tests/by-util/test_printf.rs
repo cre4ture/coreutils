@@ -37,6 +37,11 @@ fn escaped_slash() {
 }
 
 #[test]
+fn unescaped_double_quote() {
+    new_ucmd!().args(&["\\\""]).succeeds().stdout_only("\"");
+}
+
+#[test]
 fn escaped_hex() {
     new_ucmd!().args(&["\\x41"]).succeeds().stdout_only("A");
 }
@@ -638,4 +643,14 @@ fn partial_char() {
         .stderr_is(
             "printf: warning: bc: character(s) following character constant have been ignored\n",
         );
+}
+
+#[test]
+fn char_as_byte() {
+    new_ucmd!().args(&["%c", "🙃"]).succeeds().stdout_only("ð");
+}
+
+#[test]
+fn no_infinite_loop() {
+    new_ucmd!().args(&["a", "b"]).succeeds().stdout_only("a");
 }
