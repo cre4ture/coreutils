@@ -256,7 +256,7 @@ impl EnvAppData {
             #[cfg(not(windows))]
             let arg_bytes = arg.as_bytes();
             #[cfg(windows)]
-            let arg_bytes = arg.as_encoded_bytes();
+            let arg_bytes = arg.as_os_str().as_encoded_bytes();
             match arg_bytes {
                 b if check_and_handle_string_args(b, "--split-string", &mut all_args, None)? => {
                     self.had_string_argument = true;
