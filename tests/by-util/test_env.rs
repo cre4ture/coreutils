@@ -697,7 +697,6 @@ mod tests_split_iterator {
             (r#""""#, &[""]),
             (r#""""""#, &[""]),
             (r#""a b c' d""#, &["a b c' d"]),
-            (r#""$""#, &["$"]),
             (r#""\$""#, &["$"]),
             (r#""`""#, &["`"]),
             (r#""\"""#, &["\""]),
@@ -766,6 +765,10 @@ mod tests_split_iterator {
         assert_eq!(
             split("'\\"),
             Err(ParseError::MissingClosingQuote { pos: 2, c: '\'' })
+        );
+        assert_eq!(
+            split(r#""$""#),
+            Err(ParseError::ParsingOfVariableNameFailed { pos: 2, msg: "Missing variable name".into() }),
         );
     }
 
@@ -929,26 +932,20 @@ mod test_raw_string_parser {
     }
 
     #[test]
-    fn test_multi_byte_codes_skip_one_only_allowed_for_ascii_chars_skip_until_char_skip_until_end()
+    fn test_multi_byte_codes_skip_one_take_one_skip_until_ascii_char_or_end()
     {
         let input = "🦉🦉🦉x🦉🦉x🦉x🦉🦉🦉🦉";
         let mut uut = env::raw_string_parser::RawStringParser::new(input);
 
-        uut.skip_one().unwrap_err();
-        assert_eq!(uut.get_look_at_pos(), 0);
-        uut.take_one().unwrap(); // take 🦉🦉🦉
+        uut.skip_one().unwrap(); // skip 🦉🦉🦉
         assert_eq!(uut.get_look_at_pos(), 12);
 
         uut.skip_one().unwrap(); // skip x
-        assert_eq!(uut.get_look_at_pos(), 13);
-        uut.skip_one().unwrap_err();
         assert_eq!(uut.get_look_at_pos(), 13);
         uut.take_one().unwrap(); // take 🦉🦉
         assert_eq!(uut.get_look_at_pos(), 21);
 
         uut.skip_one().unwrap(); // skip x
-        assert_eq!(uut.get_look_at_pos(), 22);
-        uut.skip_one().unwrap_err();
         assert_eq!(uut.get_look_at_pos(), 22);
         uut.skip_until_ascii_char_or_end(b'x').unwrap(); // skip 🦉
         assert_eq!(uut.get_look_at_pos(), 26);
@@ -957,7 +954,7 @@ mod test_raw_string_parser {
         assert_eq!(uut.get_look_at_pos(), 43);
 
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output().unwrap(), "🦉🦉🦉🦉🦉x");
+        assert_eq!(uut.take_collected_output().unwrap(), "🦉🦉x");
     }
 
     #[test]

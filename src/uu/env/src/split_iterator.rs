@@ -193,6 +193,12 @@ impl<'a> SplitIterator<'a> {
 
         let pos_end = self.raw_parser.get_look_at_pos();
 
+        if pos_end == pos_start {
+            return Err(ParseError::ParsingOfVariableNameFailed {
+                pos: pos_start,
+                msg: "Missing variable name".into() });
+        }
+
         Ok(self.raw_parser.get_substring(&Range {
             start: pos_start,
             end: pos_end,
