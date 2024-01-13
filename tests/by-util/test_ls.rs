@@ -115,13 +115,24 @@ fn test_ls_allocation_size() {
             .succeeds()
             .stdout_matches(&Regex::new("[^ ] 2 [^ ]").unwrap());
 
-        #[cfg(not(target_os = "freebsd"))]
+        #[cfg(all(
+            not(target_os = "freebsd"),
+            not(all(target_os = "android", target_pointer_size="64"))))]
         scene
             .ucmd()
             .arg("-s1")
             .arg("some-dir1")
             .succeeds()
             .stdout_is("total 4096\n   0 empty-file\n   0 file-with-holes\n4096 zero-file\n");
+
+
+        #[cfg(all(target_os = "android", target_pointer_size="64"))]
+        scene
+            .ucmd()
+            .arg("-s1")
+            .arg("some-dir1")
+            .succeeds()
+            .stdout_is("total 4100\n   0 empty-file\n   0 file-with-holes\n4100 zero-file\n");
 
         scene
             .ucmd()
