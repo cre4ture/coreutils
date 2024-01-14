@@ -117,13 +117,14 @@ fn test_ls_allocation_size() {
 
         #[cfg(all(
             not(target_os = "freebsd"),
-            not(all(target_os = "android", target_pointer_width="64"))))]
-        let (zero_file_size_4k, zero_file_size_1k, zero_file_size_8k, zero_file_size_4m)
-          = (4096, 1024, 8192, "4.0M");
+            not(all(target_os = "android", target_pointer_width = "64"))
+        ))]
+        let (zero_file_size_4k, zero_file_size_1k, zero_file_size_8k, zero_file_size_4m) =
+            (4096, 1024, 8192, "4.0M");
 
-        #[cfg(all(target_os = "android", target_pointer_width="64"))]
-        let (zero_file_size_4k, zero_file_size_1k, zero_file_size_8k, zero_file_size_4m)
-          = (4100, 1025, 8200, "4.1M"); // FIXME: Investigate where this difference comes from. Is it OS or filesystem?
+        #[cfg(all(target_os = "android", target_pointer_width = "64"))]
+        let (zero_file_size_4k, zero_file_size_1k, zero_file_size_8k, zero_file_size_4m) =
+            (4100, 1025, 8200, "4.1M"); // FIXME: Investigate where this difference comes from. Is it OS or filesystem?
 
         #[cfg(not(target_os = "freebsd"))]
         scene

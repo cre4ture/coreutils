@@ -275,7 +275,6 @@ fn test_type_option_with_file() {
         .stdout_move_str();
     let fs_type_root_dir = fs_type_root_dir.lines().nth(1).unwrap().trim();
 
-
     new_ucmd!().args(&["-t", fs_type_cwd, "."]).succeeds();
     new_ucmd!()
         .args(&["-t", "nonexisting", "."])
