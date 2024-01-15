@@ -656,7 +656,7 @@ impl FsMeta for StatFs {
             not(target_arch = "s390x"),
             target_pointer_width = "64"
         ))]
-        return self.f_bsize;
+        return self.f_bsize; // i64 -> i64 - OK
         #[cfg(all(
             not(target_env = "musl"),
             not(target_os = "freebsd"),
@@ -664,20 +664,21 @@ impl FsMeta for StatFs {
             any(
                 target_arch = "s390x",
                 target_vendor = "apple",
-                target_os = "android",
+                all(target_os = "android", target_pointer_width = "32"),
                 target_os = "openbsd",
                 not(target_pointer_width = "64")
             )
         ))]
-        return self.f_bsize.into();
+        return self.f_bsize.into(); // i32 or u32 -> i64 - OK
         #[cfg(any(
             target_env = "musl",
             target_os = "freebsd",
             target_os = "illumos",
             target_os = "solaris",
-            target_os = "redox"
+            target_os = "redox",
+            all(target_os = "android", target_pointer_width = "64"),
         ))]
-        return self.f_bsize.try_into().unwrap();
+        return self.f_bsize.try_into().unwrap(); // u64 -> i64 - might fail if number is too high
     }
     fn total_blocks(&self) -> u64 {
         #[cfg(target_pointer_width = "64")]
@@ -741,14 +742,17 @@ impl FsMeta for StatFs {
             not(target_env = "musl"),
             any(
                 target_vendor = "apple",
-                target_os = "android",
+                all(target_os = "android", target_pointer_width = "32"),
                 target_os = "freebsd",
                 target_arch = "s390x",
                 not(target_pointer_width = "64")
             )
         ))]
         return self.f_type.into();
-        #[cfg(target_env = "musl")]
+        #[cfg(any(
+            target_env = "musl",
+            all(target_os = "android", target_pointer_width = "64"),
+        ))]
         return self.f_type.try_into().unwrap();
     }
     #[cfg(not(any(
