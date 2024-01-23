@@ -27,7 +27,7 @@ jobs:
       matrix:
         api-level: [28]
         target: [default]
-        arch: [x86] # , arm64-v8a
+        arch: [x86, x86_64] # , arm64-v8a
     env:
       TERMUX: v0.118.0
     steps:
@@ -49,7 +49,7 @@ jobs:
         api-level: ${{ matrix.api-level }}
         target: ${{ matrix.target }}
         arch: ${{ matrix.arch }}
-        ram-size: 2048M
+        ram-size: 8GB
         disk-size: 7GB
         force-avd-creation: true
         emulator-options: -no-window -no-snapshot-load -noaudio -no-boot-anim -camera-back none
