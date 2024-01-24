@@ -50,7 +50,7 @@ jobs:
         target: ${{ matrix.target }}
         arch: ${{ matrix.arch }}
         ram-size: 8GB
-        disk-size: 7GB
+        disk-size: 14GB
         force-avd-creation: true
         emulator-options: -no-window -no-snapshot-load -noaudio -no-boot-anim -camera-back none
         script: |
