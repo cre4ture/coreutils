@@ -217,7 +217,8 @@ snapshot() {
     echo "Prepare and install system packages"
     probe='/sdcard/sourceslist.probe'
     command="echo 'deb https://grimler.se/termux-packages-24 stable main' > \$PREFIX/etc/apt/sources.list; echo \$? > $probe"
-    run_termux_command ${command@Q} "$probe"
+    printf -v command "%q" "$command"
+    run_termux_command $command "$probe"
     probe='/sdcard/pkg.probe'
     command="'mkdir -vp ~/.cargo/bin; yes | pkg install openssh rust binutils openssl tar -y; sshd; echo \$? > $probe'"
     run_termux_command "$command" "$probe" || return
@@ -226,15 +227,13 @@ snapshot() {
     run_command_via_ssh echo Hello SSH World \$USER
 
     echo "Installing cargo-nextest"
-    probe='/sdcard/nextest.probe'
     # We need to install nextest via cargo currently, since there is no pre-built binary for android x86
     command="export CARGO_TERM_COLOR=always && cargo install cargo-nextest"
     run_command_via_ssh $command
     return_code=$?
 
     echo "Info about cargo and rust"
-    probe='/sdcard/info.probe'
-    command="'echo \$HOME; \
+    command="echo \$HOME; \
 PATH=\$HOME/.cargo/bin:\$PATH; \
 export PATH; \
 echo \$PATH; \
@@ -242,9 +241,8 @@ pwd; \
 command -v rustc && rustc -Vv; \
 ls -la ~/.cargo/bin; \
 cargo --list; \
-cargo nextest --version; \
-touch $probe'"
-    run_termux_command "$command" "$probe"
+cargo nextest --version"
+    run_command_via_ssh $command
 
     echo "Snapshot complete"
     # shellcheck disable=SC2086
@@ -328,14 +326,12 @@ echo \$? > ${probe}'"
 build() {
     echo "Running build"
 
+    setup_ssh_forwarding
 
-
-    probe='/sdcard/build.probe'
-    command="'export CARGO_TERM_COLOR=always; \
-export CARGO_INCREMENTAL=0; \
-cd ~/coreutils && cargo build --features feat_os_unix_android; \
-echo \$? >$probe'"
-    run_termux_command "$command" "$probe" || return
+    command="export CARGO_TERM_COLOR=always;
+             export CARGO_INCREMENTAL=0; \
+             cd ~/coreutils && cargo build --features feat_os_unix_android"
+    run_command_via_ssh "$command" || return
 
     echo "Finished build"
 }
