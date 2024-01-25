@@ -209,6 +209,27 @@ run_command_via_ssh() {
     ssh -p 9022 termux@127.0.0.1 $@
 }
 
+navigate_down() {
+    adb shell input keyevent 20
+}
+
+hit_space_key() {
+    adb shell input text "\ "
+}
+
+termux_change_rep() {
+    probe='/sdcard/change_repo.probe'
+    adb shell input text "termux-change-repo" && hit_enter
+    sleep 1
+    hit_enter  # select mirror group option
+    sleep 1
+    navigate_down
+    navigate_down
+    navigate_down # select europe
+    hit_space_key
+    hit_enter
+}
+
 snapshot() {
     apk="$1"
     echo "Running snapshot"
@@ -216,7 +237,7 @@ snapshot() {
 
     echo "Prepare and install system packages"
     probe='/sdcard/sourceslist.probe'
-    command="'echo deb https://grimler.se/termux-packages-24 stable main > \$PREFIX/etc/apt/sources.list; echo \$? > $probe'"
+    command="'echo deb https://grimler.se/termux-packages-24 stable main | dd of=\$PREFIX/etc/apt/sources.list; echo \$? > $probe'"
     run_termux_command "$command" "$probe"
     probe='/sdcard/pkg.probe'
     command="'mkdir -vp ~/.cargo/bin; yes | pkg install openssh rust binutils openssl tar -y && sshd; echo \$? > $probe'"
