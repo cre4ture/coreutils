@@ -216,11 +216,10 @@ snapshot() {
 
     echo "Prepare and install system packages"
     probe='/sdcard/sourceslist.probe'
-    command="echo 'deb https://grimler.se/termux-packages-24 stable main' > \$PREFIX/etc/apt/sources.list; echo \$? > $probe"
-    printf -v command "%q" "$command"
+    command="'echo \"deb https://grimler.se/termux-packages-24 stable main\" > \$PREFIX/etc/apt/sources.list; echo \$? > $probe'"
     run_termux_command $command "$probe"
     probe='/sdcard/pkg.probe'
-    command="'mkdir -vp ~/.cargo/bin; yes | pkg install openssh rust binutils openssl tar -y; sshd; echo \$? > $probe'"
+    command="'mkdir -vp ~/.cargo/bin; yes | pkg install openssh rust binutils openssl tar -y & sshd; echo \$? > $probe'"
     run_termux_command "$command" "$probe" || return
 
     setup_ssh_forwarding
@@ -254,6 +253,8 @@ sync_host() {
     cache_home="${HOME}/${cache_dir_name}"
     cache_dest="/sdcard/${cache_dir_name}"
 
+    setup_ssh_forwarding
+
     echo "Running sync host -> image: ${repo}"
 
     # android doesn't allow symlinks on shared dirs, and adb can't selectively push files
@@ -284,7 +285,7 @@ sync_host() {
 
     # ...but shared dirs can't build, so move it home as termux
     probe='/sdcard/sync.probe'
-    command="'mv /sdcard/coreutils ~/; \
+    command="mv /sdcard/coreutils ~/; \
 cd ~/coreutils; \
 if [[ -e ${cache_dest} ]]; then \
 rm -rf ~/.cargo ./target; \
@@ -293,9 +294,8 @@ ls -la ~/.cargo; \
 tar xzf ${cache_dest}/target.tgz; \
 ls -la ./target; \
 rm -rf ${cache_dest}; \
-fi; \
-touch $probe'"
-    run_termux_command "$command" "$probe" || return
+fi"
+    run_command_via_ssh "$command" || return
 
     echo "Finished sync host -> image: ${repo}"
 }
@@ -305,17 +305,17 @@ sync_image() {
     cache_home="${HOME}/${cache_dir_name}"
     cache_dest="/sdcard/${cache_dir_name}"
 
+    setup_ssh_forwarding
+
     echo "Running sync image -> host: ${repo}"
 
-    probe='/sdcard/cache.probe'
-    command="'rm -rf /sdcard/coreutils ${cache_dest}; \
+    command="rm -rf /sdcard/coreutils ${cache_dest}; \
 mkdir -p ${cache_dest}; \
 cd ${cache_dest}; \
 tar czf cargo.tgz -C ~/ .cargo; \
 tar czf target.tgz -C ~/coreutils target; \
-ls -la ${cache_dest}; \
-echo \$? > ${probe}'"
-    run_termux_command "$command" "$probe" || return
+ls -la ${cache_dest}"
+    run_command_via_ssh "$command" || return
 
     rm -rf "$cache_home"
     adb pull -a "$cache_dest" "$cache_home" || return
@@ -339,31 +339,33 @@ build() {
 tests() {
     echo "Running tests"
 
+    setup_ssh_forwarding
+
     probe='/sdcard/tests.probe'
-    command="'export PATH=\$HOME/.cargo/bin:\$PATH; \
+    command="export PATH=\$HOME/.cargo/bin:\$PATH; \
 export RUST_BACKTRACE=1; \
 export CARGO_TERM_COLOR=always; \
 export CARGO_INCREMENTAL=0; \
-cd ~/coreutils; \
+cd ~/coreutils && \
 timeout --preserve-status --verbose -k 1m 60m \
-cargo nextest run --profile ci --hide-progress-bar --features feat_os_unix_android; \
-echo \$? >$probe'"
-    run_termux_command "$command" "$probe" || return
+cargo nextest run --profile ci --hide-progress-bar --features feat_os_unix_android"
+    run_command_via_ssh "$command" || return
 
     echo "Finished tests"
 }
 
 hash_rustc() {
-    probe='/sdcard/rustc.probe'
     tmp_hash="__rustc_hash__.tmp"
     hash="__rustc_hash__"
 
+    setup_ssh_forwarding
+
     echo "Hashing rustc version: ${HOME}/${hash}"
 
-    command="'rustc -Vv; echo \$? > ${probe}'"
+    command="rustc -Vv"
     keep_log=1
     debug=0
-    run_termux_command "$command" "$probe" || return
+    run_termux_command "$command" || return
     rm -f "$tmp_hash"
     mv "rustc.log" "$tmp_hash" || return
     # sha256sum is not available. shasum is the macos native program.
