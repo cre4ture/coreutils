@@ -216,10 +216,10 @@ snapshot() {
 
     echo "Prepare and install system packages"
     probe='/sdcard/sourceslist.probe'
-    command="'echo \"deb https://grimler.se/termux-packages-24 stable main\" > \$PREFIX/etc/apt/sources.list; echo \$? > $probe'"
-    run_termux_command $command "$probe"
+    command="'echo deb https://grimler.se/termux-packages-24 stable main > \$PREFIX/etc/apt/sources.list; echo \$? > $probe'"
+    run_termux_command "$command" "$probe"
     probe='/sdcard/pkg.probe'
-    command="'mkdir -vp ~/.cargo/bin; yes | pkg install openssh rust binutils openssl tar -y & sshd; echo \$? > $probe'"
+    command="'mkdir -vp ~/.cargo/bin; yes | pkg install openssh rust binutils openssl tar -y && sshd; echo \$? > $probe'"
     run_termux_command "$command" "$probe" || return
 
     setup_ssh_forwarding
