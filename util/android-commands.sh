@@ -202,7 +202,7 @@ snapshot() {
 
     echo "Prepare and install system packages"
     probe='/sdcard/sourceslist.probe'
-    run_termux_command "echo 'deb https://grimler.se/termux-packages-24 stable main' > \$PREFIX/etc/apt/sources.list; echo \$? > $probe" "$probe"
+    run_termux_command "\"echo 'deb https://grimler.se/termux-packages-24 stable main' > \$PREFIX/etc/apt/sources.list; echo \$? > $probe\"" "$probe"
     probe='/sdcard/pkg.probe'
     command="'mkdir -vp ~/.cargo/bin; yes | pkg install rust binutils openssl tar -y; echo \$? > $probe'"
     run_termux_command "$command" "$probe" || return
