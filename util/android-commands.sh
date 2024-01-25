@@ -43,6 +43,12 @@ If you have multiple devices, use the ANDROID_SERIAL environment variable to
 specify which to connect to."
 }
 
+start_sshd() {
+    adb shell input text "pkg upgrade" && hit_enter && hit_enter
+    adb shell input text "pkg install openssh" && hit_enter && hit_enter
+    adb shell input text "sshd" && hit_enter && hit_enter
+}
+
 hit_enter() {
     adb shell input keyevent 66
 }
@@ -202,10 +208,15 @@ snapshot() {
 
     echo "Prepare and install system packages"
     probe='/sdcard/sourceslist.probe'
-    run_termux_command "\"echo 'deb https://grimler.se/termux-packages-24 stable main' > \$PREFIX/etc/apt/sources.list; echo \$? > $probe\"" "$probe"
+    command="echo 'deb https://grimler.se/termux-packages-24 stable main' > \$PREFIX/etc/apt/sources.list; echo \$? > $probe"
+    run_termux_command ${command@Q} "$probe"
     probe='/sdcard/pkg.probe'
-    command="'mkdir -vp ~/.cargo/bin; yes | pkg install rust binutils openssl tar -y; echo \$? > $probe'"
+    command="'mkdir -vp ~/.cargo/bin; yes | pkg install openssh rust binutils openssl tar -y; sshd; echo \$? > $probe'"
     run_termux_command "$command" "$probe" || return
+
+    adb forward tcp:9022 tcp:8022
+
+    ssh -p 9022 termux@127.0.0.1 echo Hello SSH World \$USER
 
     echo "Installing cargo-nextest"
     probe='/sdcard/nextest.probe'
