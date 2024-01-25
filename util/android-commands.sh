@@ -201,6 +201,14 @@ init() {
     pkill -9 qemu-system-x86_64 || true
 }
 
+setup_ssh_forwarding() {
+    adb forward tcp:9022 tcp:8022
+}
+
+run_command_via_ssh() {
+    ssh -p 9022 termux@127.0.0.1 $@
+}
+
 snapshot() {
     apk="$1"
     echo "Running snapshot"
@@ -214,18 +222,14 @@ snapshot() {
     command="'mkdir -vp ~/.cargo/bin; yes | pkg install openssh rust binutils openssl tar -y; sshd; echo \$? > $probe'"
     run_termux_command "$command" "$probe" || return
 
-    adb forward tcp:9022 tcp:8022
-
-    ssh -p 9022 termux@127.0.0.1 echo Hello SSH World \$USER
+    setup_ssh_forwarding
+    run_command_via_ssh echo Hello SSH World \$USER
 
     echo "Installing cargo-nextest"
     probe='/sdcard/nextest.probe'
     # We need to install nextest via cargo currently, since there is no pre-built binary for android x86
-    command="'\
-export CARGO_TERM_COLOR=always; \
-cargo install cargo-nextest; \
-echo \$? > $probe'"
-    run_termux_command "$command" "$probe"
+    command="export CARGO_TERM_COLOR=always && cargo install cargo-nextest"
+    run_command_via_ssh $command
     return_code=$?
 
     echo "Info about cargo and rust"
@@ -323,6 +327,8 @@ echo \$? > ${probe}'"
 
 build() {
     echo "Running build"
+
+
 
     probe='/sdcard/build.probe'
     command="'export CARGO_TERM_COLOR=always; \
