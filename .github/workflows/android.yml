@@ -31,6 +31,7 @@ jobs:
     env:
       TERMUX: v0.118.0
       KEY_POSTFIX: nextest+rustc-hash+adb-install+sshd
+      COMMON_EMULATOR_OPTIONS: -no-window -noaudio -no-boot-anim -camera-back none -gpu swiftshader_indirect
     steps:
     - uses: actions/checkout@v4
     - name: Restore AVD cache
@@ -53,7 +54,7 @@ jobs:
         ram-size: 8GB
         disk-size: 30GB
         force-avd-creation: true
-        emulator-options: -no-window -no-snapshot-load -noaudio -no-boot-anim -camera-back none
+        emulator-options: ${{ env.COMMON_EMULATOR_OPTIONS }} -no-snapshot-load
         script: |
           util/android-commands.sh init "${{ matrix.arch }}" "${{ matrix.api-level }}" "${{ env.TERMUX }}"
     - name: Save AVD cache
@@ -89,7 +90,7 @@ jobs:
         ram-size: 2048M
         disk-size: 7GB
         force-avd-creation: false
-        emulator-options: -no-window -no-snapshot-save -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -snapshot ${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+${{ env.KEY_POSTFIX }}
+        emulator-options: ${{ env.COMMON_EMULATOR_OPTIONS }} -no-snapshot-save -snapshot ${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+${{ env.KEY_POSTFIX }}
         # This is not a usual script. Every line is executed in a separate shell with `sh -c`. If
         # one of the lines returns with error the whole script is failed (like running a script with
         # set -e) and in consequences the other lines (shells) are not executed.
