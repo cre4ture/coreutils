@@ -19,7 +19,21 @@ this_repo="$(dirname "$(dirname -- "$(readlink -- "${0}")")")"
 cache_dir_name="__rust_cache__"
 dev_probe_dir=/data/data/com.termux/files/tmp
 dev_home_dir=/data/data/com.termux/files/home
-repo_url="deb https://packages-cf.termux.org/apt/termux-main/ stable main"
+
+repo_url_round_robin=$RANDOM
+repo_url_list=(
+    "deb https://packages-cf.termux.org/apt/termux-main/ stable main",
+    "deb https://packages-cf.termux.dev/apt/termux-main/ stable main",
+    "deb https://grimler.se/termux/termux-main stable main",
+    "deb https://ftp.fau.de/termux/termux-main stable main"
+)
+number_repo_urls=${#repo_url_list[@]}
+
+move_to_next_repo_url() {
+    repo_url_round_robin=$(($repo_url_round_robin + 1))
+    index=$(($repo_url_round_robin % $number_repo_urls))
+    echo ${repo_url_list[$index]}
+}
 
 echo "====== runner information ======"
 echo "hostname: " `hostname`
@@ -366,6 +380,7 @@ install_packages_via_adb_shell() {
 install_packages_via_adb_shell_using_apt() {
     install_package_list="$@"
 
+    repo_url=`move_to_next_repo_url`
     echo "set apt repository url: " $repo_url
     probe="$dev_probe_dir/sourceslist.probe"
     command="'echo $repo_url | dd of=\$PREFIX/etc/apt/sources.list; echo \$? > $probe'"
@@ -379,11 +394,21 @@ install_packages_via_adb_shell_using_apt() {
 install_packages_via_ssh_using_apt() {
     install_package_list="$@"
 
+    repo_url=`move_to_next_repo_url`
     echo "set apt repository url: " $repo_url
     run_command_via_ssh "echo $repo_url | dd of=\$PREFIX/etc/apt/sources.list"
 
     run_command_via_ssh "apt update; yes | apt install $install_package_list -y"
 }
+
+apt_upgrade_all_packages() {
+    repo_url=`move_to_next_repo_url`
+    echo "set apt repository url: " $repo_url
+    run_command_via_ssh "echo $repo_url | dd of=\$PREFIX/etc/apt/sources.list"
+
+    run_command_via_ssh "apt update; yes | apt upgrade -y"
+}
+
 
 generate_and_install_public_key() {
     echo "generate local public private key pair"
@@ -402,6 +427,8 @@ snapshot() {
     echo "Prepare and install system packages"
 
     reinit_ssh_connection || return 1
+
+    apt_upgrade_all_packages
 
     install_packages_via_ssh_using_apt "rust binutils openssl tar"
 
