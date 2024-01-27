@@ -17,6 +17,8 @@
 
 this_repo="$(dirname "$(dirname -- "$(readlink -- "${0}")")")"
 cache_dir_name="__rust_cache__"
+dev_probe_dir=/data/data/com.termux/files/tmp
+dev_home_dir=/data/data/com.termux/files/home
 
 help() {
     echo \
@@ -43,6 +45,12 @@ If you have multiple devices, use the ANDROID_SERIAL environment variable to
 specify which to connect to."
 }
 
+setup_tmp_dir() {
+    adb shell input text \"cd\" && hit_enter
+    adb shell input text \"mkdir ../tmp\" && hit_enter
+    adb shell input text \"chmod a+rwx ../.. .. ../tmp\" && hit_enter
+}
+
 start_sshd() {
     adb shell input text "pkg upgrade" && hit_enter && hit_enter
     adb shell input text "pkg install openssh" && hit_enter && hit_enter
@@ -64,13 +72,18 @@ launch_termux() {
         exit 1
     fi
     # the emulator can sometimes be a little slow to launch the app
-    while ! adb shell 'ls /sdcard/launch.probe' 2>/dev/null; do
+    while ! adb shell "ls $dev_probe_dir/launch.probe" 2>/dev/null; do
         echo "waiting for launch.probe"
         sleep 5
-        adb shell input text 'touch\ /sdcard/launch.probe' && hit_enter
+        setup_tmp_dir
+        adb shell input text "touch\ $dev_probe_dir/launch.probe" && hit_enter
     done
     echo "found launch.probe"
-    adb shell 'rm /sdcard/launch.probe' && echo "removed launch.probe"
+    adb shell "rm $dev_probe_dir/launch.probe" && echo "removed launch.probe"
+}
+
+chmod_target_file() {
+    adb shell input text \"chmod a+rw $1\"  &&  hit_enter
 }
 
 # Usage: run_termux_command
@@ -105,7 +118,7 @@ run_termux_command() {
     local debug=${debug:-1}
 
     log_name="$(basename -s .probe "${probe}").log" # probe name must have suffix .probe
-    log_file="/sdcard/${log_name}"
+    log_file="$dev_probe_dir/${log_name}"
     log_read="${log_name}.read"
     echo 0 >"${log_read}"
     if [[ $debug -eq 1 ]]; then
@@ -129,9 +142,15 @@ run_termux_command() {
     while ! adb shell "ls $probe" 2>/dev/null; do
         echo -n "Waiting for $probe: "
 
+        chmod_target_file "$log_file"
+        chmod_target_file "$probe"
+
         if [[ -e "$log_name" ]]; then
             rm "$log_name"
         fi
+
+        chmod_target_file "$log_file"
+        chmod_target_file "$probe"
 
         adb pull "$log_file" . || try_fix=$((try_fix - 1))
         if [[ -e "$log_name" ]]; then
@@ -163,10 +182,16 @@ run_termux_command() {
     done
     end=$(date +%s)
 
+    chmod_target_file "$log_file"
+    chmod_target_file "$probe"
+
+    # exit 77
+
     return_code=$(adb shell "cat $probe") || return_code=0
     adb shell "rm ${probe}"
 
-    adb pull "$log_file" .
+    # adb pull "$log_file" .
+    adb shell "cat $log_file" > $log_name
     echo "==================================== SUMMARY ==================================="
     echo "Command: ${command}"
     echo "Finished in $((end - start)) seconds."
@@ -205,8 +230,16 @@ setup_ssh_forwarding() {
     adb forward tcp:9022 tcp:8022
 }
 
+copy_file_or_dir_via_ssh() {
+    scp -r $1 scp://termux@127.0.0.1:9022/$2
+}
+
 run_command_via_ssh() {
-    ssh -p 9022 termux@127.0.0.1 $@
+    ssh -p 9022 termux:@127.0.0.1 -o StrictHostKeyChecking=accept-new $@
+}
+
+run_script_file_via_ssh() {
+    ssh -p 9022 termux:@127.0.0.1 -o StrictHostKeyChecking=accept-new "bash -s" < $1
 }
 
 navigate_down() {
@@ -218,7 +251,6 @@ hit_space_key() {
 }
 
 termux_change_rep() {
-    probe='/sdcard/change_repo.probe'
     adb shell input text "termux-change-repo" && hit_enter
     sleep 1
     hit_enter  # select mirror group option
@@ -230,18 +262,74 @@ termux_change_rep() {
     hit_enter
 }
 
+set_password() {
+    adb shell input text "passwd" && hit_enter
+    sleep 1
+    adb shell input text "termux" && hit_enter
+    sleep 1
+    adb shell input text "termux" && hit_enter
+}
+
+adb_input_text_long() {
+    string=$1
+    length=${#string}
+    step=20
+    p=0
+    for ((i = 0; i < length-$step; i = $i + $step)); do
+        chars="${string:i:$step}"
+        adb shell input text \"$chars\"
+        p=$(($i+$step))
+    done
+
+    length=${#string}
+    for ((i = $p; i < length; i++)); do
+        char="${string:i:1}"
+        adb shell input text \"$char\"
+    done
+}
+
+install_rsa_pub() {
+
+    run_command_via_ssh "echo hello" && return  # if this works, we are already fine. Skipping
+
+    # remove old host identity:
+    ssh-keygen -f ~/.ssh/known_hosts -R "[127.0.0.1]:9022"
+
+    rsa_pub_key=`cat ~/.ssh/id_rsa.pub`
+    echo "====================================="
+    echo "$rsa_pub_key"
+    echo "====================================="
+
+    adb shell input text \"echo \"
+
+    adb_input_text_long "$rsa_pub_key"
+
+    adb shell input text "\" >> ~/.ssh/authorized_keys\"" && hit_enter
+    sleep 1
+}
+
+copy_ssh_id() {
+    echo test
+}
+
 snapshot() {
     apk="$1"
     echo "Running snapshot"
     adb install -g "$apk"
 
+    setup_tmp_dir
+
     echo "Prepare and install system packages"
-    probe='/sdcard/sourceslist.probe'
-    command="'echo deb https://grimler.se/termux-packages-24 stable main | dd of=\$PREFIX/etc/apt/sources.list; echo \$? > $probe'"
-    run_termux_command "$command" "$probe"
-    probe='/sdcard/pkg.probe'
+    #termux_change_rep
+
+    #probe="$dev_probe_dir/sourceslist.probe"
+    #command="'echo deb https://grimler.se/termux-packages-24 stable main | dd of=\$PREFIX/etc/apt/sources.list; echo \$? > $probe'"
+    #run_termux_command "$command" "$probe"
+    probe="$dev_probe_dir/pkg.probe"
     command="'mkdir -vp ~/.cargo/bin; yes | pkg install openssh rust binutils openssl tar -y && sshd; echo \$? > $probe'"
     run_termux_command "$command" "$probe" || return
+
+    install_rsa_pub
 
     setup_ssh_forwarding
     run_command_via_ssh echo Hello SSH World \$USER
@@ -251,6 +339,9 @@ snapshot() {
     command="export CARGO_TERM_COLOR=always && cargo install cargo-nextest"
     run_command_via_ssh $command
     return_code=$?
+
+    echo "Info about cargo and rust - via SSH Script"
+    run_script_file_via_ssh android-scripts/collect-info.sh
 
     echo "Info about cargo and rust"
     command="echo \$HOME; \
@@ -272,51 +363,22 @@ cargo nextest --version"
 sync_host() {
     repo="$1"
     cache_home="${HOME}/${cache_dir_name}"
-    cache_dest="/sdcard/${cache_dir_name}"
+    cache_dest="$dev_home_dir/${cache_dir_name}"
 
     setup_ssh_forwarding
 
     echo "Running sync host -> image: ${repo}"
 
-    # android doesn't allow symlinks on shared dirs, and adb can't selectively push files
-    symlinks=$(find "$repo" -type l)
-    # dash doesn't support process substitution :(
-    echo "$symlinks" | sort >symlinks
+    # run_command_via_ssh "mkdir $dev_home_dir/coreutils"
 
-    git -C "$repo" diff --name-status | cut -f 2 >modified
-    modified_links=$(join symlinks modified)
-    if [ -n "$modified_links" ]; then
-        echo "You have modified symlinks. Either stash or commit them, then try again: $modified_links"
-        exit 1
-    fi
     #shellcheck disable=SC2086
     if ! git ls-files --error-unmatch $symlinks >/dev/null; then
         echo "You have untracked symlinks. Either remove or commit them, then try again."
         exit 1
     fi
 
-    #shellcheck disable=SC2086
-    rm $symlinks
-    # adb's shell user only has access to shared dirs...
-    adb push -a "$repo" /sdcard/coreutils
-    [[ -e "$cache_home" ]] && adb push -a "$cache_home" "$cache_dest"
-
-    #shellcheck disable=SC2086
-    git -C "$repo" checkout $symlinks
-
-    # ...but shared dirs can't build, so move it home as termux
-    probe='/sdcard/sync.probe'
-    command="mv /sdcard/coreutils ~/; \
-cd ~/coreutils; \
-if [[ -e ${cache_dest} ]]; then \
-rm -rf ~/.cargo ./target; \
-tar xzf ${cache_dest}/cargo.tgz -C ~/; \
-ls -la ~/.cargo; \
-tar xzf ${cache_dest}/target.tgz; \
-ls -la ./target; \
-rm -rf ${cache_dest}; \
-fi"
-    run_command_via_ssh "$command" || return
+    copy_file_or_dir_via_ssh "$repo" "$dev_home_dir"
+    [[ -e "$cache_home" ]] && copy_file_or_dir_via_ssh "$cache_home" "$cache_dest"
 
     echo "Finished sync host -> image: ${repo}"
 }
@@ -324,13 +386,13 @@ fi"
 sync_image() {
     repo="$1"
     cache_home="${HOME}/${cache_dir_name}"
-    cache_dest="/sdcard/${cache_dir_name}"
+    cache_dest="$dev_probe_dir/${cache_dir_name}"
 
     setup_ssh_forwarding
 
     echo "Running sync image -> host: ${repo}"
 
-    command="rm -rf /sdcard/coreutils ${cache_dest}; \
+    command="rm -rf $dev_probe_dir/coreutils ${cache_dest}; \
 mkdir -p ${cache_dest}; \
 cd ${cache_dest}; \
 tar czf cargo.tgz -C ~/ .cargo; \
@@ -362,7 +424,7 @@ tests() {
 
     setup_ssh_forwarding
 
-    probe='/sdcard/tests.probe'
+    probe="$dev_probe_dir/tests.probe"
     command="export PATH=\$HOME/.cargo/bin:\$PATH; \
 export RUST_BACKTRACE=1; \
 export CARGO_TERM_COLOR=always; \
@@ -383,10 +445,10 @@ hash_rustc() {
 
     echo "Hashing rustc version: ${HOME}/${hash}"
 
-    command="rustc -Vv"
+    command=""
     keep_log=1
     debug=0
-    run_termux_command "$command" || return
+    run_command_via_ssh "rustc -Vv" > rustc.log || return
     rm -f "$tmp_hash"
     mv "rustc.log" "$tmp_hash" || return
     # sha256sum is not available. shasum is the macos native program.
