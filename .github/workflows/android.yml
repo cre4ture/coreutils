@@ -30,6 +30,7 @@ jobs:
         arch: [x86, x86_64] # , arm64-v8a
     env:
       TERMUX: v0.118.0
+      KEY_POSTFIX: nextest+rustc-hash+sshd
     steps:
     - uses: actions/checkout@v4
     - name: Restore AVD cache
@@ -41,7 +42,7 @@ jobs:
           ~/.android/avd/*/snapshots/*
           ~/.android/adb*
           ~/__rustc_hash__
-        key: avd-${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+nextest+rustc-hash+sshd
+        key: avd-${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+${{ env.KEY_POSTFIX }}
     - name: Create and cache emulator image
       if: steps.avd-cache.outputs.cache-hit != 'true'
       uses: reactivecircus/android-emulator-runner@v2
@@ -50,7 +51,7 @@ jobs:
         target: ${{ matrix.target }}
         arch: ${{ matrix.arch }}
         ram-size: 8GB
-        disk-size: 14GB
+        disk-size: 30GB
         force-avd-creation: true
         emulator-options: -no-window -no-snapshot-load -noaudio -no-boot-anim -camera-back none
         script: |
@@ -64,7 +65,7 @@ jobs:
           ~/.android/avd/*/snapshots/*
           ~/.android/adb*
           ~/__rustc_hash__
-        key: avd-${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+nextest+rustc-hash+sshd
+        key: avd-${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+${{ env.KEY_POSTFIX }}
     - uses: juliangruber/read-file-action@v1
       id: read_rustc_hash
       with:
@@ -88,7 +89,7 @@ jobs:
         ram-size: 2048M
         disk-size: 7GB
         force-avd-creation: false
-        emulator-options: -no-window -no-snapshot-save -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -snapshot ${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}
+        emulator-options: -no-window -no-snapshot-save -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -snapshot ${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+${{ env.KEY_POSTFIX }}
         # This is not a usual script. Every line is executed in a separate shell with `sh -c`. If
         # one of the lines returns with error the whole script is failed (like running a script with
         # set -e) and in consequences the other lines (shells) are not executed.

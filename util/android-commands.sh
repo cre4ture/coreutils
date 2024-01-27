@@ -217,7 +217,7 @@ init() {
         snapshot "termux-app_${termux}+github-debug_${arch}.apk" &&
         hash_rustc &&
         exit_termux &&
-        adb -s emulator-5554 emu avd snapshot save "${api_level}-${arch}+termux-${termux}" &&
+        adb -s emulator-5554 emu avd snapshot save "${api_level}-${arch}+termux-${termux}+${KEY_POSTFIX}" &&
         echo "Emulator image created." || {
         pkill -9 qemu-system-x86_64
         return 1
