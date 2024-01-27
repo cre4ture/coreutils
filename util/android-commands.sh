@@ -227,7 +227,28 @@ init() {
     pkill -9 qemu-system-x86_64 || true
 }
 
+reinit_ssh_connection() {
+    setup_ssh_forwarding
+    run_command_via_ssh echo hello && return
+
+    start_sshd_via_adb_shell
+    run_command_via_ssh echo hello && return
+
+    install_packages_via_adb sshd
+    start_sshd_via_adb_shell
+    generate_and_install_public_key
+    run_command_via_ssh echo hello && return
+}
+
+start_sshd_via_adb_shell() {
+    echo "start sshd via adb shell"
+    probe="$dev_probe_dir/sshd.probe"
+    command="'sshd; echo \$? > $probe'"
+    run_termux_command "$command" "$probe"
+}
+
 setup_ssh_forwarding() {
+    echo "setup ssh forwarding"
     adb forward tcp:9022 tcp:8022
 }
 
@@ -317,6 +338,28 @@ copy_ssh_id() {
     echo test
 }
 
+install_packages_via_adb() {
+    install_package_list = "$@"
+    repo_url="deb https://packages-cf.termux.org/apt/termux-main/ stable main"
+
+    echo "set pkg repository url: " $repo_url
+    probe="$dev_probe_dir/sourceslist.probe"
+    command="'echo $repo_url | dd of=\$PREFIX/etc/apt/sources.list; echo \$? > $probe'"
+    run_termux_command "$command" "$probe"
+
+    probe="$dev_probe_dir/adb_install.probe"
+    command="'mkdir -vp ~/.cargo/bin; apt update; yes | apt install $install_package_list -y; echo \$? > $probe'"
+    run_termux_command "$command" "$probe"
+}
+
+generate_and_install_public_key() {
+    echo "generate local public private key pair"
+    generate_rsa_key_local
+    echo "install public key via 'adb shell input'"
+    install_rsa_pub
+    echo "setup port forwarding for sshd"
+}
+
 snapshot() {
     apk="$1"
     echo "Running snapshot"
@@ -327,32 +370,20 @@ snapshot() {
     echo "Prepare and install system packages"
     #termux_change_rep
 
-    repo_url="deb https://packages-cf.termux.org/apt/termux-main/ stable main"
     install_package_list="openssh rust binutils openssl tar"
-    start_services_list="sshd"
 
-    echo "set pkg repository url: " $repo_url
-    probe="$dev_probe_dir/sourceslist.probe"
-    command="'echo $repo_url | dd of=\$PREFIX/etc/apt/sources.list; echo \$? > $probe'"
-    run_termux_command "$command" "$probe"
-
-    echo "try install with apt. Because it doesn't automatically poll for multiple repo urls."
-    probe="$dev_probe_dir/pkg.probe"
-    command="'mkdir -vp ~/.cargo/bin; apt update; yes | apt install $install_package_list -y && $start_services_list; echo \$? > $probe'"
-    run_termux_command "$command" "$probe"
+    install_packages_via_adb "$install_package_list"
 
     if [$? -ne 0]; then
         echo "apt failed. Now try install with pkg as fallback."
         probe="$dev_probe_dir/pkg.probe"
-        command="'mkdir -vp ~/.cargo/bin; yes | pkg install $install_package_list -y && $start_services_list; echo \$? > $probe'"
+        command="'mkdir -vp ~/.cargo/bin; yes | pkg install $install_package_list -y; echo \$? > $probe'"
         run_termux_command "$command" "$probe" || return
     fi
 
-    echo "generate local public private key pair"
-    generate_rsa_key_local
-    echo "install public key via 'adb shell input'"
-    install_rsa_pub
-    echo "setup port forwarding for sshd"
+    start_sshd_via_adb_shell
+
+    generate_and_install_public_key
     setup_ssh_forwarding
     echo "test ssh connection"
     run_command_via_ssh echo Hello SSH World \$USER || return
@@ -388,7 +419,7 @@ sync_host() {
     cache_home="${HOME}/${cache_dir_name}"
     cache_dest="$dev_home_dir/${cache_dir_name}"
 
-    setup_ssh_forwarding
+    reinit_ssh_connection
 
     echo "Running sync host -> image: ${repo}"
 
@@ -411,7 +442,7 @@ sync_image() {
     cache_home="${HOME}/${cache_dir_name}"
     cache_dest="$dev_probe_dir/${cache_dir_name}"
 
-    setup_ssh_forwarding
+    reinit_ssh_connection
 
     echo "Running sync image -> host: ${repo}"
 
@@ -432,7 +463,7 @@ ls -la ${cache_dest}"
 build() {
     echo "Running build"
 
-    setup_ssh_forwarding
+    reinit_ssh_connection
 
     command="export CARGO_TERM_COLOR=always;
              export CARGO_INCREMENTAL=0; \
@@ -445,7 +476,7 @@ build() {
 tests() {
     echo "Running tests"
 
-    setup_ssh_forwarding
+    reinit_ssh_connection
 
     probe="$dev_probe_dir/tests.probe"
     command="export PATH=\$HOME/.cargo/bin:\$PATH; \
@@ -464,7 +495,7 @@ hash_rustc() {
     tmp_hash="__rustc_hash__.tmp"
     hash="__rustc_hash__"
 
-    setup_ssh_forwarding
+    reinit_ssh_connection
 
     echo "Hashing rustc version: ${HOME}/${hash}"
 
