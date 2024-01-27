@@ -212,13 +212,15 @@ init() {
     api_level="$2"
     termux="$3"
 
+    snapshot_name="${api_level}-${arch}+termux-${termux}+${KEY_POSTFIX}"
+
     # shellcheck disable=SC2015
     wget "https://github.com/termux/termux-app/releases/download/${termux}/termux-app_${termux}+github-debug_${arch}.apk" &&
         snapshot "termux-app_${termux}+github-debug_${arch}.apk" &&
         hash_rustc &&
         exit_termux &&
-        adb -s emulator-5554 emu avd snapshot save "${api_level}-${arch}+termux-${termux}+${KEY_POSTFIX}" &&
-        echo "Emulator image created." || {
+        adb -s emulator-5554 emu avd snapshot save "$snapshot_name" &&
+        echo "Emulator image created. Name: $snapshot_name" || {
         pkill -9 qemu-system-x86_64
         return 1
     }

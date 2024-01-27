@@ -30,7 +30,7 @@ jobs:
         arch: [x86, x86_64] # , arm64-v8a
     env:
       TERMUX: v0.118.0
-      KEY_POSTFIX: nextest+rustc-hash+sshd
+      KEY_POSTFIX: nextest+rustc-hash+adb-install+sshd
     steps:
     - uses: actions/checkout@v4
     - name: Restore AVD cache
