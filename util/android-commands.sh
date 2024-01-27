@@ -343,7 +343,7 @@ copy_ssh_id() {
 }
 
 install_packages_via_adb_shell() {
-    install_package_list = "$@"
+    install_package_list="$@"
 
     install_packages_via_adb_shell_using_apt "$install_package_list"
     if [[ $? -ne 0 ]]; then
@@ -357,7 +357,7 @@ install_packages_via_adb_shell() {
 }
 
 install_packages_via_adb_shell_using_apt() {
-    install_package_list = "$@"
+    install_package_list="$@"
 
     echo "set apt repository url: " $repo_url
     probe="$dev_probe_dir/sourceslist.probe"
@@ -370,7 +370,7 @@ install_packages_via_adb_shell_using_apt() {
 }
 
 install_packages_via_ssh_using_apt() {
-    install_package_list = "$@"
+    install_package_list="$@"
 
     echo "set apt repository url: " $repo_url
     run_command_via_ssh "echo $repo_url | dd of=\$PREFIX/etc/apt/sources.list"
