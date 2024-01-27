@@ -19,6 +19,7 @@ this_repo="$(dirname "$(dirname -- "$(readlink -- "${0}")")")"
 cache_dir_name="__rust_cache__"
 dev_probe_dir=/data/data/com.termux/files/tmp
 dev_home_dir=/data/data/com.termux/files/home
+repo_url="deb https://packages-cf.termux.org/apt/termux-main/ stable main"
 
 echo "====== runner information ======"
 echo "hostname: " `hostname`
@@ -234,10 +235,13 @@ reinit_ssh_connection() {
     start_sshd_via_adb_shell
     run_command_via_ssh echo hello && return
 
-    install_packages_via_adb sshd
-    start_sshd_via_adb_shell
+    install_packages_via_adb_shell openssh
     generate_and_install_public_key
+    start_sshd_via_adb_shell
     run_command_via_ssh echo hello && return
+
+    echo "failed to setup ssh connection"
+    return 1
 }
 
 start_sshd_via_adb_shell() {
@@ -338,11 +342,24 @@ copy_ssh_id() {
     echo test
 }
 
-install_packages_via_adb() {
+install_packages_via_adb_shell() {
     install_package_list = "$@"
-    repo_url="deb https://packages-cf.termux.org/apt/termux-main/ stable main"
 
-    echo "set pkg repository url: " $repo_url
+    install_packages_via_adb_shell_using_apt "$install_package_list"
+    if [[ $? -ne 0 ]]; then
+        echo "apt failed. Now try install with pkg as fallback."
+        probe="$dev_probe_dir/pkg.probe"
+        command="'mkdir -vp ~/.cargo/bin; yes | pkg install $install_package_list -y; echo \$? > $probe'"
+        run_termux_command "$command" "$probe" || return 1
+    fi
+
+    return 0
+}
+
+install_packages_via_adb_shell_using_apt() {
+    install_package_list = "$@"
+
+    echo "set apt repository url: " $repo_url
     probe="$dev_probe_dir/sourceslist.probe"
     command="'echo $repo_url | dd of=\$PREFIX/etc/apt/sources.list; echo \$? > $probe'"
     run_termux_command "$command" "$probe"
@@ -350,6 +367,15 @@ install_packages_via_adb() {
     probe="$dev_probe_dir/adb_install.probe"
     command="'mkdir -vp ~/.cargo/bin; apt update; yes | apt install $install_package_list -y; echo \$? > $probe'"
     run_termux_command "$command" "$probe"
+}
+
+install_packages_via_ssh_using_apt() {
+    install_package_list = "$@"
+
+    echo "set apt repository url: " $repo_url
+    run_command_via_ssh "echo $repo_url | dd of=\$PREFIX/etc/apt/sources.list"
+
+    run_command_via_ssh "apt update; yes | apt install $install_package_list -y"
 }
 
 generate_and_install_public_key() {
@@ -366,32 +392,15 @@ snapshot() {
     adb install -g "$apk"
 
     setup_tmp_dir
-
     echo "Prepare and install system packages"
-    #termux_change_rep
 
-    install_package_list="openssh rust binutils openssl tar"
+    reinit_ssh_connection || return 1
 
-    install_packages_via_adb "$install_package_list"
-
-    if [$? -ne 0]; then
-        echo "apt failed. Now try install with pkg as fallback."
-        probe="$dev_probe_dir/pkg.probe"
-        command="'mkdir -vp ~/.cargo/bin; yes | pkg install $install_package_list -y; echo \$? > $probe'"
-        run_termux_command "$command" "$probe" || return
-    fi
-
-    start_sshd_via_adb_shell
-
-    generate_and_install_public_key
-    setup_ssh_forwarding
-    echo "test ssh connection"
-    run_command_via_ssh echo Hello SSH World \$USER || return
+    install_packages_via_ssh_using_apt "rust binutils openssl tar"
 
     echo "Installing cargo-nextest"
     # We need to install nextest via cargo currently, since there is no pre-built binary for android x86
-    command="export CARGO_TERM_COLOR=always && cargo install cargo-nextest"
-    run_command_via_ssh $command
+    run_command_via_ssh "export CARGO_TERM_COLOR=always && cargo install cargo-nextest"
     return_code=$?
 
     echo "Info about cargo and rust - via SSH Script"
