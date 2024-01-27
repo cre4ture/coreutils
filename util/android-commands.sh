@@ -20,6 +20,11 @@ cache_dir_name="__rust_cache__"
 dev_probe_dir=/data/data/com.termux/files/tmp
 dev_home_dir=/data/data/com.termux/files/home
 
+echo "====== runner information ======"
+echo "hostname: " `hostname`
+echo "uname -a: " `uname -a`
+echo "====== ================== ======"
+
 help() {
     echo \
         "Usage: $0 COMMAND [ARG]
@@ -49,12 +54,6 @@ setup_tmp_dir() {
     adb shell input text \"cd\" && hit_enter
     adb shell input text \"mkdir ../tmp\" && hit_enter
     adb shell input text \"chmod a+rwx ../.. .. ../tmp\" && hit_enter
-}
-
-start_sshd() {
-    adb shell input text "pkg upgrade" && hit_enter && hit_enter
-    adb shell input text "pkg install openssh" && hit_enter && hit_enter
-    adb shell input text "sshd" && hit_enter && hit_enter
 }
 
 hit_enter() {
