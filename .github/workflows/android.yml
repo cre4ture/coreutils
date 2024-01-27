@@ -30,8 +30,10 @@ jobs:
         arch: [x86, x86_64] # , arm64-v8a
     env:
       TERMUX: v0.118.0
-      KEY_POSTFIX: nextest+rustc-hash+adb-install+sshd+clean3
+      KEY_POSTFIX: nextest+rustc-hash+adb-install+sshd+clean4
       COMMON_EMULATOR_OPTIONS: -no-window -noaudio -no-boot-anim -camera-back none -gpu swiftshader_indirect
+      EMULATOR_RAM_SIZE: 8GB
+      EMULATOR_DISK_SIZE: 30GB
     steps:
     - uses: actions/checkout@v4
     - name: Restore AVD cache
@@ -51,8 +53,8 @@ jobs:
         api-level: ${{ matrix.api-level }}
         target: ${{ matrix.target }}
         arch: ${{ matrix.arch }}
-        ram-size: 8GB
-        disk-size: 30GB
+        ram-size: ${{ env.EMULATOR_RAM_SIZE }}
+        disk-size: ${{ env.EMULATOR_DISK_SIZE }}
         force-avd-creation: true
         emulator-options: ${{ env.COMMON_EMULATOR_OPTIONS }} -no-snapshot-load
         script: |
@@ -87,8 +89,8 @@ jobs:
         api-level: ${{ matrix.api-level }}
         target: ${{ matrix.target }}
         arch: ${{ matrix.arch }}
-        ram-size: 2048M
-        disk-size: 7GB
+        ram-size: ${{ env.EMULATOR_RAM_SIZE }}
+        disk-size: ${{ env.EMULATOR_DISK_SIZE }}
         force-avd-creation: false
         emulator-options: ${{ env.COMMON_EMULATOR_OPTIONS }} -no-snapshot-save -snapshot ${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+${{ env.KEY_POSTFIX }}
         # This is not a usual script. Every line is executed in a separate shell with `sh -c`. If
