@@ -322,17 +322,33 @@ snapshot() {
     echo "Prepare and install system packages"
     #termux_change_rep
 
-    #probe="$dev_probe_dir/sourceslist.probe"
-    #command="'echo deb https://grimler.se/termux-packages-24 stable main | dd of=\$PREFIX/etc/apt/sources.list; echo \$? > $probe'"
-    #run_termux_command "$command" "$probe"
+    repo_url="deb https://packages-cf.termux.org/apt/termux-main/ stable main"
+    install_package_list="openssh rust binutils openssl tar"
+    start_services_list="sshd"
+
+    echo "set pkg repository url: " $repo_url
+    probe="$dev_probe_dir/sourceslist.probe"
+    command="'echo $repo_url | dd of=\$PREFIX/etc/apt/sources.list; echo \$? > $probe'"
+    run_termux_command "$command" "$probe"
+
+    echo "try install with apt. Because it doesn't automatically poll for multiple repo urls."
     probe="$dev_probe_dir/pkg.probe"
-    command="'mkdir -vp ~/.cargo/bin; yes | pkg install openssh rust binutils openssl tar -y && sshd; echo \$? > $probe'"
-    run_termux_command "$command" "$probe" || return
+    command="'mkdir -vp ~/.cargo/bin; yes | apt install $install_package_list -y && $start_services_list; echo \$? > $probe'"
+    run_termux_command "$command" "$probe"
 
+    if [$? -ne 0]; then
+        echo "apt failed. Now try install with pkg as fallback."
+        probe="$dev_probe_dir/pkg.probe"
+        command="'mkdir -vp ~/.cargo/bin; yes | pkg install $install_package_list -y && $start_services_list; echo \$? > $probe'"
+        run_termux_command "$command" "$probe" || return
+    fi
+
+    echo "install public key via 'adb shell input'"
     install_rsa_pub
-
+    echo "setup port forwarding for sshd"
     setup_ssh_forwarding
-    run_command_via_ssh echo Hello SSH World \$USER
+    echo "test ssh connection"
+    run_command_via_ssh echo Hello SSH World \$USER || return
 
     echo "Installing cargo-nextest"
     # We need to install nextest via cargo currently, since there is no pre-built binary for android x86
