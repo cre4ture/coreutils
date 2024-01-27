@@ -31,6 +31,8 @@ echo "\$this_repo: $this_repo"
 echo "readlink -f \$this_repo: `readlink -f $this_repo`"
 echo "====== ================== ======"
 
+this_repo=`readlink -f $this_repo`
+
 help() {
     echo \
         "Usage: $0 COMMAND [ARG]
