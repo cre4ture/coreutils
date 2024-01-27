@@ -24,6 +24,11 @@ repo_url="deb https://packages-cf.termux.org/apt/termux-main/ stable main"
 echo "====== runner information ======"
 echo "hostname: " `hostname`
 echo "uname -a: " `uname -a`
+echo "pwd: " `pwd`
+echo "\$0: $0"
+echo "\$(readlink -- "\${0}"): $(readlink -- "${0}")"
+echo "\$this_repo: $this_repo"
+echo "readlink -f \$this_repo: `readlink -f $this_repo`"
 echo "====== ================== ======"
 
 help() {
@@ -433,12 +438,6 @@ sync_host() {
     echo "Running sync host -> image: ${repo}"
 
     # run_command_via_ssh "mkdir $dev_home_dir/coreutils"
-
-    #shellcheck disable=SC2086
-    if ! git ls-files --error-unmatch $symlinks >/dev/null; then
-        echo "You have untracked symlinks. Either remove or commit them, then try again."
-        exit 1
-    fi
 
     copy_file_or_dir_via_ssh "$repo" "$dev_home_dir"
     [[ -e "$cache_home" ]] && copy_file_or_dir_via_ssh "$cache_home" "$cache_dest"
