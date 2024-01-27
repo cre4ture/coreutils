@@ -41,7 +41,7 @@ jobs:
           ~/.android/avd/*/snapshots/*
           ~/.android/adb*
           ~/__rustc_hash__
-        key: avd-${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+nextest+rustc-hash
+        key: avd-${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+nextest+rustc-hash+sshd
     - name: Create and cache emulator image
       if: steps.avd-cache.outputs.cache-hit != 'true'
       uses: reactivecircus/android-emulator-runner@v2
@@ -64,7 +64,7 @@ jobs:
           ~/.android/avd/*/snapshots/*
           ~/.android/adb*
           ~/__rustc_hash__
-        key: avd-${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+nextest+rustc-hash
+        key: avd-${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+nextest+rustc-hash+sshd
     - uses: juliangruber/read-file-action@v1
       id: read_rustc_hash
       with:
