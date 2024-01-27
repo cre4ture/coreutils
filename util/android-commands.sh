@@ -235,7 +235,7 @@ reinit_ssh_connection() {
     start_sshd_via_adb_shell
     run_command_via_ssh echo hello && return
 
-    install_packages_via_adb_shell openssh
+    install_packages_via_adb_shell openssh openssl
     generate_and_install_public_key
     start_sshd_via_adb_shell
     run_command_via_ssh echo hello && return

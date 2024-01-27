@@ -30,7 +30,7 @@ jobs:
         arch: [x86, x86_64] # , arm64-v8a
     env:
       TERMUX: v0.118.0
-      KEY_POSTFIX: nextest+rustc-hash+adb-install+sshd+clean
+      KEY_POSTFIX: nextest+rustc-hash+adb-install+sshd+clean3
       COMMON_EMULATOR_OPTIONS: -no-window -noaudio -no-boot-anim -camera-back none -gpu swiftshader_indirect
     steps:
     - uses: actions/checkout@v4
