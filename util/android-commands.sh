@@ -333,7 +333,7 @@ snapshot() {
 
     echo "try install with apt. Because it doesn't automatically poll for multiple repo urls."
     probe="$dev_probe_dir/pkg.probe"
-    command="'mkdir -vp ~/.cargo/bin; yes | apt install $install_package_list -y && $start_services_list; echo \$? > $probe'"
+    command="'mkdir -vp ~/.cargo/bin; apt update; yes | apt install $install_package_list -y && $start_services_list; echo \$? > $probe'"
     run_termux_command "$command" "$probe"
 
     if [$? -ne 0]; then
