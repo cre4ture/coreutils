@@ -288,6 +288,10 @@ adb_input_text_long() {
     done
 }
 
+generate_rsa_key_local() {
+    yes "" | ssh-keygen -t rsa -b 4096 -C "Github Action" -N ""
+}
+
 install_rsa_pub() {
 
     run_command_via_ssh "echo hello" && return  # if this works, we are already fine. Skipping
@@ -343,6 +347,8 @@ snapshot() {
         run_termux_command "$command" "$probe" || return
     fi
 
+    echo "generate local public private key pair"
+    generate_rsa_key_local
     echo "install public key via 'adb shell input'"
     install_rsa_pub
     echo "setup port forwarding for sshd"
