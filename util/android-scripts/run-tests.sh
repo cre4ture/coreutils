@@ -21,7 +21,8 @@ kill_all_background_jobs() {
     jobs -p | xargs -I{} kill -- -{}
 }
 
-watchplus 2 "df -h; free -hm" &
+watchplus 2 df -h &
+watchplus 2 free -hm &
 
 cd ~/coreutils && \
 timeout --preserve-status --verbose -k 1m 60m \
