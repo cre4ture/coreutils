@@ -25,7 +25,7 @@ dev_home_dir=/data/data/com.termux/files/home
 repo_url_list=(
     "deb https://packages-cf.termux.org/apt/termux-main/ stable main"
     "deb https://packages-cf.termux.dev/apt/termux-main/ stable main"
-    "deb https://grimler.se/termux/termux-main stable main"
+#    "deb https://grimler.se/termux/termux-main stable main"  # slow
     "deb https://ftp.fau.de/termux/termux-main stable main"
 )
 number_repo_urls=${#repo_url_list[@]}
@@ -101,12 +101,31 @@ launch_termux() {
         echo "failed to launch termux"
         exit 1
     fi
+
     # the emulator can sometimes be a little slow to launch the app
-    while ! adb shell "ls $dev_probe_dir/launch.probe" 2>/dev/null; do
-        echo "waiting for launch.probe"
-        sleep 5
+    loop_count=0
+    while ! adb shell "dumpsys window windows" | \
+            grep -E "imeInputTarget in display# 0 Window{[^}]+com.termux\/com\.termux\.HomeActivity}"
+    do
+        sleep 1
+        loop_count=$((loop_count + 1))
+        if [[ loop_count -ge 20 ]]; then
+            break
+        fi
+    done
+
+    touch_cmd() {
         setup_tmp_dir
         adb shell input text "\"touch $dev_probe_dir/launch.probe\"" && hit_enter
+        sleep 1
+    }
+
+    touch_cmd
+    while ! adb shell "ls $dev_probe_dir/launch.probe" 2>/dev/null
+    do
+        echo "waiting for launch.probe"
+        sleep 4
+        touch_cmd
     done
     echo "found launch.probe"
     adb shell "rm $dev_probe_dir/launch.probe" && echo "removed launch.probe"
@@ -162,7 +181,7 @@ run_termux_command() {
     start=$(date +%s)
     adb shell input text "$shell_command" && sleep 3 && hit_enter
     # just for safety wait a little bit before polling for the probe and the log file
-    sleep 5
+    sleep 1
 
     local timeout=${timeout:-3600}
     local retries=${retries:-10}
@@ -172,15 +191,9 @@ run_termux_command() {
     while ! adb shell "ls $probe" 2>/dev/null; do
         echo -n "Waiting for $probe: "
 
-        chmod_target_file "$log_file"
-        chmod_target_file "$probe"
-
         if [[ -e "$log_name" ]]; then
             rm "$log_name"
         fi
-
-        chmod_target_file "$log_file"
-        chmod_target_file "$probe"
 
         adb pull "$log_file" . || try_fix=$((try_fix - 1))
         if [[ -e "$log_name" ]]; then
@@ -212,16 +225,10 @@ run_termux_command() {
     done
     end=$(date +%s)
 
-    chmod_target_file "$log_file"
-    chmod_target_file "$probe"
-
-    # exit 77
-
     return_code=$(adb shell "cat $probe") || return_code=0
     adb shell "rm ${probe}"
 
-    # adb pull "$log_file" .
-    adb shell "cat $log_file" > $log_name
+    adb shell "cat $log_file" > "$log_name"
     echo "==================================== SUMMARY ==================================="
     echo "Command: ${command}"
     echo "Finished in $((end - start)) seconds."
@@ -336,16 +343,13 @@ adb_input_text_long() {
     step=20
     p=0
     for ((i = 0; i < length-step; i = i + step)); do
-        chars="${string:i:$step}"
-        adb shell input text "\"$chars\""
+        chunk="${string:i:$step}"
+        adb shell input text "\"$chunk\""
         p=$((i+step))
     done
 
-    length=${#string}
-    for ((i = p; i < length; i++)); do
-        char="${string:i:1}"
-        adb shell input text "\"$char\""
-    done
+    remaining="${string:p}"
+    adb shell input text "\"$remaining\""
 }
 
 generate_rsa_key_local() {
