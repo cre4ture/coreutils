@@ -90,7 +90,7 @@ hit_enter() {
 }
 
 exit_termux() {
-    adb shell input text "exit" && hit_enter && hit_enter
+    adb shell input text \"exit\" && hit_enter && hit_enter
 }
 
 launch_termux() {
@@ -104,7 +104,7 @@ launch_termux() {
         echo "waiting for launch.probe"
         sleep 5
         setup_tmp_dir
-        adb shell input text "touch\ $dev_probe_dir/launch.probe" && hit_enter
+        adb shell input text "\"touch\ $dev_probe_dir/launch.probe\"" && hit_enter
     done
     echo "found launch.probe"
     adb shell "rm $dev_probe_dir/launch.probe" && echo "removed launch.probe"
@@ -301,6 +301,7 @@ run_command_via_ssh() {
 
 test_ssh_connection() {
     run_command_via_ssh echo ssh connection is working
+    run_command_via_ssh free -mh
 }
 
 run_script_file_via_ssh() {
@@ -334,14 +335,14 @@ adb_input_text_long() {
     p=0
     for ((i = 0; i < length-step; i = i + step)); do
         chars="${string:i:$step}"
-        adb shell input text "$chars"
+        adb shell input text "\"$chars\""
         p=$((i+step))
     done
 
     length=${#string}
     for ((i = p; i < length; i++)); do
         char="${string:i:1}"
-        adb shell input text "$char"
+        adb shell input text "\"$char\""
     done
 }
 

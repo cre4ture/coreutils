@@ -19,12 +19,13 @@ concurrency:
 
 env:
   TERMUX: v0.118.0
-  KEY_POSTFIX: nextest+rustc-hash+adb+sshd+upgrade+inc9
+  KEY_POSTFIX: nextest+rustc-hash+adb+sshd+upgrade+inc10
   COMMON_EMULATOR_OPTIONS: -no-window -noaudio -no-boot-anim -camera-back none -gpu swiftshader_indirect
   EMULATOR_RAM_SIZE: 4096
   EMULATOR_DISK_SIZE: 20GB
   EMULATOR_CORES: 4
   EMULATOR_HEAP_SIZE: 2048M
+  ENUMLATOR_URL: reactivecircus/android-emulator-runner@v2.30.1
 
 jobs:
   test_android:
@@ -94,7 +95,7 @@ jobs:
         # the github cache during the development of this workflow
         key: ${{ matrix.arch }}_${{ matrix.target}}_${{ steps.read_rustc_hash.outputs.content }}_${{ hashFiles('**/Cargo.toml', '**/Cargo.lock') }}_v3
     - name: Build and Test
-      uses: reactivecircus/android-emulator-runner@v2
+      uses: reactivecircus/android-emulator-runner@v2.30.1
       with:
         api-level: ${{ matrix.api-level }}
         target: ${{ matrix.target }}
