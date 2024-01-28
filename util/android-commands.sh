@@ -31,27 +31,28 @@ number_repo_urls=${#repo_url_list[@]}
 repo_url_round_robin=$RANDOM
 
 move_to_next_repo_url() {
-    repo_url_round_robin=$((($repo_url_round_robin + 1) % $number_repo_urls))
+    repo_url_round_robin=$(((repo_url_round_robin + 1) % number_repo_urls))
     echo "next round robin repo_url: $repo_url_round_robin"
 }
 move_to_next_repo_url # first call needed for modulo
 
 get_current_repo_url() {
-    echo ${repo_url_list[$repo_url_round_robin]}
+    echo "${repo_url_list[$repo_url_round_robin]}"
 }
 
 echo "====== runner information ======"
-echo "hostname: " `hostname`
-echo "uname -a: " `uname -a`
-echo "pwd: " `pwd`
+echo "hostname: $(hostname)"
+echo "uname -a: $(uname -a)"
+echo "pwd: $(pwd)"
 echo "\$*: $*"
 echo "\$0: $0"
-echo "\$(readlink -- "\${0}"): $(readlink -- "${0}")"
+# shellcheck disable=SC2140
+echo "\$(readlink -- "\$\{0\}"): $(readlink -- "${0}")"
 echo "\$this_repo: $this_repo"
-echo "readlink -f \$this_repo: `readlink -f $this_repo`"
+echo "readlink -f \$this_repo: $(readlink -f $this_repo)"
 echo "====== ================== ======"
 
-this_repo=`readlink -f $this_repo`
+this_repo=$(readlink -f "$this_repo")
 
 help() {
     echo \
@@ -110,7 +111,7 @@ launch_termux() {
 }
 
 chmod_target_file() {
-    adb shell input text \"chmod a+rw $1\"  &&  hit_enter
+    adb shell input text "chmod a+rw \"$1\""  &&  hit_enter
 }
 
 # Usage: run_termux_command
@@ -237,6 +238,7 @@ run_termux_command() {
 
 init() {
     arch="$1"
+    # shellcheck disable=SC2034
     api_level="$2"
     termux="$3"
 
@@ -294,7 +296,7 @@ copy_file_or_dir_from_device_via_ssh() {
 }
 
 run_command_via_ssh() {
-    ssh -p 9022 termux:@127.0.0.1 -o StrictHostKeyChecking=accept-new $@
+    ssh -p 9022 termux:@127.0.0.1 -o StrictHostKeyChecking=accept-new "$@"
 }
 
 test_ssh_connection() {
@@ -302,7 +304,7 @@ test_ssh_connection() {
 }
 
 run_script_file_via_ssh() {
-    ssh -p 9022 termux:@127.0.0.1 -o StrictHostKeyChecking=accept-new "bash -s" < $1
+    ssh -p 9022 termux:@127.0.0.1 -o StrictHostKeyChecking=accept-new "bash -s" < "$1"
 }
 
 navigate_down() {
@@ -325,29 +327,21 @@ termux_change_rep() {
     hit_enter
 }
 
-set_password() {
-    adb shell input text "passwd" && hit_enter
-    sleep 1
-    adb shell input text "termux" && hit_enter
-    sleep 1
-    adb shell input text "termux" && hit_enter
-}
-
 adb_input_text_long() {
     string=$1
     length=${#string}
     step=20
     p=0
-    for ((i = 0; i < length-$step; i = $i + $step)); do
+    for ((i = 0; i < length-step; i = i + step)); do
         chars="${string:i:$step}"
-        adb shell input text \"$chars\"
-        p=$(($i+$step))
+        adb shell input text "$chars"
+        p=$((i+step))
     done
 
     length=${#string}
-    for ((i = $p; i < length; i++)); do
+    for ((i = p; i < length; i++)); do
         char="${string:i:1}"
-        adb shell input text \"$char\"
+        adb shell input text "$char"
     done
 }
 
@@ -362,7 +356,7 @@ install_rsa_pub() {
     # remove old host identity:
     ssh-keygen -f ~/.ssh/known_hosts -R "[127.0.0.1]:9022"
 
-    rsa_pub_key=`cat ~/.ssh/id_rsa.pub`
+    rsa_pub_key=$(cat ~/.ssh/id_rsa.pub)
     echo "====================================="
     echo "$rsa_pub_key"
     echo "====================================="
@@ -373,10 +367,6 @@ install_rsa_pub() {
 
     adb shell input text "\" >> ~/.ssh/authorized_keys\"" && hit_enter
     sleep 1
-}
-
-copy_ssh_id() {
-    echo test
 }
 
 install_packages_via_adb_shell() {
@@ -396,9 +386,9 @@ install_packages_via_adb_shell() {
 install_packages_via_adb_shell_using_apt() {
     install_package_list="$*"
 
-    repo_url=`get_current_repo_url`
+    repo_url=$(get_current_repo_url)
     move_to_next_repo_url
-    echo "set apt repository url: " $repo_url
+    echo "set apt repository url: $repo_url"
     probe="$dev_probe_dir/sourceslist.probe"
     command="'echo $repo_url | dd of=\$PREFIX/etc/apt/sources.list; echo \$? > $probe'"
     run_termux_command "$command" "$probe"
@@ -409,20 +399,20 @@ install_packages_via_adb_shell_using_apt() {
 }
 
 install_packages_via_ssh_using_apt() {
-    install_package_list="$@"
+    install_package_list="$*"
 
-    repo_url=`get_current_repo_url`
+    repo_url=$(get_current_repo_url)
     move_to_next_repo_url
-    echo "set apt repository url: " $repo_url
+    echo "set apt repository url: $repo_url"
     run_command_via_ssh "echo $repo_url | dd of=\$PREFIX/etc/apt/sources.list"
 
     run_command_via_ssh "apt update; yes | apt install $install_package_list -y"
 }
 
 apt_upgrade_all_packages() {
-    repo_url=`get_current_repo_url`
+    repo_url=$(get_current_repo_url)
     move_to_next_repo_url
-    echo "set apt repository url: " $repo_url
+    echo "set apt repository url: $repo_url"
     run_command_via_ssh "echo $repo_url | dd of=\$PREFIX/etc/apt/sources.list"
 
     run_command_via_ssh "apt update; yes | apt upgrade -y"
@@ -457,7 +447,7 @@ snapshot() {
     return_code=$?
 
     echo "Info about cargo and rust - via SSH Script"
-    run_script_file_via_ssh $this_repo/util/android-scripts/collect-info.sh
+    run_script_file_via_ssh "$this_repo/util/android-scripts/collect-info.sh"
 
     echo "Info about cargo and rust"
     command="echo \$HOME; \
@@ -469,7 +459,7 @@ command -v rustc && rustc -Vv; \
 ls -la ~/.cargo/bin; \
 cargo --list; \
 cargo nextest --version"
-    run_command_via_ssh $command
+    run_command_via_ssh "$command"
 
     echo "Snapshot complete"
     # shellcheck disable=SC2086

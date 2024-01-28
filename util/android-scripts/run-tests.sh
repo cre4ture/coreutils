@@ -12,8 +12,8 @@ echo "PATH: $PATH"
 watchplus() {
     # call: watchplus <interval> <command>
     while true; do
-        ${@:2}
-        sleep $1
+        "${@:2}"
+        sleep "$1"
     done
 }
 

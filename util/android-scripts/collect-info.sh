@@ -1,9 +1,9 @@
 #!/bin/bash
 
-echo $HOME
+echo "$HOME"
 PATH=$HOME/.cargo/bin:$PATH
 export PATH
-echo $PATH
+echo "$PATH"
 pwd
 command -v rustc && rustc -Vv
 ls -la ~/.cargo/bin
