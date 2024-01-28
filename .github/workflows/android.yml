@@ -19,9 +19,8 @@ concurrency:
 
 env:
   TERMUX: v0.118.0
-  KEY_POSTFIX: nextest+rustc-hash+adb+sshd+upgrade+4GB+inc1
+  KEY_POSTFIX: nextest+rustc-hash+adb+sshd+upgrade+8GB+inc5
   COMMON_EMULATOR_OPTIONS: -no-window -noaudio -no-boot-anim -camera-back none -gpu swiftshader_indirect
-  EMULATOR_RAM_SIZE: 4096
   EMULATOR_DISK_SIZE: 20GB
   EMULATOR_CORES: 4
   EMULATOR_HEAP_SIZE: 2048M
@@ -35,10 +34,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        ram: [4096, 8192]
         api-level: [28]
-        target: [playstore]
+        target: [default, playstore]
         arch: [x86, x86_64] # , arm64-v8a
+        exclude:
+          - ram: 8192
+            arch: x86
+          - ram: 4094
+            arch: x86_64
     env:
+      EMULATOR_RAM_SIZE: ${{ matrix.ram }}
       AVD_CACHE_KEY: "set later due to limitations of github actions not able to concatenate env variables"
     steps:
     - name: Concatenate values to environment file
