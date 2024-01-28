@@ -20,7 +20,6 @@ cache_dir_name="__rust_cache__"
 dev_probe_dir=/data/data/com.termux/files/tmp
 dev_home_dir=/data/data/com.termux/files/home
 
-repo_url_round_robin=$RANDOM
 repo_url_list=(
     "deb https://packages-cf.termux.org/apt/termux-main/ stable main"
     "deb https://packages-cf.termux.dev/apt/termux-main/ stable main"
@@ -28,11 +27,16 @@ repo_url_list=(
     "deb https://ftp.fau.de/termux/termux-main stable main"
 )
 number_repo_urls=${#repo_url_list[@]}
+repo_url_round_robin=$RANDOM
 
 move_to_next_repo_url() {
-    repo_url_round_robin=$(($repo_url_round_robin + 1))
-    index=$(($repo_url_round_robin % $number_repo_urls))
-    echo ${repo_url_list[$index]}
+    repo_url_round_robin=$((($repo_url_round_robin + 1) % $number_repo_urls))
+    echo "next round robin repo_url: $repo_url_round_robin"
+}
+move_to_next_repo_url # first call needed for modulo
+
+get_current_repo_url() {
+    echo ${repo_url_list[$repo_url_round_robin]}
 }
 
 echo "====== runner information ======"
@@ -380,7 +384,8 @@ install_packages_via_adb_shell() {
 install_packages_via_adb_shell_using_apt() {
     install_package_list="$@"
 
-    repo_url=`move_to_next_repo_url`
+    repo_url=`get_current_repo_url`
+    move_to_next_repo_url
     echo "set apt repository url: " $repo_url
     probe="$dev_probe_dir/sourceslist.probe"
     command="'echo $repo_url | dd of=\$PREFIX/etc/apt/sources.list; echo \$? > $probe'"
@@ -394,7 +399,8 @@ install_packages_via_adb_shell_using_apt() {
 install_packages_via_ssh_using_apt() {
     install_package_list="$@"
 
-    repo_url=`move_to_next_repo_url`
+    repo_url=`get_current_repo_url`
+    move_to_next_repo_url
     echo "set apt repository url: " $repo_url
     run_command_via_ssh "echo $repo_url | dd of=\$PREFIX/etc/apt/sources.list"
 
@@ -402,7 +408,8 @@ install_packages_via_ssh_using_apt() {
 }
 
 apt_upgrade_all_packages() {
-    repo_url=`move_to_next_repo_url`
+    repo_url=`get_current_repo_url`
+    move_to_next_repo_url
     echo "set apt repository url: " $repo_url
     run_command_via_ssh "echo $repo_url | dd of=\$PREFIX/etc/apt/sources.list"
 
