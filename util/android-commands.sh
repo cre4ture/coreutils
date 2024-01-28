@@ -81,6 +81,7 @@ specify which to connect to."
 }
 
 setup_tmp_dir() {
+    return 0
     adb shell input text \"cd\" && hit_enter
     adb shell input text \"mkdir ../tmp\" && hit_enter
     adb shell input text \"chmod a+rwx ../.. .. ../tmp\" && hit_enter
