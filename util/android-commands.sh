@@ -22,9 +22,9 @@ dev_home_dir=/data/data/com.termux/files/home
 
 repo_url_round_robin=$RANDOM
 repo_url_list=(
-    "deb https://packages-cf.termux.org/apt/termux-main/ stable main",
-    "deb https://packages-cf.termux.dev/apt/termux-main/ stable main",
-    "deb https://grimler.se/termux/termux-main stable main",
+    "deb https://packages-cf.termux.org/apt/termux-main/ stable main"
+    "deb https://packages-cf.termux.dev/apt/termux-main/ stable main"
+    "deb https://grimler.se/termux/termux-main stable main"
     "deb https://ftp.fau.de/termux/termux-main stable main"
 )
 number_repo_urls=${#repo_url_list[@]}
