@@ -44,6 +44,7 @@ echo "====== runner information ======"
 echo "hostname: " `hostname`
 echo "uname -a: " `uname -a`
 echo "pwd: " `pwd`
+echo "\$*: $*"
 echo "\$0: $0"
 echo "\$(readlink -- "\${0}"): $(readlink -- "${0}")"
 echo "\$this_repo: $this_repo"
@@ -284,8 +285,12 @@ setup_ssh_forwarding() {
     adb forward tcp:9022 tcp:8022
 }
 
-copy_file_or_dir_via_ssh() {
-    scp -r $1 scp://termux@127.0.0.1:9022/$2
+copy_file_or_dir_to_device_via_ssh() {
+    scp -r "$1" "scp://termux@127.0.0.1:9022/$2"
+}
+
+copy_file_or_dir_from_device_via_ssh() {
+    scp -r "scp://termux@127.0.0.1:9022/$1" "$2"
 }
 
 run_command_via_ssh() {
@@ -375,7 +380,7 @@ copy_ssh_id() {
 }
 
 install_packages_via_adb_shell() {
-    install_package_list="$@"
+    install_package_list="$*"
 
     install_packages_via_adb_shell_using_apt "$install_package_list"
     if [[ $? -ne 0 ]]; then
@@ -389,7 +394,7 @@ install_packages_via_adb_shell() {
 }
 
 install_packages_via_adb_shell_using_apt() {
-    install_package_list="$@"
+    install_package_list="$*"
 
     repo_url=`get_current_repo_url`
     move_to_next_repo_url
@@ -482,8 +487,8 @@ sync_host() {
 
     # run_command_via_ssh "mkdir $dev_home_dir/coreutils"
 
-    copy_file_or_dir_via_ssh "$repo" "$dev_home_dir"
-    [[ -e "$cache_home" ]] && copy_file_or_dir_via_ssh "$cache_home" "$cache_dest"
+    copy_file_or_dir_to_device_via_ssh "$repo" "$dev_home_dir"
+    [[ -e "$cache_home" ]] && copy_file_or_dir_to_device_via_ssh "$cache_home" "$cache_dest"
 
     echo "Finished sync host -> image: ${repo}"
 }
@@ -506,7 +511,7 @@ ls -la ${cache_dest}"
     run_command_via_ssh "$command" || return
 
     rm -rf "$cache_home"
-    adb pull -a "$cache_dest" "$cache_home" || return
+    copy_file_or_dir_from_device_via_ssh "$cache_dest" "$cache_home" || return
 
     echo "Finished sync image -> host: ${repo}"
 }
