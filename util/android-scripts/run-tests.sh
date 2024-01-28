@@ -25,7 +25,11 @@ watchplus 2 df -h &
 watchplus 2 free -hm &
 
 cd ~/coreutils && \
-timeout --preserve-status --verbose -k 1m 60m \
-cargo nextest run --profile ci --hide-progress-bar --features feat_os_unix_android
+    timeout --preserve-status --verbose -k 1m 60m \
+        cargo nextest run --profile ci --hide-progress-bar --features feat_os_unix_android
+
+result=$?
 
 kill_all_background_jobs
+
+return $result
