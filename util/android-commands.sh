@@ -17,7 +17,8 @@
 
 this_repo="$(dirname "$(dirname -- "$(readlink -- "${0}")")")"
 cache_dir_name="__rust_cache__"
-dev_probe_dir=/data/data/com.termux/files/tmp
+#dev_probe_dir=/data/data/com.termux/files/tmp
+dev_probe_dir=/sdcard
 dev_home_dir=/data/data/com.termux/files/home
 
 # choose only reliable mirrors here:
@@ -104,14 +105,14 @@ launch_termux() {
         echo "waiting for launch.probe"
         sleep 5
         setup_tmp_dir
-        adb shell input text "\"touch\ $dev_probe_dir/launch.probe\"" && hit_enter
+        adb shell input text "\"touch $dev_probe_dir/launch.probe\"" && hit_enter
     done
     echo "found launch.probe"
     adb shell "rm $dev_probe_dir/launch.probe" && echo "removed launch.probe"
 }
 
 chmod_target_file() {
-    adb shell input text "chmod a+rw \"$1\""  &&  hit_enter
+    adb shell input text "\"chmod a+rw $1\""  &&  hit_enter
 }
 
 # Usage: run_termux_command
