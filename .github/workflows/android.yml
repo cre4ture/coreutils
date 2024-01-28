@@ -17,6 +17,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+env:
+  TERMUX: v0.118.0
+  KEY_POSTFIX: nextest+rustc-hash+adb+sshd+upgrade+inc6
+  COMMON_EMULATOR_OPTIONS: -no-window -noaudio -no-boot-anim -camera-back none -gpu swiftshader_indirect
+  EMULATOR_RAM_SIZE: 10GB
+  EMULATOR_DISK_SIZE: 20GB
+
 jobs:
   test_android:
     name: Test builds
@@ -29,12 +36,11 @@ jobs:
         target: [default]
         arch: [x86, x86_64] # , arm64-v8a
     env:
-      TERMUX: v0.118.0
-      KEY_POSTFIX: nextest+rustc-hash+adb+sshd+upgrade+inc6
-      COMMON_EMULATOR_OPTIONS: -no-window -noaudio -no-boot-anim -camera-back none -gpu swiftshader_indirect
-      EMULATOR_RAM_SIZE: 10GB
-      EMULATOR_DISK_SIZE: 20GB
+      AVD_CACHE_KEY: "set later due to limitations of github actions not able to concatenate env variables"
     steps:
+    - name: Concatenate values to environment file
+      run: |
+        echo "AVD_CACHE_KEY=${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+${{ env.KEY_POSTFIX }}" >> $GITHUB_ENV
     - uses: actions/checkout@v4
     - name: Restore AVD cache
       uses: actions/cache/restore@v4
@@ -45,7 +51,7 @@ jobs:
           ~/.android/avd/*/snapshots/*
           ~/.android/adb*
           ~/__rustc_hash__
-        key: avd-${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+${{ env.KEY_POSTFIX }}
+        key: avd-${{ env.AVD_CACHE_KEY }}
     - name: Create and cache emulator image
       if: steps.avd-cache.outputs.cache-hit != 'true'
       uses: reactivecircus/android-emulator-runner@v2
@@ -68,7 +74,7 @@ jobs:
           ~/.android/avd/*/snapshots/*
           ~/.android/adb*
           ~/__rustc_hash__
-        key: avd-${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+${{ env.KEY_POSTFIX }}
+        key: avd-${{ env.AVD_CACHE_KEY }}
     - uses: juliangruber/read-file-action@v1
       id: read_rustc_hash
       with:
@@ -92,7 +98,7 @@ jobs:
         ram-size: ${{ env.EMULATOR_RAM_SIZE }}
         disk-size: ${{ env.EMULATOR_DISK_SIZE }}
         force-avd-creation: false
-        emulator-options: ${{ env.COMMON_EMULATOR_OPTIONS }} -no-snapshot-save -snapshot ${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+${{ env.KEY_POSTFIX }}
+        emulator-options: ${{ env.COMMON_EMULATOR_OPTIONS }} -no-snapshot-save -snapshot ${{ env.AVD_CACHE_KEY }}
         # This is not a usual script. Every line is executed in a separate shell with `sh -c`. If
         # one of the lines returns with error the whole script is failed (like running a script with
         # set -e) and in consequences the other lines (shells) are not executed.

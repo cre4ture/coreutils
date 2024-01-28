@@ -20,6 +20,7 @@ cache_dir_name="__rust_cache__"
 dev_probe_dir=/data/data/com.termux/files/tmp
 dev_home_dir=/data/data/com.termux/files/home
 
+# choose only reliable mirrors here:
 repo_url_list=(
     "deb https://packages-cf.termux.org/apt/termux-main/ stable main"
     "deb https://packages-cf.termux.dev/apt/termux-main/ stable main"
@@ -238,7 +239,7 @@ init() {
     api_level="$2"
     termux="$3"
 
-    snapshot_name="${api_level}-${arch}+termux-${termux}+${KEY_POSTFIX}"
+    snapshot_name="${AVD_CACHE_KEY}"
 
     # shellcheck disable=SC2015
     wget "https://github.com/termux/termux-app/releases/download/${termux}/termux-app_${termux}+github-debug_${arch}.apk" &&
@@ -445,7 +446,7 @@ snapshot() {
     return_code=$?
 
     echo "Info about cargo and rust - via SSH Script"
-    run_script_file_via_ssh android-scripts/collect-info.sh
+    run_script_file_via_ssh $this_repo/util/android-scripts/collect-info.sh
 
     echo "Info about cargo and rust"
     command="echo \$HOME; \
@@ -522,12 +523,12 @@ tests() {
 
     reinit_ssh_connection
 
-    probe="$dev_probe_dir/tests.probe"
     command="export PATH=\$HOME/.cargo/bin:\$PATH; \
 export RUST_BACKTRACE=1; \
 export CARGO_TERM_COLOR=always; \
 export CARGO_INCREMENTAL=0; \
 cd ~/coreutils && \
+watch \"df -h; free -m\" \
 timeout --preserve-status --verbose -k 1m 60m \
 cargo nextest run --profile ci --hide-progress-bar --features feat_os_unix_android"
     run_command_via_ssh "$command" || return
