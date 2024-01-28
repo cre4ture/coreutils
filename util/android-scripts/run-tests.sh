@@ -18,7 +18,7 @@ watchplus() {
 }
 
 kill_all_background_jobs() {
-    jobs -p | xargs -I{} kill -- -{}
+    jobs -p | xargs -I{} kill -- {}
 }
 
 watchplus 2 df -h &
