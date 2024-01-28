@@ -523,15 +523,7 @@ tests() {
 
     reinit_ssh_connection
 
-    command="export PATH=\$HOME/.cargo/bin:\$PATH; \
-export RUST_BACKTRACE=1; \
-export CARGO_TERM_COLOR=always; \
-export CARGO_INCREMENTAL=0; \
-cd ~/coreutils && \
-watch \"df -h; free -m\" \
-timeout --preserve-status --verbose -k 1m 60m \
-cargo nextest run --profile ci --hide-progress-bar --features feat_os_unix_android"
-    run_command_via_ssh "$command" || return
+    run_script_file_via_ssh "$this_repo/util/android-scripts/run-tests.sh" || return
 
     echo "Finished tests"
 }
