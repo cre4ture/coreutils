@@ -1,3 +1,5 @@
+#!/bin/bash
+
 export PATH=\$HOME/.cargo/bin:\$PATH
 export RUST_BACKTRACE=1
 export CARGO_TERM_COLOR=always
@@ -11,7 +13,7 @@ function watchplus {
     done
 }
 
-watchplus 2 "df -h; free -m" &
+watchplus 2 "df -h; free -hm" &
 
 cd ~/coreutils && \
 timeout --preserve-status --verbose -k 1m 60m \

@@ -256,15 +256,17 @@ init() {
 
 reinit_ssh_connection() {
     setup_ssh_forwarding
-    run_command_via_ssh echo hello && return
+    test_ssh_connection && return
 
-    start_sshd_via_adb_shell
-    run_command_via_ssh echo hello && return
-
-    install_packages_via_adb_shell openssh openssl
-    generate_and_install_public_key
-    start_sshd_via_adb_shell
-    run_command_via_ssh echo hello && return
+    start_sshd_via_adb_shell && (
+        test_ssh_connection && return
+        generate_and_install_public_key && test_ssh_connection && return
+    ) || (
+        install_packages_via_adb_shell openssh openssl
+        generate_and_install_public_key
+        start_sshd_via_adb_shell
+        test_ssh_connection && return
+    )
 
     echo "failed to setup ssh connection"
     return 1
@@ -288,6 +290,10 @@ copy_file_or_dir_via_ssh() {
 
 run_command_via_ssh() {
     ssh -p 9022 termux:@127.0.0.1 -o StrictHostKeyChecking=accept-new $@
+}
+
+test_ssh_connection() {
+    run_command_via_ssh echo hello
 }
 
 run_script_file_via_ssh() {
