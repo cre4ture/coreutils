@@ -17,8 +17,14 @@ watchplus() {
     done
 }
 
+kill_all_background_jobs() {
+    jobs -p | xargs -I{} kill -- -{}
+}
+
 watchplus 2 "df -h; free -hm" &
 
 cd ~/coreutils && \
 timeout --preserve-status --verbose -k 1m 60m \
 cargo nextest run --profile ci --hide-progress-bar --features feat_os_unix_android
+
+kill_all_background_jobs
