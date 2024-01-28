@@ -41,7 +41,7 @@ jobs:
         exclude:
           - ram: 8192
             arch: x86
-          - ram: 4094
+          - ram: 4096
             arch: x86_64
     env:
       EMULATOR_RAM_SIZE: ${{ matrix.ram }}
@@ -49,7 +49,7 @@ jobs:
     steps:
     - name: Concatenate values to environment file
       run: |
-        echo "AVD_CACHE_KEY=${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+${{ env.KEY_POSTFIX }}" >> $GITHUB_ENV
+        echo "AVD_CACHE_KEY=${{ matrix.ram }}-${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+${{ env.KEY_POSTFIX }}" >> $GITHUB_ENV
     - uses: actions/checkout@v4
     - name: Restore AVD cache
       uses: actions/cache/restore@v4
