@@ -1,15 +1,19 @@
 #!/bin/bash
 
-export PATH=\$HOME/.cargo/bin:\$PATH
+echo "PATH: $PATH"
+
+export PATH=$HOME/.cargo/bin:$PATH
 export RUST_BACKTRACE=1
 export CARGO_TERM_COLOR=always
 export CARGO_INCREMENTAL=0
 
-function watchplus {
+echo "PATH: $PATH"
+
+watchplus() {
     # call: watchplus <interval> <command>
     while true; do
-        "${@:2}";
-        sleep $1;
+        ${@:2}
+        sleep $1
     done
 }
 

@@ -266,10 +266,10 @@ reinit_ssh_connection() {
         generate_and_install_public_key
         start_sshd_via_adb_shell
         test_ssh_connection && return
+    ) || (
+        echo "failed to setup ssh connection"
+        return 1
     )
-
-    echo "failed to setup ssh connection"
-    return 1
 }
 
 start_sshd_via_adb_shell() {
@@ -293,7 +293,7 @@ run_command_via_ssh() {
 }
 
 test_ssh_connection() {
-    run_command_via_ssh echo hello
+    run_command_via_ssh echo ssh connection is working
 }
 
 run_script_file_via_ssh() {
@@ -429,7 +429,7 @@ generate_and_install_public_key() {
     generate_rsa_key_local
     echo "install public key via 'adb shell input'"
     install_rsa_pub
-    echo "setup port forwarding for sshd"
+    echo "installed ssh public key on device"
 }
 
 snapshot() {
