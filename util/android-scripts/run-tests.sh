@@ -9,27 +9,34 @@ export CARGO_INCREMENTAL=0
 
 echo "PATH: $PATH"
 
-watchplus() {
-    # call: watchplus <interval> <command>
-    while true; do
-        "${@:2}"
-        sleep "$1"
-    done
-}
+run_tests_in_subprocess() (
 
-kill_all_background_jobs() {
-    jobs -p | xargs -I{} kill -- {}
-}
+    ulimit -v $((1024 * 1024 * 3))  # limit virtual memory to 3GB
 
-watchplus 2 df -h &
-watchplus 2 free -hm &
+    watchplus() {
+        # call: watchplus <interval> <command>
+        while true; do
+            "${@:2}"
+            sleep "$1"
+        done
+    }
 
-cd ~/coreutils && \
-    timeout --preserve-status --verbose -k 1m 60m \
-        cargo nextest run --profile ci --hide-progress-bar --features feat_os_unix_android
+    kill_all_background_jobs() {
+        jobs -p | xargs -I{} kill -- {}
+    }
 
-result=$?
+    watchplus 2 df -h &
+    watchplus 2 free -hm &
 
-kill_all_background_jobs
+    cd ~/coreutils && \
+        timeout --preserve-status --verbose -k 1m 60m \
+            cargo nextest run --profile ci --hide-progress-bar --features feat_os_unix_android
 
-return $result
+    result=$?
+
+    kill_all_background_jobs
+
+    return $result
+)
+
+run_tests_in_subprocess
