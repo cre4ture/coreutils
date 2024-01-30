@@ -120,12 +120,22 @@ launch_termux() {
         sleep 1
     }
 
+    local timeout=120
     touch_cmd
     while ! adb shell "ls $dev_probe_dir/launch.probe" 2>/dev/null
     do
         echo "waiting for launch.probe"
         sleep 4
         touch_cmd
+
+        timeout=$((timeout - 4))
+        if [[ timeout -le 0 ]]; then
+            mkdir output
+            adb exec-out screencap -p > output/error-screen.png
+            echo "timeout waiting for termux to start up"
+            return 1
+        fi
+
     done
     echo "found launch.probe"
     adb shell "rm $dev_probe_dir/launch.probe" && echo "removed launch.probe"

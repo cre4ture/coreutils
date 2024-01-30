@@ -19,7 +19,7 @@ concurrency:
 
 env:
   TERMUX: v0.118.0
-  KEY_POSTFIX: nextest+rustc-hash+adb+sshd+upgrade+8GB+inc6
+  KEY_POSTFIX: nextest+rustc-hash+adb+sshd+upgrade+8GB+inc7
   COMMON_EMULATOR_OPTIONS: -no-window -noaudio -no-boot-anim -camera-back none -gpu swiftshader_indirect
   EMULATOR_DISK_SIZE: 20GB
   EMULATOR_CORES: 4
@@ -129,3 +129,8 @@ jobs:
       with:
         path: ~/__rust_cache__
         key: ${{ matrix.arch }}_${{ matrix.target}}_${{ steps.read_rustc_hash.outputs.content }}_${{ hashFiles('**/Cargo.toml', '**/Cargo.lock') }}_v3
+    - name: Archive code coverage results
+      uses: actions/upload-artifact@v4
+      with:
+        name: error-screenshot
+        path: output/error-screen.png
