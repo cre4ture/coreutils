@@ -96,7 +96,7 @@ exit_termux() {
 }
 
 timestamp() {
-  date +"%T"
+  date +"%H%M%S%Z"
 }
 
 take_screen_shot() {
