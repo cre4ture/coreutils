@@ -95,12 +95,27 @@ exit_termux() {
     adb shell input text \"exit\" && hit_enter && hit_enter
 }
 
+timestamp() {
+  date +"%T"
+}
+
+take_screen_shot() {
+    filename_prefix="$1"
+    filename="$this_repo/output/${filename_prefix}_screen_$(timestamp).png"
+    echo "take screenshot: $filename"
+    mkdir "$this_repo/output"
+    adb exec-out screencap -p > "$filename"
+}
+
 launch_termux() {
     echo "launching termux"
+    take_screen_shot "launch_termux_enter"
     if ! adb shell 'am start -n com.termux/.HomeActivity'; then
         echo "failed to launch termux"
         exit 1
     fi
+
+    take_screen_shot "launch_termux_after_start_activity"
 
     # the emulator can sometimes be a little slow to launch the app
     loop_count=0
@@ -114,30 +129,34 @@ launch_termux() {
         fi
     done
 
+    take_screen_shot "launch_termux_after_wait_activity"
+
     touch_cmd() {
         setup_tmp_dir
         adb shell input text "\"touch $dev_probe_dir/launch.probe\"" && hit_enter
         sleep 1
     }
 
-    local timeout=120
+    local timeout_start=120
+    local timeout=$timeout_start
     touch_cmd
     while ! adb shell "ls $dev_probe_dir/launch.probe" 2>/dev/null
     do
-        echo "waiting for launch.probe"
+        echo "waiting for launch.probe - ($timeout / $timeout_start seconds)"
+        take_screen_shot "launch_termux_touch_probe"
         sleep 4
         touch_cmd
 
         timeout=$((timeout - 4))
         if [[ timeout -le 0 ]]; then
-            mkdir output
-            adb exec-out screencap -p > output/error-screen.png
+            take_screen_shot "error_launch_termux"
             echo "timeout waiting for termux to start up"
             return 1
         fi
 
     done
     echo "found launch.probe"
+    take_screen_shot "launch_termux_found_probe"
     adb shell "rm $dev_probe_dir/launch.probe" && echo "removed launch.probe"
 }
 
@@ -186,7 +205,7 @@ run_termux_command() {
         shell_command="'{ ${command}; } &> ${log_file}'"
     fi
 
-    launch_termux
+    launch_termux || return
     echo "Running command: ${command}"
     start=$(date +%s)
     adb shell input text "$shell_command" && sleep 3 && hit_enter
