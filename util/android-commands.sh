@@ -114,6 +114,10 @@ take_screen_shot() {
 launch_termux() {
     echo "launching termux"
     take_screen_shot "launch_termux_enter"
+
+    adb shell input tap 120 380  # close potential dialog "System UI isn't responding" with "wait".
+                                 # should not cause side effects when dialog is not there...
+
     if ! adb shell 'am start -n com.termux/.HomeActivity'; then
         echo "failed to launch termux"
         exit 1
