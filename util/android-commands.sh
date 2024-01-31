@@ -99,6 +99,10 @@ timestamp() {
   date +"%H%M%S%Z"
 }
 
+add_timestamp_to_lines() {
+    while read line; do printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$line"; done
+}
+
 take_screen_shot() {
     filename_prefix="$1"
     filename="$this_repo/output/$(timestamp)_${filename_prefix}_screen.png"
@@ -346,7 +350,8 @@ copy_file_or_dir_from_device_via_ssh() {
 }
 
 run_command_via_ssh() {
-    ssh -p 9022 termux:@127.0.0.1 -o StrictHostKeyChecking=accept-new "$@"
+    ssh -p 9022 termux:@127.0.0.1 -o StrictHostKeyChecking=accept-new "$@" | add_timestamp_to_lines
+    return "${PIPESTATUS[0]}"
 }
 
 test_ssh_connection() {
