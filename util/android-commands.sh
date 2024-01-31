@@ -399,12 +399,12 @@ adb_input_text_long() {
     p=0
     for ((i = 0; i < length-step; i = i + step)); do
         chunk="${string:i:$step}"
-        adb shell input text "\"$chunk\""
+        adb shell input text "'$chunk'"
         p=$((i+step))
     done
 
     remaining="${string:p}"
-    adb shell input text "\"$remaining\""
+    adb shell input text "'$remaining'"
 }
 
 generate_rsa_key_local() {
