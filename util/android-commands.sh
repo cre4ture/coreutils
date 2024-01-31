@@ -103,7 +103,7 @@ take_screen_shot() {
     filename_prefix="$1"
     filename="$this_repo/output/$(timestamp)_${filename_prefix}_screen.png"
     echo "take screenshot: $filename"
-    mkdir "$this_repo/output"
+    mkdir -p "$this_repo/output"
     adb exec-out screencap -p > "$filename"
 }
 
@@ -206,11 +206,16 @@ run_termux_command() {
     fi
 
     launch_termux || return
+
+    take_screen_shot "run_termux_command_before_input_of_shell_command"
+
     echo "Running command: ${command}"
     start=$(date +%s)
-    adb shell input text "$shell_command" && sleep 3 && hit_enter
+    adb_input_text_long "$shell_command" && sleep 1 && hit_enter
     # just for safety wait a little bit before polling for the probe and the log file
     sleep 1
+
+    take_screen_shot "run_termux_command_after_input_of_shell_command"
 
     local timeout=${timeout:-3600}
     local retries=${retries:-10}
@@ -233,6 +238,7 @@ run_termux_command() {
 
         if [[ retries -le 0 ]]; then
             echo "Maximum retries reached running command. Aborting ..."
+            take_screen_shot "run_termux_command_maximum_tries_reached"
             return 1
         elif [[ try_fix -le 0 ]]; then
             retries=$((retries - 1))
@@ -241,7 +247,10 @@ run_termux_command() {
             # hitting the enter key solves the issue, sometimes the github runner is just a little
             # bit slow.
             echo "No output received. Trying to fix the issue ... (${retries} retries left)"
+            take_screen_shot "run_termux_command_before_trying_to_fix"
             hit_enter
+            sleep 1
+            take_screen_shot "run_termux_command_after_trying_to_fix"
         fi
 
         sleep "$sleep_interval"
@@ -249,6 +258,7 @@ run_termux_command() {
 
         if [[ $timeout -le 0 ]]; then
             echo "Timeout reached running command. Aborting ..."
+            take_screen_shot "run_termux_command_timeout_reached"
             return 1
         fi
     done
@@ -269,6 +279,8 @@ run_termux_command() {
     adb shell "rm ${log_file}"
     [[ $keep_log -ne 1 ]] && rm -f "$log_name"
     rm -f "$log_read" "$probe"
+
+    take_screen_shot "run_termux_command_finished_normally"
 
     # shellcheck disable=SC2086
     return $return_code
