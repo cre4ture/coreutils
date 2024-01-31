@@ -217,11 +217,14 @@ run_termux_command() {
 
     take_screen_shot "run_termux_command_before_input_of_shell_command"
 
+    # remove artificial quoting
+    shell_command="${shell_command%\'}"
+    shell_command="${shell_command#\'}"
+
     echo "Running command: ${command}"
+    echo "Running shell-command: ${shell_command}"
     start=$(date +%s)
-    # shellcheck disable=SC2090
-    # shellcheck disable=SC2086
-    adb_input_text_long $shell_command && sleep 1 && hit_enter
+    adb_input_text_long "$shell_command" && sleep 1 && hit_enter
     # just for safety wait a little bit before polling for the probe and the log file
     sleep 1
 
