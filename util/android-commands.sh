@@ -101,7 +101,7 @@ timestamp() {
 
 take_screen_shot() {
     filename_prefix="$1"
-    filename="$this_repo/output/${filename_prefix}_screen_$(timestamp).png"
+    filename="$this_repo/output/$(timestamp)_${filename_prefix}_screen.png"
     echo "take screenshot: $filename"
     mkdir "$this_repo/output"
     adb exec-out screencap -p > "$filename"

@@ -30,11 +30,11 @@ env:
 jobs:
   test_android:
     name: Test builds
-    runs-on: macos-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
+        os: [macos-latest, ubuntu-latest]
         ram: [4096, 8192]
         api-level: [28]
         target: [default]
@@ -44,13 +44,15 @@ jobs:
             arch: x86
           - ram: 4096
             arch: x86_64
+#    runs-on: macos-latest
+    runs-on: ${{ matrix.os }}
     env:
       EMULATOR_RAM_SIZE: ${{ matrix.ram }}
       AVD_CACHE_KEY: "set later due to limitations of github actions not able to concatenate env variables"
     steps:
     - name: Concatenate values to environment file
       run: |
-        echo "AVD_CACHE_KEY=${{ matrix.ram }}-${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+${{ env.KEY_POSTFIX }}" >> $GITHUB_ENV
+        echo "AVD_CACHE_KEY=${{ matrix.os }}-${{ matrix.ram }}-${{ matrix.api-level }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+${{ env.KEY_POSTFIX }}" >> $GITHUB_ENV
     - uses: actions/checkout@v4
     - name: Restore AVD cache
       uses: actions/cache/restore@v4
@@ -133,5 +135,5 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: test_output
+        name: test_output_${{ env.AVD_CACHE_KEY }}
         path: output
