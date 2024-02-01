@@ -359,7 +359,7 @@ copy_file_or_dir_from_device_via_ssh() {
 }
 
 run_command_via_ssh() {
-    ssh -p 9022 termux:@127.0.0.1 -o StrictHostKeyChecking=accept-new "$@" | add_timestamp_to_lines
+    ssh -p 9022 termux:@127.0.0.1 -o StrictHostKeyChecking=accept-new "$@" 2>&1 | add_timestamp_to_lines
     return "${PIPESTATUS[0]}"
 }
 
@@ -369,7 +369,7 @@ test_ssh_connection() {
 }
 
 run_script_file_via_ssh() {
-    ssh -p 9022 termux:@127.0.0.1 -o StrictHostKeyChecking=accept-new "bash -s" < "$1"
+    ssh -p 9022 termux:@127.0.0.1 -o StrictHostKeyChecking=accept-new "bash -s" < "$1" 2>&1 | add_timestamp_to_lines
 }
 
 navigate_down() {
@@ -502,6 +502,9 @@ snapshot() {
     apt_upgrade_all_packages
 
     install_packages_via_ssh_using_apt "rust binutils openssl tar"
+
+    echo "Read /proc/cpuinfo"
+    run_command_via_ssh "cat /proc/cpuinfo"
 
     echo "Installing cargo-nextest"
     # We need to install nextest via cargo currently, since there is no pre-built binary for android x86
