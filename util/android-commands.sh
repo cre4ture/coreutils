@@ -370,6 +370,7 @@ test_ssh_connection() {
 
 run_script_file_via_ssh() {
     ssh -p 9022 termux:@127.0.0.1 -o StrictHostKeyChecking=accept-new "bash -s" < "$1" 2>&1 | add_timestamp_to_lines
+    return "${PIPESTATUS[0]}"
 }
 
 navigate_down() {
@@ -576,6 +577,9 @@ build() {
 
     reinit_ssh_connection
 
+    echo "Read /proc/cpuinfo"
+    run_command_via_ssh "cat /proc/cpuinfo"
+
     command="export CARGO_TERM_COLOR=always;
              export CARGO_INCREMENTAL=0; \
              cd ~/coreutils && cargo build --features feat_os_unix_android"
@@ -588,6 +592,9 @@ tests() {
     echo "Running tests"
 
     reinit_ssh_connection
+
+    echo "Read /proc/cpuinfo"
+    run_command_via_ssh "cat /proc/cpuinfo"
 
     run_script_file_via_ssh "$this_repo/util/android-scripts/run-tests.sh" || return
 
