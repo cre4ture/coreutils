@@ -319,7 +319,7 @@ init() {
     snapshot_name="${AVD_CACHE_KEY}"
 
     # shellcheck disable=SC2015
-    wget "https://github.com/termux/termux-app/releases/download/${termux}/termux-app_${termux}+github-debug_${arch}.apk" &&
+    wget -nv "https://github.com/termux/termux-app/releases/download/${termux}/termux-app_${termux}+github-debug_${arch}.apk" &&
         snapshot "termux-app_${termux}+github-debug_${arch}.apk" &&
         hash_rustc &&
         exit_termux &&

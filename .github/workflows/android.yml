@@ -77,6 +77,12 @@ jobs:
           ~/.android/adb*
           ~/__rustc_hash__
         key: avd-${{ env.AVD_CACHE_KEY }}
+    - name: Delete AVD Lockfile when run from cache
+      if: steps.avd-cache.outputs.cache-hit == 'true'
+      run: |
+        rm -f \
+          ~/.android/avd/*.avd/*.lock \
+          ~/.android/avd/*/*.lock              
     - name: Create and cache emulator image
       if: steps.avd-cache.outputs.cache-hit != 'true'
       uses: reactivecircus/android-emulator-runner@v2.30.1
