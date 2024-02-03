@@ -110,7 +110,7 @@ jobs:
       id: read_rustc_hash
       with:
         # ~ expansion didn't work
-        path: /Users/runner/__rustc_hash__
+        path: ${{ runner.os == 'Linux' && '/home/runner/__rustc_hash__' || '/Users/runner/__rustc_hash__' }}
         trim: true
     - name: Restore rust cache
       id: rust-cache
