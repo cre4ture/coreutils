@@ -390,7 +390,7 @@ run_script_file_via_ssh() {
 }
 
 # Experiments showed that the adb shell input text functionality has a limitation for the input length.
-# If input lenght is too much, the input is not fully provided to the android device.
+# If input length is too big, the input is not fully provided to the android device.
 # To avoid this, we divide large inputs into smaller chunks and put them one-by-one.
 adb_input_text_long() {
     string=$1
