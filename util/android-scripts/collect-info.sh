@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# spell-checker:ignore nextest watchplus PIPESTATUS
+
 echo "$HOME"
 PATH=$HOME/.cargo/bin:$PATH
 export PATH

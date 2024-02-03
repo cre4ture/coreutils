@@ -1,27 +1,40 @@
 #!/usr/bin/env bash
 # spell-checker:ignore termux keyevent sdcard binutils unmatch adb's dumpsys logcat pkill nextest logfile
+# spell-checker:ignore screencap reinit PIPESTATUS keygen sourceslist
 
-# There are three shells: the host's, adb, and termux. Only adb lets us run
-# commands directly on the emulated device, only termux provides a GNU
-# environment on the emulated device (to e.g. run cargo). So we use adb to
-# launch termux, then to send keystrokes to it while it's running.
-# This means that the commands sent to termux are first parsed as arguments in
+# There are four shells: the host's, adb, termux and termux via ssh.
+# But only termux and termux via ssh provides a GNU environment on the
+# emulated device (to e.g. run cargo).
+# Initially, only adb lets us run commands directly on the emulated device.
+# Thus we first establish a ssh connection which then can be used to access
+# the termux shell directly, getting output and return code as usual.
+# So we use adb to launch termux, then to send keystrokes to it while it's running.
+# This way we install sshd and a public key from the host. After that we can
+# use ssh to directly run commands in termux environment.
+
+# Before ssh, we need to consider some inconvenient, limiting specialties:
+# The commands sent to termux via adb keystrokes are first parsed as arguments in
 # this shell, then as arguments in the adb shell, before finally being used as
 # text inputs to the app. Hence, the "'wrapping'" on those commands.
-# There's no way to get any direct feedback from termux, so every time we run a
-# command on it, we make sure it creates a unique *.probe file which is polled
-# every 30 seconds together with the current output of the command in a *.log file.
-# The contents of the probe file are used as a return code: 0 on success, some
-# other number for errors (an empty file is basically the same as 0). Note that
-# the return codes are text, not raw bytes.
+# Using this approach there's no way to get any direct feedback from termux,
+# so every time we run a command on it, we make sure it creates a unique *.probe file
+# which is polled every 30 seconds together with the current output of the
+# command in a *.log file. The contents of the probe file are used as a return code:
+# 0 on success, some other number for errors (an empty file is basically the same as 0).
+# Note that the return codes are text, not raw bytes.
+
+# Additionally, we can use adb screenshot functionality to investigate issues
+# when there is no feedback arriving from the android device.
 
 this_repo="$(dirname "$(dirname -- "$(readlink -- "${0}")")")"
 cache_dir_name="__rust_cache__"
-#dev_probe_dir=/data/data/com.termux/files/tmp
 dev_probe_dir=/sdcard
 dev_home_dir=/data/data/com.termux/files/home
 
-# choose only reliable mirrors here:
+# This is a list of termux package mirrors approved to be used.
+# The default mirror list contains entries that do not function properly anymore.
+# To avoid failures due to broken mirrors, we use our own list.
+# Choose only reliable mirrors here:
 repo_url_list=(
     "deb https://packages-cf.termux.org/apt/termux-main/ stable main"
     "deb https://packages-cf.termux.dev/apt/termux-main/ stable main"
@@ -41,6 +54,7 @@ get_current_repo_url() {
     echo "${repo_url_list[$repo_url_round_robin]}"
 }
 
+# dump some information about the runners system for debugging purposes:
 echo "====== runner information ======"
 echo "hostname: $(hostname)"
 echo "uname -a: $(uname -a)"
@@ -50,7 +64,7 @@ echo "\$0: $0"
 # shellcheck disable=SC2140
 echo "\$(readlink -- "\$\{0\}"): $(readlink -- "${0}")"
 echo "\$this_repo: $this_repo"
-echo "readlink -f \$this_repo: $(readlink -f $this_repo)"
+echo "readlink -f \$this_repo: $(readlink -f "$this_repo")"
 this_repo=$(readlink -f "$this_repo")
 
 echo "====== runner memory ==========="
@@ -86,13 +100,6 @@ If you have multiple devices, use the ANDROID_SERIAL environment variable to
 specify which to connect to."
 }
 
-setup_tmp_dir() {
-    return 0
-    adb shell input text \"cd\" && hit_enter
-    adb shell input text \"mkdir ../tmp\" && hit_enter
-    adb shell input text \"chmod a+rwx ../.. .. ../tmp\" && hit_enter
-}
-
 hit_enter() {
     adb shell input keyevent 66
 }
@@ -106,9 +113,11 @@ timestamp() {
 }
 
 add_timestamp_to_lines() {
-    while read line; do printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$line"; done
+    while IFS= read -r line; do printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$line"; done
 }
 
+# takes a screenshot with given name from the android device. Filename is prefixed with timestamp.
+# screenshots are collected at the end of the github workflow and provided as download link.
 take_screen_shot() {
     filename_prefix="$1"
     filename="$this_repo/output/$(timestamp)_${filename_prefix}_screen.png"
@@ -122,7 +131,8 @@ launch_termux() {
     take_screen_shot "launch_termux_enter"
 
     adb shell input tap 120 380  # close potential dialog "System UI isn't responding" with "wait".
-                                 # should not cause side effects when dialog is not there...
+                                 # should not cause side effects when dialog is not there as there are
+                                 # no relevant GUI elements at this position otherwise.
 
     if ! adb shell 'am start -n com.termux/.HomeActivity'; then
         echo "failed to launch termux"
@@ -172,10 +182,6 @@ launch_termux() {
     echo "found launch.probe"
     take_screen_shot "launch_termux_found_probe"
     adb shell "rm $dev_probe_dir/launch.probe" && echo "removed launch.probe"
-}
-
-chmod_target_file() {
-    adb shell input text "\"chmod a+rw $1\""  &&  hit_enter
 }
 
 # Usage: run_termux_command
@@ -364,6 +370,8 @@ copy_file_or_dir_from_device_via_ssh() {
     scp -r "scp://termux@127.0.0.1:9022/$1" "$2"
 }
 
+# runs the in args provided command on android side via ssh. forwards return code.
+# adds a timestamp to every line to be able to see where delays are
 run_command_via_ssh() {
     ssh -p 9022 termux:@127.0.0.1 -o StrictHostKeyChecking=accept-new "$@" 2>&1 | add_timestamp_to_lines
     return "${PIPESTATUS[0]}"
@@ -374,31 +382,16 @@ test_ssh_connection() {
     run_command_via_ssh free -mh
 }
 
+# takes a local (on runner side) script file and runs it via ssh on the virtual android device. forwards return code.
+# adds a timestamp to every line to be able to see where delays are
 run_script_file_via_ssh() {
     ssh -p 9022 termux:@127.0.0.1 -o StrictHostKeyChecking=accept-new "bash -s" < "$1" 2>&1 | add_timestamp_to_lines
     return "${PIPESTATUS[0]}"
 }
 
-navigate_down() {
-    adb shell input keyevent 20
-}
-
-hit_space_key() {
-    adb shell input text "\ "
-}
-
-termux_change_rep() {
-    adb shell input text "termux-change-repo" && hit_enter
-    sleep 1
-    hit_enter  # select mirror group option
-    sleep 1
-    navigate_down
-    navigate_down
-    navigate_down # select europe
-    hit_space_key
-    hit_enter
-}
-
+# Experiments showed that the adb shell input text functionality has a limitation for the input length.
+# If input lenght is too much, the input is not fully provided to the android device.
+# To avoid this, we divide large inputs into smaller chunks and put them one-by-one.
 adb_input_text_long() {
     string=$1
     length=${#string}
@@ -452,6 +445,8 @@ install_packages_via_adb_shell() {
     return 0
 }
 
+# We use apt to install the packages as pkg doesn't respect any pre-defined mirror list.
+# Its important to have a defined mirror list to avoid issues with broken mirrors.
 install_packages_via_adb_shell_using_apt() {
     install_package_list="$*"
 
@@ -487,7 +482,6 @@ apt_upgrade_all_packages() {
     run_command_via_ssh "apt update; yes | apt upgrade -y"
 }
 
-
 generate_and_install_public_key() {
     echo "generate local public private key pair"
     generate_rsa_key_local
@@ -520,18 +514,6 @@ snapshot() {
 
     echo "Info about cargo and rust - via SSH Script"
     run_script_file_via_ssh "$this_repo/util/android-scripts/collect-info.sh"
-
-    echo "Info about cargo and rust"
-    command="echo \$HOME; \
-PATH=\$HOME/.cargo/bin:\$PATH; \
-export PATH; \
-echo \$PATH; \
-pwd; \
-command -v rustc && rustc -Vv; \
-ls -la ~/.cargo/bin; \
-cargo --list; \
-cargo nextest --version"
-    run_command_via_ssh "$command"
 
     echo "Snapshot complete"
     # shellcheck disable=SC2086
@@ -615,9 +597,6 @@ hash_rustc() {
 
     echo "Hashing rustc version: ${HOME}/${hash}"
 
-    command=""
-    keep_log=1
-    debug=0
     run_command_via_ssh "rustc -Vv" > rustc.log || return
     rm -f "$tmp_hash"
     mv "rustc.log" "$tmp_hash" || return
