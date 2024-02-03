@@ -55,6 +55,10 @@ echo "====== ================== ======"
 
 this_repo=$(readlink -f "$this_repo")
 
+free -mh
+df -h
+cat /proc/cpuinfo
+
 help() {
     echo \
         "Usage: $0 COMMAND [ARG]
