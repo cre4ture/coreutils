@@ -57,6 +57,7 @@ jobs:
     env:
       EMULATOR_RAM_SIZE: ${{ matrix.ram }}
       EMULATOR_CORES: ${{ matrix.cores }}
+      RUNNER_OS: ${{ matrix.os }}
       AVD_CACHE_KEY: "set later due to limitations of github actions not able to concatenate env variables"
     steps:
     - name: Concatenate values to environment file
@@ -73,6 +74,12 @@ jobs:
           ~/.android/adb*
           ~/__rustc_hash__
         key: avd-${{ env.AVD_CACHE_KEY }}
+    - name: Enable KVM group perms (linux hardware acceleration)
+      if: ${{ env.RUNNER_OS }} == ubuntu-latest
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
     - name: Create and cache emulator image
       if: steps.avd-cache.outputs.cache-hit != 'true'
       uses: reactivecircus/android-emulator-runner@v2.30.1
