@@ -66,13 +66,6 @@ echo "\$(readlink -- "\$\{0\}"): $(readlink -- "${0}")"
 echo "\$this_repo: $this_repo"
 echo "readlink -f \$this_repo: $(readlink -f "$this_repo")"
 this_repo=$(readlink -f "$this_repo")
-
-echo "====== runner memory ==========="
-free -mh
-echo "====== runner disks ============"
-df -h
-echo "====== runner cpuinfo =========="
-cat /proc/cpuinfo
 echo "====== runner info end ========="
 
 help() {
