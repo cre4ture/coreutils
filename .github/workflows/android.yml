@@ -137,7 +137,7 @@ jobs:
       with:
         path: ~/__rust_cache__
         key: ${{ matrix.arch }}_${{ matrix.target}}_${{ steps.read_rustc_hash.outputs.content }}_${{ hashFiles('**/Cargo.toml', '**/Cargo.lock') }}_v3
-    - name: archive any output (error screenshot)
+    - name: archive any output (error screenshots)
       if: always()
       uses: actions/upload-artifact@v4
       with:
