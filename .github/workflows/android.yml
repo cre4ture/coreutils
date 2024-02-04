@@ -54,6 +54,7 @@ jobs:
       run: |
         echo "AVD_CACHE_KEY=${{ matrix.os }}-${{ matrix.cores }}-${{ matrix.ram }}-${{ matrix.api-level }}-${{ matrix.target }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+${{ env.KEY_POSTFIX }}" >> $GITHUB_ENV
     - name: Collect information about runner
+      if: always()
       continue-on-error: true
       run: |
         hostname
@@ -79,13 +80,11 @@ jobs:
         sudo udevadm trigger --name-match=kvm
     - uses: actions/checkout@v4
     - name: Collect information about runner
+      if: always()
       continue-on-error: true
       run: |
-        hostname
-        uname -a
         free -mh
         df -Th
-        cat /proc/cpuinfo
     - name: Restore AVD cache
       uses: actions/cache/restore@v4
       id: avd-cache
@@ -98,6 +97,7 @@ jobs:
           ~/__rustc_hash__
         key: avd-${{ env.AVD_CACHE_KEY }}
     - name: Collect information about runner after AVD cache
+      if: always()
       continue-on-error: true
       run: |
         free -mh
@@ -151,6 +151,7 @@ jobs:
         # the github cache during the development of this workflow
         key: ${{ matrix.arch }}_${{ matrix.target}}_${{ steps.read_rustc_hash.outputs.content }}_${{ hashFiles('**/Cargo.toml', '**/Cargo.lock') }}_v3
     - name: Collect information about runner ressources
+      if: always()
       continue-on-error: true
       run: |
         free -mh
@@ -177,6 +178,7 @@ jobs:
           util/android-commands.sh tests
           if [[ "${{ steps.rust-cache.outputs.cache-hit }}" != 'true' ]]; then util/android-commands.sh sync_image; fi; exit 0
     - name: Collect information about runner ressources
+      if: always()
       continue-on-error: true
       run: |
         free -mh
@@ -194,6 +196,7 @@ jobs:
         name: test_output_${{ env.AVD_CACHE_KEY }}
         path: output
     - name: Collect information about runner ressources
+      if: always()
       continue-on-error: true
       run: |
         free -mh
