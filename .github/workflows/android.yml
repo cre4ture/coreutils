@@ -69,6 +69,7 @@ jobs:
         sudo mkdir /mnt/data || true
         sudo chmod a+rwx /mnt/data || true
         mkdir /mnt/data/.android && ln -s /mnt/data/.android ~/.android || true
+        mkdir /mnt/data/work && ln -s /mnt/data/work ~/work || true
     - name: Enable KVM group perms (linux hardware acceleration)
       if: ${{ runner.os == 'Linux' }}
       run: |
