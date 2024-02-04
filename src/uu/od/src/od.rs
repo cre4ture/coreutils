@@ -213,36 +213,43 @@ impl OdOptions {
 /// opens the input and calls `odfunc` to process the input.
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
+
     let args = args.collect_ignore();
 
-    let clap_opts = uu_app();
+    std::panic::catch_unwind(move ||{
 
-    let clap_matches = clap_opts.try_get_matches_from(&args)?;
+        let clap_opts = uu_app();
 
-    let od_options = OdOptions::new(&clap_matches, &args)?;
+        let clap_matches = clap_opts.try_get_matches_from(&args)?;
 
-    let mut input_offset =
-        InputOffset::new(od_options.radix, od_options.skip_bytes, od_options.label);
+        let od_options = OdOptions::new(&clap_matches, &args)?;
 
-    let mut input = open_input_peek_reader(
-        &od_options.input_strings,
-        od_options.skip_bytes,
-        od_options.read_bytes,
-    );
-    let mut input_decoder = InputDecoder::new(
-        &mut input,
-        od_options.line_bytes,
-        PEEK_BUFFER_SIZE,
-        od_options.byte_order,
-    );
+        let mut input_offset =
+            InputOffset::new(od_options.radix, od_options.skip_bytes, od_options.label);
 
-    let output_info = OutputInfo::new(
-        od_options.line_bytes,
-        &od_options.formats[..],
-        od_options.output_duplicates,
-    );
+        let mut input = open_input_peek_reader(
+            &od_options.input_strings,
+            od_options.skip_bytes,
+            od_options.read_bytes,
+        );
+        let mut input_decoder = InputDecoder::new(
+            &mut input,
+            od_options.line_bytes,
+            PEEK_BUFFER_SIZE,
+            od_options.byte_order,
+        );
 
-    odfunc(&mut input_offset, &mut input_decoder, &output_info)
+        let output_info = OutputInfo::new(
+            od_options.line_bytes,
+            &od_options.formats[..],
+            od_options.output_duplicates,
+        );
+
+        odfunc(&mut input_offset, &mut input_decoder, &output_info)
+    }).map_err(|err_obj|{
+        show_error!("catch_unwind(odfunc) err_obj: {:?}", err_obj);
+        USimpleError::new(44, format!("panic caught! ({:?})", err_obj))
+    })?
 }
 
 pub fn uu_app() -> Command {
