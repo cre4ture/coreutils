@@ -65,6 +65,7 @@ jobs:
         touch /mnt/testfile || true
         mkdir /mnt/testfolder || true
         ls -lah /mnt/
+        cat /mnt/DATALOSS_WARNING_README.txt
     - name: Enable KVM group perms (linux hardware acceleration)
       if: ${{ runner.os == 'Linux' }}
       run: |
@@ -72,6 +73,19 @@ jobs:
         sudo udevadm control --reload-rules
         sudo udevadm trigger --name-match=kvm
     - uses: actions/checkout@v4
+    - name: Collect information about runner
+      continue-on-error: true
+      run: |
+        hostname
+        uname -a
+        free -mh
+        df -h
+        df -Th
+        cat /proc/cpuinfo
+        touch /mnt/testfile || true
+        mkdir /mnt/testfolder || true
+        ls -lah /mnt/
+        cat /mnt/DATALOSS_WARNING_README.txt
     - name: Restore AVD cache
       uses: actions/cache/restore@v4
       id: avd-cache
@@ -83,6 +97,19 @@ jobs:
           ~/.android/adb*
           ~/__rustc_hash__
         key: avd-${{ env.AVD_CACHE_KEY }}
+    - name: Collect information about runner
+      continue-on-error: true
+      run: |
+        hostname
+        uname -a
+        free -mh
+        df -h
+        df -Th
+        cat /proc/cpuinfo
+        touch /mnt/testfile || true
+        mkdir /mnt/testfolder || true
+        ls -lah /mnt/
+        cat /mnt/DATALOSS_WARNING_README.txt
     - name: Delete AVD Lockfile when run from cache
       if: steps.avd-cache.outputs.cache-hit == 'true'
       run: |
