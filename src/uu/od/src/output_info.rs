@@ -14,6 +14,7 @@ use crate::parse_formats::ParsedFormatterItemInfo;
 const MAX_BYTES_PER_UNIT: usize = 8;
 
 /// Contains information to output single output line in human readable form
+#[derive(Debug)]
 pub struct SpacedFormatterItemInfo {
     /// Contains a function pointer to output data, and information about the output format.
     pub formatter_item_info: FormatterItemInfo,

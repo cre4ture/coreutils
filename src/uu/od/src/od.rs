@@ -559,6 +559,8 @@ fn print_bytes(prefix: &str, input_decoder: &MemoryDecoder, output_info: &Output
     for f in output_info.spaced_formatters_iter() {
         let mut output_text = String::new();
 
+        show_error!("print_bytes() - begin: f: {:?}", f);
+
         let mut b = 0;
         while b < input_decoder.length() {
             write!(
@@ -585,6 +587,8 @@ fn print_bytes(prefix: &str, input_decoder: &MemoryDecoder, output_info: &Output
 
             b += f.formatter_item_info.byte_size;
         }
+
+        show_error!("print_bytes() - middle: output_text: {:?}", output_text);
 
         if f.add_ascii_dump {
             let missing_spacing = output_info
