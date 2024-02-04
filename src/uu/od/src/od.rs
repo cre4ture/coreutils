@@ -491,6 +491,7 @@ where
                 let length = memory_decoder.length();
 
                 if length == 0 {
+                    show_error!("print_final_offset(), length: {:?}", length);
                     input_offset.print_final_offset();
                     break;
                 }
@@ -503,6 +504,7 @@ where
                         max_used = line_bytes;
                     }
 
+                    show_error!("zero_out_buffer(), length: {:?}, max_used: {:?}", length, max_used);
                     memory_decoder.zero_out_buffer(length, max_used);
                 }
 
@@ -510,6 +512,7 @@ where
                     && length == line_bytes
                     && memory_decoder.get_buffer(0) == &previous_bytes[..]
                 {
+                    show_error!("duplicate_line(), duplicate_line: {:?}", duplicate_line);
                     if !duplicate_line {
                         duplicate_line = true;
                         println!("*");
@@ -518,9 +521,11 @@ where
                     duplicate_line = false;
                     if length == line_bytes {
                         // save a copy of the input unless it is the last line
+                        show_error!("clone_buffer(), previous_bytes: {:?}", previous_bytes);
                         memory_decoder.clone_buffer(&mut previous_bytes);
                     }
 
+                    show_error!("print_bytes(), input_offset.format_byte_offset(): {:?}", input_offset.format_byte_offset());
                     print_bytes(
                         &input_offset.format_byte_offset(),
                         &memory_decoder,
@@ -528,10 +533,11 @@ where
                     );
                 }
 
+                show_error!("increase_position(), length: {:?}", length);
                 input_offset.increase_position(length as u64);
             }
             Err(e) => {
-                show_error!("{}", e);
+                show_error!("show_error: {}", e);
                 input_offset.print_final_offset();
                 return Err(1.into());
             }
