@@ -54,12 +54,17 @@ jobs:
       run: |
         echo "AVD_CACHE_KEY=${{ matrix.os }}-${{ matrix.cores }}-${{ matrix.ram }}-${{ matrix.api-level }}-${{ matrix.target }}-${{ matrix.arch }}+termux-${{ env.TERMUX }}+${{ env.KEY_POSTFIX }}" >> $GITHUB_ENV
     - name: Collect information about runner
+      continue-on-error: true
       run: |
         hostname
         uname -a
         free -mh
         df -h
+        df -Th
         cat /proc/cpuinfo
+        touch /mnt/testfile || true
+        mkdir /mnt/testfolder || true
+        ls -lah /mnt/
     - name: Enable KVM group perms (linux hardware acceleration)
       if: ${{ runner.os == 'Linux' }}
       run: |
@@ -70,6 +75,7 @@ jobs:
     - name: Restore AVD cache
       uses: actions/cache/restore@v4
       id: avd-cache
+      continue-on-error: true
       with:
         path: |
           ~/.android/avd/*
@@ -82,7 +88,7 @@ jobs:
       run: |
         rm -f \
           ~/.android/avd/*.avd/*.lock \
-          ~/.android/avd/*/*.lock              
+          ~/.android/avd/*/*.lock
     - name: Create and cache emulator image
       if: steps.avd-cache.outputs.cache-hit != 'true'
       uses: reactivecircus/android-emulator-runner@v2.30.1
