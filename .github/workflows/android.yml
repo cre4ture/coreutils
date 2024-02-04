@@ -62,14 +62,16 @@ jobs:
         df -h
         df -Th
         cat /proc/cpuinfo
-        touch /mnt/testfile || true
-        mkdir /mnt/testfolder || true
+    - name: (Linux) create links from home to data partition
+      if: ${{ runner.os == 'Linux' }}
+      continue-on-error: true
+      run: |
         ls -lah /mnt/
         cat /mnt/DATALOSS_WARNING_README.txt
-        sudo mkdir /mnt/data || true
-        sudo chmod a+rwx /mnt/data || true
-        mkdir /mnt/data/.android && ln -s /mnt/data/.android ~/.android || true
-        mkdir /mnt/data/work && ln -s /mnt/data/work ~/work || true
+        sudo mkdir /mnt/data
+        sudo chmod a+rwx /mnt/data
+        mkdir /mnt/data/.android && ln -s /mnt/data/.android ~/.android
+        mkdir /mnt/data/work && ln -s /mnt/data/work ~/work
     - name: Enable KVM group perms (linux hardware acceleration)
       if: ${{ runner.os == 'Linux' }}
       run: |
