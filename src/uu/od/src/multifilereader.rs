@@ -26,6 +26,13 @@ pub struct MultifileReader<'a> {
     any_err: bool,
 }
 
+impl<'a> std::fmt::Debug for MultifileReader<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result
+    {
+        writeln!(f, "MultiFileReader(any_err: {})", self.any_err)
+    }
+}
+
 pub trait HasError {
     fn has_error(&self) -> bool;
 }

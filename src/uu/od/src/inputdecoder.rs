@@ -12,6 +12,7 @@ use crate::peekreader::PeekRead;
 /// Processes an input and provides access to the data read in various formats
 ///
 /// Currently only useful if the input implements `PeekRead`.
+#[derive(Debug)]
 pub struct InputDecoder<'a, I>
 where
     I: 'a,
@@ -92,6 +93,7 @@ where
 }
 
 /// Provides access to the internal data in various formats
+#[derive(Debug)]
 pub struct MemoryDecoder<'a> {
     /// A reference to the parents' data
     data: &'a mut Vec<u8>,

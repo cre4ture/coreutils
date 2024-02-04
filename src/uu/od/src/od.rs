@@ -458,7 +458,7 @@ pub fn uu_app() -> Command {
 }
 
 /// Loops through the input line by line, calling `print_bytes` to take care of the output.
-fn odfunc<I>(
+fn odfunc<I: std::fmt::Debug>(
     input_offset: &mut InputOffset,
     input_decoder: &mut InputDecoder<I>,
     output_info: &OutputInfo,
@@ -473,7 +473,13 @@ where
     loop {
         // print each line data (or multi-format raster of several lines describing the same data).
 
-        match input_decoder.peek_read() {
+        show_error!("loop entry(), input_decoder: {:?}", input_decoder);
+
+        let read_result = input_decoder.peek_read();
+
+        show_error!("loop entry(), read_result: {:?}", read_result);
+
+        match read_result {
             Ok(mut memory_decoder) => {
                 let length = memory_decoder.length();
 
@@ -526,8 +532,10 @@ where
     }
 
     if input_decoder.has_error() {
+        show_error!("input_decoder.has_error(), input_decoder: {:?}", input_decoder);
         Err(1.into())
     } else {
+        show_error!("!input_decoder.has_error(), input_decoder: {:?}", input_decoder);
         Ok(())
     }
 }

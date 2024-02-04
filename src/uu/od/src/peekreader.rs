@@ -6,6 +6,7 @@
 
 //! Contains the trait `PeekRead` and type `PeekReader` implementing it.
 
+use std::fmt::Debug;
 use std::io;
 use std::io::{Read, Write};
 
@@ -39,12 +40,13 @@ pub trait PeekRead {
 }
 
 /// Wrapper for `std::io::Read` allowing to peek into the data to be read.
-pub struct PeekReader<R> {
+#[derive(Debug)]
+pub struct PeekReader<R: std::fmt::Debug> {
     inner: R,
     temp_buffer: Vec<u8>,
 }
 
-impl<R> PeekReader<R> {
+impl<R: std::fmt::Debug> PeekReader<R> {
     /// Create a new `PeekReader` wrapping `inner`
     pub fn new(inner: R) -> Self {
         Self {
@@ -54,7 +56,7 @@ impl<R> PeekReader<R> {
     }
 }
 
-impl<R: Read> PeekReader<R> {
+impl<R: Read + std::fmt::Debug> PeekReader<R> {
     fn read_from_tempbuffer(&mut self, mut out: &mut [u8]) -> usize {
         match out.write(self.temp_buffer.as_mut_slice()) {
             Ok(n) => {
@@ -73,7 +75,7 @@ impl<R: Read> PeekReader<R> {
     }
 }
 
-impl<R: Read> Read for PeekReader<R> {
+impl<R: Read + std::fmt::Debug> Read for PeekReader<R> {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
         let start_pos = self.read_from_tempbuffer(out);
         match self.inner.read(&mut out[start_pos..]) {
@@ -83,7 +85,7 @@ impl<R: Read> Read for PeekReader<R> {
     }
 }
 
-impl<R: Read> PeekRead for PeekReader<R> {
+impl<R: Read + std::fmt::Debug> PeekRead for PeekReader<R> {
     /// Reads data into a buffer.
     ///
     /// See `PeekRead::peek_read`.
@@ -109,7 +111,7 @@ impl<R: Read> PeekRead for PeekReader<R> {
     }
 }
 
-impl<R: HasError> HasError for PeekReader<R> {
+impl<R: HasError + std::fmt::Debug> HasError for PeekReader<R> {
     fn has_error(&self) -> bool {
         self.inner.has_error()
     }
