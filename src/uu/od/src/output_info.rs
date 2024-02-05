@@ -31,6 +31,7 @@ pub struct SpacedFormatterItemInfo {
 }
 
 /// Contains information about all output lines.
+#[derive(Debug)]
 pub struct OutputInfo {
     /// The number of bytes of a line.
     pub byte_size_line: usize,

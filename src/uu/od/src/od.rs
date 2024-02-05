@@ -563,13 +563,20 @@ fn print_bytes(prefix: &str, input_decoder: &MemoryDecoder, output_info: &Output
 
         let mut b = 0;
         while b < input_decoder.length() {
-            write!(
+
+            show_error!("print_bytes() - before write: b: {:?}, output_info: {:?} ", b, output_info);
+            let wr = write!(
                 output_text,
                 "{:>width$}",
                 "",
                 width = f.spacing[b % output_info.byte_size_block]
-            )
-            .unwrap();
+            );
+
+            show_error!("print_bytes() - after write: wr: {:?}", wr);
+
+            wr.unwrap();
+
+            show_error!("print_bytes() - after unwrap");
 
             match f.formatter_item_info.formatter {
                 FormatWriter::IntWriter(func) => {
@@ -585,7 +592,11 @@ fn print_bytes(prefix: &str, input_decoder: &MemoryDecoder, output_info: &Output
                 }
             }
 
+            show_error!("print_bytes() - after match");
+
             b += f.formatter_item_info.byte_size;
+
+            show_error!("print_bytes() - after b +=: {b}, {:?}", f.formatter_item_info.byte_size);
         }
 
         show_error!("print_bytes() - middle: output_text: {:?}", output_text);
