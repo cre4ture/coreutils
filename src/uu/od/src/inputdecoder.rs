@@ -3,6 +3,7 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 use half::f16;
+use uucore::show_error;
 use std::io;
 
 use crate::byteorder_io::ByteOrder;
@@ -149,9 +150,16 @@ impl<'a> MemoryDecoder<'a> {
     /// Returns a f32/f64 from the internal buffer at position `start`.
     pub fn read_float(&self, start: usize, byte_size: usize) -> f64 {
         match byte_size {
-            2 => f64::from(f16::from_bits(
-                self.byte_order.read_u16(&self.data[start..start + 2]),
-            )),
+            2 => {
+                show_error!("read_float() - FloatWriter 1: start {start}, data: {:?}", &self.data);
+                let bytes = &self.data[start..start + 2];
+                show_error!("read_float() - FloatWriter 2: start {start}, bytes: {:?}", bytes);
+                let bits = self.byte_order.read_u16(&bytes);
+                show_error!("read_float() - FloatWriter 3: start {start}, bits: {bits}");
+                let r = f64::from(f16::from_bits(bits));
+                show_error!("read_float() - FloatWriter 4: r: {:?}", r);
+                r
+            },
             4 => f64::from(self.byte_order.read_f32(&self.data[start..start + 4])),
             8 => self.byte_order.read_f64(&self.data[start..start + 8]),
             _ => panic!("Invalid byte_size: {byte_size}"),
