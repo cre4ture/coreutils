@@ -584,8 +584,11 @@ fn print_bytes(prefix: &str, input_decoder: &MemoryDecoder, output_info: &Output
                     output_text.push_str(&func(p));
                 }
                 FormatWriter::FloatWriter(func) => {
+                    show_error!("print_bytes() - FloatWriter 1");
                     let p = input_decoder.read_float(b, f.formatter_item_info.byte_size);
+                    show_error!("print_bytes() - FloatWriter 2");
                     output_text.push_str(&func(p));
+                    show_error!("print_bytes() - FloatWriter 3");
                 }
                 FormatWriter::MultibyteWriter(func) => {
                     output_text.push_str(&func(input_decoder.get_full_buffer(b)));
