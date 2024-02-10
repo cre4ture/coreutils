@@ -931,3 +931,16 @@ fn test_f16c_direct() {
 
     assert_eq!(0.0, result);
 }
+
+#[test]
+fn test_if_f16c_is_detected() {
+
+    let detected = std::is_x86_feature_detected!("f16c");
+    if detected {
+        println!("f16c detected!");
+    } else {
+        println!("f16c not detected!");
+    }
+
+    assert_eq!(true, detected);
+}
