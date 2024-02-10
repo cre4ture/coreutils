@@ -35,7 +35,7 @@ run_tests_in_subprocess() (
     # run tests
     cd ~/coreutils && \
         timeout --preserve-status --verbose -k 1m 60m \
-            cargo nextest run --profile ci --hide-progress-bar --features feat_os_unix_android
+            cargo nextest run --workspace --profile ci --hide-progress-bar --features feat_os_unix_android
 
     result=$?
 
