@@ -12,7 +12,6 @@ use pretty_assertions::assert_eq;
 use rlimit::prlimit;
 #[cfg(feature = "sleep")]
 use rstest::rstest;
-#[cfg(unix)]
 use std::borrow::Cow;
 use std::collections::VecDeque;
 #[cfg(not(windows))]
@@ -342,6 +341,11 @@ impl CmdResult {
     /// Returns the program's standard error as a string slice
     pub fn stderr_str(&self) -> &str {
         std::str::from_utf8(&self.stderr).unwrap()
+    }
+
+    /// Returns the program's standard error as a string slice, automatically handling invalid utf8
+    pub fn stderr_str_lossy(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(&self.stderr)
     }
 
     /// Returns the program's standard error as a string
@@ -2354,7 +2358,7 @@ pub fn whoami() -> String {
 pub fn host_name_for(util_name: &str) -> Cow<str> {
     // In some environments, e.g. macOS/freebsd, the GNU coreutils are prefixed with "g"
     // to not interfere with the BSD counterparts already in `$PATH`.
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(all(not(target_os = "linux"), not(target_os = "android")))]
     {
         // make call to `host_name_for` idempotent
         if util_name.starts_with('g') && util_name != "groups" {
@@ -2497,7 +2501,7 @@ pub fn expected_result(ts: &TestScenario, args: &[&str]) -> std::result::Result<
     let (stdout, stderr): (String, String) = if cfg!(target_os = "linux") {
         (
             result.stdout_str().to_string(),
-            result.stderr_str().to_string(),
+            result.stderr_str_lossy().to_string(),
         )
     } else {
         // `host_name_for` added prefix, strip 'g' prefix from results:
@@ -2505,7 +2509,7 @@ pub fn expected_result(ts: &TestScenario, args: &[&str]) -> std::result::Result<
         let to = &from[1..];
         (
             result.stdout_str().replace(&from, to),
-            result.stderr_str().replace(&from, to),
+            result.stderr_str_lossy().replace(&from, to),
         )
     };
 
