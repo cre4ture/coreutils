@@ -301,6 +301,15 @@ jobs:
           - { os: macos-latest   , features: feat_os_macos }
           - { os: windows-latest , features: feat_os_windows }
     steps:
+    - name: Collect information about runner
+      if: always()
+      continue-on-error: true
+      run: |
+        hostname
+        uname -a
+        free -mh
+        df -Th
+        cat /proc/cpuinfo
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable
     - uses: taiki-e/install-action@nextest
