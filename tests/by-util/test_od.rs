@@ -925,7 +925,9 @@ fn test_f16c_direct() {
     let result: f32 = unsafe {
         let mut vec = std::mem::MaybeUninit::<__m128i>::zeroed();
         vec.as_mut_ptr().cast::<u16>().write(i);
+        println!("before intrinsic");
         let retval = _mm_cvtph_ps(vec.assume_init());
+        println!("after intrinsic");
         *(&retval as *const __m128).cast()
     };
 
