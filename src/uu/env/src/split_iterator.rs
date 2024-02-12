@@ -53,8 +53,18 @@ const DOUBLE_QUOTES: u8 = b'\"';
 const SINGLE_QUOTES: u8 = b'\'';
 const INVALID_UTF8_MARKER: char = '\u{FFFD}';
 
-const REPLACEMENTS: (&[u8], &[u8]) = ("rntfv_#$\"".as_bytes(), "\r\n\t\x0C\x0B #$\"".as_bytes());
-static_assertions::const_assert_eq!(REPLACEMENTS.0.len(), REPLACEMENTS.1.len());
+const REPLACEMENTS: [(u8, u8); 9] = [
+    (b'r', b'\r'),
+    (b'n', b'\n'),
+    (b't', b'\t'),
+    (b'f', b'\x0C'),
+    (b'v', b'\x0B'),
+    (b'_', b' '),
+    (b'#', b'#'),
+    (b'$', b'$'),
+    (b'"', b'"'),
+];
+
 const ASCII_WHITESPACE_CHARS: &[u8] = " \t\r\n\x0B\x0C".as_bytes();
 
 pub struct SplitIterator<'a> {
@@ -243,10 +253,9 @@ impl<'a> SplitIterator<'a> {
     }
 
     fn check_and_replace_ascii_escape_code(&mut self, c: u8) -> Result<bool, ParseError> {
-        let (from, to) = REPLACEMENTS;
-        if let Some(pos) = memchr::memchr(c, from) {
+        if let Some(replace) = REPLACEMENTS.iter().find(|&x| x.0 == c) {
             self.skip_one()?;
-            self.push_ascii_char_to_word(*to.get(pos).unwrap())?;
+            self.push_ascii_char_to_word(replace.1)?;
             return Ok(true);
         }
 
@@ -421,7 +430,7 @@ impl<'a> SplitIterator<'a> {
                         self.take_one()?;
                         SingleQuoted
                     }
-                    Some(c) if REPLACEMENTS.0.contains(&c) => {
+                    Some(c) if REPLACEMENTS.iter().any(|&x| x.0 == c) => {
                         // See GNU test-suite e11: In single quotes, \t remains as it is.
                         // Comparing with GNU behavior: \a is not accepted and issues an error.
                         // So apparently only known sequences are allowed, even though they are not expanded.... bug of GNU?
