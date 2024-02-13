@@ -387,6 +387,7 @@ dependencies = [
  "libc",
  "nix",
  "once_cell",
+ "osstrtools",
  "phf",
  "phf_codegen",
  "pretty_assertions",

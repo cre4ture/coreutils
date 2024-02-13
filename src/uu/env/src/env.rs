@@ -14,6 +14,7 @@ use clap::{crate_name, crate_version, Arg, ArgAction, Command};
 use ini::Ini;
 #[cfg(unix)]
 use nix::sys::signal::{raise, sigaction, SaFlags, SigAction, SigHandler, SigSet, Signal};
+use osstrtools::{Bytes, OsStrTools};
 use std::borrow::Cow;
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -29,7 +30,6 @@ use uucore::display::Quotable;
 use uucore::error::{ExitCode, UError, UResult, USimpleError, UUsageError};
 use uucore::line_ending::LineEnding;
 use uucore::{format_usage, help_about, help_section, help_usage, show_warning};
-use osstrtools::{Bytes, OsStrTools};
 
 const ABOUT: &str = help_about!("env.md");
 const USAGE: &str = help_usage!("env.md");
@@ -197,7 +197,7 @@ pub fn uu_app() -> Command {
         )
 }
 
-pub fn parse_args_from_str(text: &str) -> UResult<Vec<String>> {
+pub fn parse_args_from_str(text: &OsStr) -> UResult<Vec<OsString>> {
     split_iterator::split(text).map_err(|e| match e {
         parse_error::ParseError::BackslashCNotAllowedInDoubleQuotes { pos: _ } => {
             USimpleError::new(125, "'\\c' must not appear in double-quoted -S string")
@@ -224,20 +224,8 @@ fn check_and_handle_string_args(
     all_args: &mut Vec<std::ffi::OsString>,
     do_debug_print_args: Option<&Vec<OsString>>,
 ) -> UResult<bool> {
-    let arg_bytes;
-    #[cfg(unix)]
-    {
-        arg_bytes = arg.as_bytes();
-    }
-    #[cfg(not(unix))]
-    {
-        arg_bytes = arg
-            .to_str()
-            .ok_or_else(|| USimpleError::new(1, "parameters contain invalid utf8"))?
-            .as_bytes();
-    }
-
-    if !arg_bytes.starts_with(prefix_to_test.as_bytes()) {
+    let arg_bytes = arg.as_byte_slice();
+    if !arg_bytes.starts_with(OsString::from(prefix_to_test).as_byte_slice()) {
         return Ok(false);
     }
 
@@ -246,10 +234,10 @@ fn check_and_handle_string_args(
     }
 
     let remaining_bytes = arg_bytes.get(prefix_to_test.len()..).unwrap();
-    let string = String::from_utf8(remaining_bytes.to_owned()).unwrap();
+    let string = OsStr::from_bytes(remaining_bytes);
 
-    let arg_strings = parse_args_from_str(string.as_str())?;
-    all_args.extend(arg_strings.into_iter().map(OsString::from));
+    let arg_strings = parse_args_from_str(string)?;
+    all_args.extend(arg_strings);
 
     Ok(true)
 }
@@ -420,7 +408,10 @@ impl EnvAppData {
 
         // unset specified env vars
         for name in &opts.unsets {
-            if name.is_empty() || name.contains(OsString::from("\0")) || name.contains(OsString::from("=")) {
+            if name.is_empty()
+                || name.contains(OsString::from("\0"))
+                || name.contains(OsString::from("="))
+            {
                 return Err(USimpleError::new(
                     125,
                     format!("cannot unset {}: Invalid argument", name.quote()),

@@ -18,6 +18,8 @@
 
 #![forbid(unsafe_code)]
 
+use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::mem;
 use std::ops::Range;
 
@@ -69,15 +71,15 @@ const ASCII_WHITESPACE_CHARS: &[u8] = " \t\r\n\x0B\x0C".as_bytes();
 
 pub struct SplitIterator<'a> {
     pub raw_parser: RawStringExpander<'a>,
-    pub words: Vec<String>,
+    pub words: Vec<OsString>,
     pub state: State,
 }
 
 impl<'a> SplitIterator<'a> {
-    pub fn new(s: &'a str) -> Self {
+    pub fn new(s: &'a OsStr) -> Self {
         Self {
             raw_parser: RawStringExpander::new(s),
-            words: Vec::<String>::new(),
+            words: Vec::<OsString>::new(),
             state: State::Delimiter,
         }
     }
@@ -123,7 +125,7 @@ impl<'a> SplitIterator<'a> {
         self.raw_parser.get_parser_mut()
     }
 
-    fn parse_braced_variable_name(&mut self) -> Result<(&'a str, Option<&'a str>), ParseError> {
+    fn parse_braced_variable_name(&mut self) -> Result<(&'a OsStr, Option<&'a OsStr>), ParseError> {
         let pos_start = self.get_parser().get_look_at_pos();
 
         self.check_variable_name_start()?;
@@ -191,7 +193,7 @@ impl<'a> SplitIterator<'a> {
         Ok((varname, default))
     }
 
-    fn parse_unbraced_variable_name(&mut self) -> Result<&str, ParseError> {
+    fn parse_unbraced_variable_name(&mut self) -> Result<&OsStr, ParseError> {
         let pos_start = self.get_parser().get_look_at_pos();
 
         self.check_variable_name_start()?;
@@ -238,14 +240,14 @@ impl<'a> SplitIterator<'a> {
             Some(_) => (self.parse_unbraced_variable_name()?, None),
         };
 
-        let value = std::env::var(name).ok();
+        let value = std::env::var_os(name);
         match (&value, default) {
             (None, None) => {} // do nothing, just replace it with ""
             (Some(value), _) => {
-                self.raw_parser.put_string_utf8(value)?;
+                self.raw_parser.put_string(value)?;
             }
             (None, Some(default)) => {
-                self.raw_parser.put_string_utf8(default)?;
+                self.raw_parser.put_string(default)?;
             }
         };
 
@@ -274,7 +276,7 @@ impl<'a> SplitIterator<'a> {
         }
     }
 
-    pub fn split(&mut self) -> Result<Vec<String>, ParseError> {
+    pub fn split(&mut self) -> Result<Vec<OsString>, ParseError> {
         use State::*;
 
         loop {
@@ -509,6 +511,6 @@ impl<'a> SplitIterator<'a> {
     }
 }
 
-pub fn split(s: &str) -> Result<Vec<String>, ParseError> {
+pub fn split(s: &OsStr) -> Result<Vec<OsString>, ParseError> {
     SplitIterator::new(s).split()
 }

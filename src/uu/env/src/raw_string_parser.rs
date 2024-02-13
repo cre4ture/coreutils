@@ -17,9 +17,15 @@
 //!
 //! The general idea of this module is to encapsulate the unsafe parts in a small and easily testable unit.
 // spell-checker:ignore (words) splitted
-#![allow(unsafe_code)]
+#![forbid(unsafe_code)]
 
-use std::mem;
+use std::{
+    ffi::{OsStr, OsString},
+    mem,
+    os::unix::ffi::OsStrExt,
+};
+
+use osstrtools::Bytes;
 
 pub fn is_ascii(c: u8) -> bool {
     (c & 0x80) == 0
@@ -41,28 +47,28 @@ pub enum ErrorType {
 }
 
 pub struct RawStringParser<'a> {
-    pub input: &'a str,
+    pub input: &'a OsStr,
     pointer: usize,
-    pointer_str: &'a str, // just for debugging sessions. In release build it will be removed by the compiler.
+    pointer_str: &'a OsStr,
 }
 
 pub struct RawStringExpander<'a> {
     parser: RawStringParser<'a>,
-    output: String,
+    output: OsString,
 }
 
 impl<'a> RawStringExpander<'a> {
-    pub fn new(input: &'a str) -> Self {
+    pub fn new(input: &'a OsStr) -> Self {
         Self {
             parser: RawStringParser::new(input),
-            output: String::default(),
+            output: OsString::default(),
         }
     }
 
-    pub fn new_at(input: &'a str, pos: usize) -> Result<Self, Error> {
+    pub fn new_at(input: &'a OsStr, pos: usize) -> Result<Self, Error> {
         Ok(Self {
             parser: RawStringParser::new_at(input, pos)?,
-            output: String::default(),
+            output: OsString::default(),
         })
     }
 
@@ -89,9 +95,7 @@ impl<'a> RawStringExpander<'a> {
             // SAFETY: Just moving any non-ASCII sequence as a whole is keeping multibyte chars intact.
             // SAFETY: Additionally, the function 'take_collected_output' ensures that
             // we only take the result when its end is at a ASCII boundary
-            unsafe {
-                self.output.as_mut_vec().push(c);
-            }
+            self.output.push(OsStr::from_bytes(&[c]));
             parser.set_pointer(parser.pointer + 1);
 
             if is_ascii(c) {
@@ -120,9 +124,20 @@ impl<'a> RawStringExpander<'a> {
         if boundary_detected {
             // SAFETY: when current look_at is ascii or the one before or we are at one of the two ends of the input,
             // then we can't destroy a multi-byte-non-ascii char of input.
-            unsafe {
-                self.output.as_mut_vec().push(c);
-            }
+            self.output.push(OsStr::from_bytes(&[c]));
+            Ok(())
+        } else {
+            Err(parser.make_err(ErrorType::NoAsciiBoundary))
+        }
+    }
+
+    pub fn put_string(&mut self, str: &OsStr) -> Result<(), Error> {
+        let parser = &self.parser;
+        let boundary_detected = parser.detect_boundary()?;
+        if boundary_detected {
+            // SAFETY: when current look_at is ascii or the one before or we are at one of the two ends of the input,
+            // then we can't destroy a multi-byte-non-ascii char of input.
+            self.output.push(str);
             Ok(())
         } else {
             Err(parser.make_err(ErrorType::NoAsciiBoundary))
@@ -130,19 +145,10 @@ impl<'a> RawStringExpander<'a> {
     }
 
     pub fn put_string_utf8(&mut self, str: &str) -> Result<(), Error> {
-        let parser = &self.parser;
-        let boundary_detected = parser.detect_boundary()?;
-        if boundary_detected {
-            // SAFETY: when current look_at is ascii or the one before or we are at one of the two ends of the input,
-            // then we can't destroy a multi-byte-non-ascii char of input.
-            self.output.push_str(str);
-            Ok(())
-        } else {
-            Err(parser.make_err(ErrorType::NoAsciiBoundary))
-        }
+        self.put_string(&OsString::from(str))
     }
 
-    pub fn take_collected_output(&mut self) -> Result<String, Error> {
+    pub fn take_collected_output(&mut self) -> Result<OsString, Error> {
         let parser = &self.parser;
         let boundary_detected = parser.detect_boundary()?;
         if boundary_detected {
@@ -156,7 +162,7 @@ impl<'a> RawStringExpander<'a> {
 }
 
 impl<'a> RawStringParser<'a> {
-    pub fn new(input: &'a str) -> Self {
+    pub fn new(input: &'a OsStr) -> Self {
         Self {
             input,
             pointer: 0,
@@ -164,7 +170,7 @@ impl<'a> RawStringParser<'a> {
         }
     }
 
-    pub fn new_at(input: &'a str, pos: usize) -> Result<Self, Error> {
+    pub fn new_at(input: &'a OsStr, pos: usize) -> Result<Self, Error> {
         let instance = Self {
             input,
             pointer: pos,
@@ -197,7 +203,7 @@ impl<'a> RawStringParser<'a> {
     }
 
     pub fn look_at_pointer(&self, at_pointer: usize) -> Result<u8, Error> {
-        let c = self.input.as_bytes().get(at_pointer);
+        let c = self.input.as_byte_slice().get(at_pointer);
         if let Some(c) = c {
             Ok(*c)
         } else {
@@ -217,7 +223,7 @@ impl<'a> RawStringParser<'a> {
                 break; // stop at ASCII boundary
             }
 
-            if self.pointer == self.input.as_bytes().len() {
+            if self.pointer == self.input.as_byte_slice().len() {
                 break;
             }
 
@@ -251,7 +257,7 @@ impl<'a> RawStringParser<'a> {
             // SAFETY: moving away from within a multi-byte char is not allowed
             return Err(self.make_err(ErrorType::NoAsciiBoundary));
         }
-        let remaining = self.input.as_bytes().get(self.pointer..);
+        let remaining = self.input.as_byte_slice().get(self.pointer..);
         if let Some(remaining_str) = remaining {
             let pos = memchr::memchr(c, remaining_str);
             if let Some(pos) = pos {
@@ -268,7 +274,7 @@ impl<'a> RawStringParser<'a> {
 
     pub fn detect_boundary_at(&self, at_pointer: usize) -> Result<bool, Error> {
         let boundary_detected = (at_pointer == 0)
-            || (at_pointer == self.input.bytes().len())
+            || (at_pointer == self.input.as_byte_slice().len())
             || is_ascii(self.look_at_pointer(at_pointer)?)
             || is_ascii(self.look_at_pointer(at_pointer - 1)?);
         Ok(boundary_detected)
@@ -278,17 +284,22 @@ impl<'a> RawStringParser<'a> {
         self.detect_boundary_at(self.pointer)
     }
 
-    pub fn get_substring(&self, range: &std::ops::Range<usize>) -> Result<&'a str, Error> {
+    pub fn get_substring(&self, range: &std::ops::Range<usize>) -> Result<&'a OsStr, Error> {
         let start_boundary = self.detect_boundary_at(range.start)?;
         let end_boundary = self.detect_boundary_at(range.end)?;
         if start_boundary && end_boundary {
-            Ok(self.input.get(range.start..range.end).unwrap())
+            let bytes = self
+                .input
+                .as_byte_slice()
+                .get(range.start..range.end)
+                .unwrap();
+            Ok(OsStr::from_bytes(bytes))
         } else {
             Err(self.make_err(ErrorType::NoAsciiBoundary))
         }
     }
 
-    pub fn look_at_remaining(&self) -> Result<&'a str, Error> {
+    pub fn look_at_remaining(&self) -> Result<&'a OsStr, Error> {
         let boundary_detected = self.detect_boundary()?;
         if boundary_detected {
             // SAFETY: when current look_at is ascii or the one before or we are at one of the two ends of the input,
@@ -302,6 +313,7 @@ impl<'a> RawStringParser<'a> {
     // UNSAFE -> private
     fn set_pointer(&mut self, new_pointer: usize) {
         self.pointer = new_pointer;
-        self.pointer_str = self.input.get(self.pointer..).unwrap_or("\u{FFFD}");
+        self.pointer_str =
+            OsStr::from_bytes(self.input.as_byte_slice().get(self.pointer..).unwrap());
     }
 }

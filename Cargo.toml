@@ -343,11 +343,13 @@ blake2b_simd = "1.0.2"
 blake3 = "1.5.0"
 sm3 = "0.4.2"
 digest = "0.10.7"
+osstrtools = "0.2.2"
 
 uucore = { version = ">=0.0.19", package = "uucore", path = "src/uucore" }
 uucore_procs = { version = ">=0.0.19", package = "uucore_procs", path = "src/uucore_procs" }
 uu_ls = { version = ">=0.0.18", path = "src/uu/ls" }
 uu_base32 = { version = ">=0.0.18", path = "src/uu/base32" }
+
 
 [dependencies]
 clap = { workspace = true }
@@ -492,6 +494,7 @@ uucore = { workspace = true, features = ["entries", "process", "signals"] }
 walkdir = { workspace = true }
 hex-literal = "0.4.1"
 rstest = { workspace = true }
+osstrtools = { workspace = true }
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dev-dependencies]
 procfs = { version = "0.16", default-features = false }
