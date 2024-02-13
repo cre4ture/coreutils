@@ -321,24 +321,22 @@ impl<'a> SplitIterator<'a> {
 
     fn split_delimiter_backslash(&mut self) -> Result<(), ParseError> {
         match self.get_current_char() {
-            None => {
-                return Err(ParseError::InvalidBackslashAtEndOfStringInMinusS {
-                    pos: self.get_parser().get_look_at_pos(),
-                    quoting: "Delimiter".into(),
-                });
-            }
+            None => Err(ParseError::InvalidBackslashAtEndOfStringInMinusS {
+                pos: self.get_parser().get_look_at_pos(),
+                quoting: "Delimiter".into(),
+            }),
             Some(b'_') | Some(b'\n') => {
                 self.skip_one()?;
-                return Ok(());
+                Ok(())
             }
             Some(b'$') | Some(BACKSLASH) | Some(b'#') | Some(SINGLE_QUOTES)
             | Some(DOUBLE_QUOTES) => {
                 self.take_one()?;
-                return self.split_unquoted();
+                self.split_unquoted()
             }
-            Some(b'c') => return Err(ParseError::ReachedEnd),
-            Some(c) if self.check_and_replace_ascii_escape_code(c)? => return self.split_unquoted(),
-            Some(c) => return Err(self.make_invalid_sequence_backslash_xin_minus_s(c)),
+            Some(b'c') => Err(ParseError::ReachedEnd),
+            Some(c) if self.check_and_replace_ascii_escape_code(c)? => self.split_unquoted(),
+            Some(c) => Err(self.make_invalid_sequence_backslash_xin_minus_s(c)),
         }
     }
 
@@ -378,31 +376,29 @@ impl<'a> SplitIterator<'a> {
 
     fn split_unquoted_backslash(&mut self) -> Result<(), ParseError> {
         match self.get_current_char() {
-            None => {
-                return Err(ParseError::InvalidBackslashAtEndOfStringInMinusS {
-                    pos: self.get_parser().get_look_at_pos(),
-                    quoting: "Unquoted".into(),
-                })
-            }
+            None => Err(ParseError::InvalidBackslashAtEndOfStringInMinusS {
+                pos: self.get_parser().get_look_at_pos(),
+                quoting: "Unquoted".into(),
+            }),
             Some(b'\n') => {
                 self.skip_one()?;
-                return Ok(());
+                Ok(())
             }
             Some(b'_') => {
                 self.skip_one()?;
                 self.push_word_to_words()?;
-                return Err(ParseError::ContinueWithDelimiter);
+                Err(ParseError::ContinueWithDelimiter)
             }
             Some(b'c') => {
                 self.push_word_to_words()?;
-                return Err(ParseError::ReachedEnd);
+                Err(ParseError::ReachedEnd)
             }
             Some(b'$') | Some(BACKSLASH) | Some(SINGLE_QUOTES) | Some(DOUBLE_QUOTES) => {
                 self.take_one()?;
-                return Ok(());
+                Ok(())
             }
-            Some(c) if self.check_and_replace_ascii_escape_code(c)? => return Ok(()),
-            Some(c) => return Err(self.make_invalid_sequence_backslash_xin_minus_s(c)),
+            Some(c) if self.check_and_replace_ascii_escape_code(c)? => Ok(()),
+            Some(c) => Err(self.make_invalid_sequence_backslash_xin_minus_s(c)),
         }
     }
 
@@ -432,19 +428,17 @@ impl<'a> SplitIterator<'a> {
 
     fn split_single_quoted_backslash(&mut self) -> Result<(), ParseError> {
         match self.get_current_char() {
-            None => {
-                return Err(ParseError::MissingClosingQuote {
-                    pos: self.get_parser().get_look_at_pos(),
-                    c: '\'',
-                })
-            }
+            None => Err(ParseError::MissingClosingQuote {
+                pos: self.get_parser().get_look_at_pos(),
+                c: '\'',
+            }),
             Some(b'\n') => {
                 self.skip_one()?;
-                return Ok(());
+                Ok(())
             }
             Some(SINGLE_QUOTES) | Some(BACKSLASH) => {
                 self.take_one()?;
-                return Ok(());
+                Ok(())
             }
             Some(c) if REPLACEMENTS.iter().any(|&x| x.0 == c) => {
                 // See GNU test-suite e11: In single quotes, \t remains as it is.
@@ -452,9 +446,9 @@ impl<'a> SplitIterator<'a> {
                 // So apparently only known sequences are allowed, even though they are not expanded.... bug of GNU?
                 self.push_ascii_char_to_word(BACKSLASH)?;
                 self.take_one()?;
-                return Ok(());
+                Ok(())
             }
-            Some(c) => return Err(self.make_invalid_sequence_backslash_xin_minus_s(c)),
+            Some(c) => Err(self.make_invalid_sequence_backslash_xin_minus_s(c)),
         }
     }
 
@@ -487,27 +481,23 @@ impl<'a> SplitIterator<'a> {
 
     fn split_double_quoted_backslash(&mut self) -> Result<(), ParseError> {
         match self.get_current_char() {
-            None => {
-                return Err(ParseError::MissingClosingQuote {
-                    pos: self.get_parser().get_look_at_pos(),
-                    c: '"',
-                })
-            }
+            None => Err(ParseError::MissingClosingQuote {
+                pos: self.get_parser().get_look_at_pos(),
+                c: '"',
+            }),
             Some(b'\n') => {
                 self.skip_one()?;
-                return Ok(());
+                Ok(())
             }
             Some(DOUBLE_QUOTES) | Some(b'$') | Some(BACKSLASH) => {
                 self.take_one()?;
-                return Ok(());
+                Ok(())
             }
-            Some(b'c') => {
-                return Err(ParseError::BackslashCNotAllowedInDoubleQuotes {
-                    pos: self.get_parser().get_look_at_pos(),
-                })
-            }
-            Some(c) if self.check_and_replace_ascii_escape_code(c)? => return Ok(()),
-            Some(c) => return Err(self.make_invalid_sequence_backslash_xin_minus_s(c)),
+            Some(b'c') => Err(ParseError::BackslashCNotAllowedInDoubleQuotes {
+                pos: self.get_parser().get_look_at_pos(),
+            }),
+            Some(c) if self.check_and_replace_ascii_escape_code(c)? => Ok(()),
+            Some(c) => Err(self.make_invalid_sequence_backslash_xin_minus_s(c)),
         }
     }
 
