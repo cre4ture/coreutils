@@ -33,6 +33,8 @@ pub enum ParseError {
         pos: usize,
         sub_err: raw_string_parser::Error,
     },
+    ReachedEnd,
+    ContinueWithDelimiter,
 }
 
 impl fmt::Display for ParseError {

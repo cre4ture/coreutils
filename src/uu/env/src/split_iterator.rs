@@ -72,7 +72,6 @@ const ASCII_WHITESPACE_CHARS: &[u8] = " \t\r\n\x0B\x0C".as_bytes();
 pub struct SplitIterator<'a> {
     pub raw_parser: RawStringExpander<'a>,
     pub words: Vec<OsString>,
-    pub state: State,
 }
 
 impl<'a> SplitIterator<'a> {
@@ -80,7 +79,6 @@ impl<'a> SplitIterator<'a> {
         Self {
             raw_parser: RawStringExpander::new(s),
             words: Vec::<OsString>::new(),
-            state: State::Delimiter,
         }
     }
 
@@ -276,237 +274,260 @@ impl<'a> SplitIterator<'a> {
         }
     }
 
-    pub fn split(&mut self) -> Result<Vec<OsString>, ParseError> {
-        use State::*;
-
+    fn split_root(&mut self) -> Result<(), ParseError> {
         loop {
-            let c = self.get_current_char();
-            let _c_char =
-                c.map(|c| -> char { char::from_u32(c.into()).unwrap_or(INVALID_UTF8_MARKER) }); // just for debugging session. In release, compiler will remove
-            self.state = match self.state {
-                Delimiter => match c {
-                    None => break,
-                    Some(SINGLE_QUOTES) => {
-                        self.skip_one()?;
-                        SingleQuoted
-                    }
-                    Some(DOUBLE_QUOTES) => {
-                        self.skip_one()?;
-                        DoubleQuoted
-                    }
-                    Some(BACKSLASH) => {
-                        self.skip_one()?;
-                        DelimiterBackslash
-                    }
-                    Some(c) if ASCII_WHITESPACE_CHARS.contains(&c) => {
-                        self.skip_one()?;
-                        Delimiter
-                    }
-                    Some(b'#') => {
-                        self.skip_one()?;
-                        Comment
-                    }
-                    Some(b'$') => {
-                        self.substitute_variable()?;
-                        Unquoted
-                    }
-                    Some(_) => {
-                        self.take_one()?;
-                        Unquoted
-                    }
-                },
-                DelimiterBackslash => match c {
-                    None => {
-                        return Err(ParseError::InvalidBackslashAtEndOfStringInMinusS {
-                            pos: self.get_parser().get_look_at_pos(),
-                            quoting: "Delimiter".into(),
-                        })
-                    }
-                    Some(b'_') => {
-                        self.skip_one()?;
-                        Delimiter
-                    }
-                    Some(b'\n') => {
-                        self.skip_one()?;
-                        Delimiter
-                    }
-                    Some(b'$') | Some(BACKSLASH) | Some(b'#') | Some(SINGLE_QUOTES)
-                    | Some(DOUBLE_QUOTES) => {
-                        self.take_one()?;
-                        Unquoted
-                    }
-                    Some(b'c') => break,
-                    Some(c) if self.check_and_replace_ascii_escape_code(c)? => Unquoted,
-                    Some(c) => return Err(self.make_invalid_sequence_backslash_xin_minus_s(c)),
-                },
-                Unquoted => match c {
-                    None => {
-                        self.push_word_to_words()?;
-                        break;
-                    }
-                    Some(b'$') => {
-                        self.substitute_variable()?;
-                        self.state
-                    }
-                    Some(SINGLE_QUOTES) => {
-                        self.skip_one()?;
-                        SingleQuoted
-                    }
-                    Some(DOUBLE_QUOTES) => {
-                        self.skip_one()?;
-                        DoubleQuoted
-                    }
-                    Some(BACKSLASH) => {
-                        self.skip_one()?;
-                        UnquotedBackslash
-                    }
-                    Some(c) if ASCII_WHITESPACE_CHARS.contains(&c) => {
-                        self.push_word_to_words()?;
-                        self.skip_one()?;
-                        Delimiter
-                    }
-                    Some(_) => {
-                        self.take_one()?;
-                        Unquoted
-                    }
-                },
-                UnquotedBackslash => match c {
-                    None => {
-                        return Err(ParseError::InvalidBackslashAtEndOfStringInMinusS {
-                            pos: self.get_parser().get_look_at_pos(),
-                            quoting: "Unquoted".into(),
-                        })
-                    }
-                    Some(b'\n') => {
-                        self.skip_one()?;
-                        Unquoted
-                    }
-                    Some(b'_') => {
-                        self.skip_one()?;
-                        self.push_word_to_words()?;
-                        Delimiter
-                    }
-                    Some(b'c') => {
-                        self.push_word_to_words()?;
-                        break;
-                    }
-                    Some(b'$') | Some(BACKSLASH) | Some(SINGLE_QUOTES) | Some(DOUBLE_QUOTES) => {
-                        self.take_one()?;
-                        Unquoted
-                    }
-                    Some(c) if self.check_and_replace_ascii_escape_code(c)? => Unquoted,
-                    Some(c) => return Err(self.make_invalid_sequence_backslash_xin_minus_s(c)),
-                },
-                SingleQuoted => match c {
-                    None => {
-                        return Err(ParseError::MissingClosingQuote {
-                            pos: self.get_parser().get_look_at_pos(),
-                            c: '\'',
-                        })
-                    }
-                    Some(SINGLE_QUOTES) => {
-                        self.skip_one()?;
-                        Unquoted
-                    }
-                    Some(BACKSLASH) => {
-                        self.skip_one()?;
-                        SingleQuotedBackslash
-                    }
-                    Some(_) => {
-                        self.take_one()?;
-                        SingleQuoted
-                    }
-                },
-                SingleQuotedBackslash => match c {
-                    None => {
-                        return Err(ParseError::MissingClosingQuote {
-                            pos: self.get_parser().get_look_at_pos(),
-                            c: '\'',
-                        })
-                    }
-                    Some(b'\n') => {
-                        self.skip_one()?;
-                        SingleQuoted
-                    }
-                    Some(SINGLE_QUOTES) | Some(BACKSLASH) => {
-                        self.take_one()?;
-                        SingleQuoted
-                    }
-                    Some(c) if REPLACEMENTS.iter().any(|&x| x.0 == c) => {
-                        // See GNU test-suite e11: In single quotes, \t remains as it is.
-                        // Comparing with GNU behavior: \a is not accepted and issues an error.
-                        // So apparently only known sequences are allowed, even though they are not expanded.... bug of GNU?
-                        self.push_ascii_char_to_word(BACKSLASH)?;
-                        self.take_one()?;
-                        SingleQuoted
-                    }
-                    Some(c) => return Err(self.make_invalid_sequence_backslash_xin_minus_s(c)),
-                },
-                DoubleQuoted => match c {
-                    None => {
-                        return Err(ParseError::MissingClosingQuote {
-                            pos: self.get_parser().get_look_at_pos(),
-                            c: '"',
-                        })
-                    }
-                    Some(b'$') => {
-                        self.substitute_variable()?;
-                        self.state
-                    }
-                    Some(DOUBLE_QUOTES) => {
-                        self.skip_one()?;
-                        Unquoted
-                    }
-                    Some(BACKSLASH) => {
-                        self.skip_one()?;
-                        DoubleQuotedBackslash
-                    }
-                    Some(_) => {
-                        self.take_one()?;
-                        DoubleQuoted
-                    }
-                },
-                DoubleQuotedBackslash => match c {
-                    None => {
-                        return Err(ParseError::MissingClosingQuote {
-                            pos: self.get_parser().get_look_at_pos(),
-                            c: '"',
-                        })
-                    }
-                    Some(b'\n') => {
-                        self.skip_one()?;
-                        DoubleQuoted
-                    }
-                    Some(DOUBLE_QUOTES) | Some(b'$') | Some(BACKSLASH) => {
-                        self.take_one()?;
-                        DoubleQuoted
-                    }
-                    Some(b'c') => {
-                        return Err(ParseError::BackslashCNotAllowedInDoubleQuotes {
-                            pos: self.get_parser().get_look_at_pos(),
-                        })
-                    }
-                    Some(c) if self.check_and_replace_ascii_escape_code(c)? => DoubleQuoted,
-                    Some(c) => return Err(self.make_invalid_sequence_backslash_xin_minus_s(c)),
-                },
-                Comment => match c {
-                    None => break,
-                    Some(b'\n') => {
-                        self.skip_one()?;
-                        Delimiter
-                    }
-                    Some(_) => {
-                        self.get_parser_mut().skip_until_ascii_char_or_end(b'\n')?;
-                        Comment
-                    }
-                },
-            };
-
-            if c.is_none() {
-                break;
+            match self.split_delimiter() {
+                Err(ParseError::ContinueWithDelimiter) => {}
+                Err(ParseError::ReachedEnd) => return Ok(()),
+                result => return result,
             }
         }
+    }
 
+    fn split_delimiter(&mut self) -> Result<(), ParseError> {
+        loop {
+            match self.get_current_char() {
+                None => return Ok(()),
+                Some(SINGLE_QUOTES) => {
+                    // don't consume char!
+                    self.split_unquoted()?;
+                }
+                Some(DOUBLE_QUOTES) => {
+                    // don't consume char!
+                    self.split_unquoted()?;
+                }
+                Some(BACKSLASH) => {
+                    self.skip_one()?;
+                    self.split_delimiter_backslash()?;
+                }
+                Some(c) if ASCII_WHITESPACE_CHARS.contains(&c) => {
+                    self.skip_one()?;
+                }
+                Some(b'#') => {
+                    self.skip_one()?;
+                    self.split_comment()?;
+                }
+                Some(b'$') => {
+                    // don't consume char!
+                    self.split_unquoted()?;
+                }
+                Some(_) => {
+                    // don't consume char!
+                    self.split_unquoted()?;
+                }
+            }
+        }
+    }
+
+    fn split_delimiter_backslash(&mut self) -> Result<(), ParseError> {
+        match self.get_current_char() {
+            None => {
+                return Err(ParseError::InvalidBackslashAtEndOfStringInMinusS {
+                    pos: self.get_parser().get_look_at_pos(),
+                    quoting: "Delimiter".into(),
+                });
+            }
+            Some(b'_') | Some(b'\n') => {
+                self.skip_one()?;
+                return Ok(());
+            }
+            Some(b'$') | Some(BACKSLASH) | Some(b'#') | Some(SINGLE_QUOTES)
+            | Some(DOUBLE_QUOTES) => {
+                self.take_one()?;
+                return self.split_unquoted();
+            }
+            Some(b'c') => return Err(ParseError::ReachedEnd),
+            Some(c) if self.check_and_replace_ascii_escape_code(c)? => return self.split_unquoted(),
+            Some(c) => return Err(self.make_invalid_sequence_backslash_xin_minus_s(c)),
+        }
+    }
+
+    fn split_unquoted(&mut self) -> Result<(), ParseError> {
+        loop {
+            match self.get_current_char() {
+                None => {
+                    self.push_word_to_words()?;
+                    return Err(ParseError::ReachedEnd);
+                }
+                Some(b'$') => {
+                    self.substitute_variable()?;
+                }
+                Some(SINGLE_QUOTES) => {
+                    self.skip_one()?;
+                    self.split_single_quoted()?;
+                }
+                Some(DOUBLE_QUOTES) => {
+                    self.skip_one()?;
+                    self.split_double_quoted()?;
+                }
+                Some(BACKSLASH) => {
+                    self.skip_one()?;
+                    self.split_unquoted_backslash()?;
+                }
+                Some(c) if ASCII_WHITESPACE_CHARS.contains(&c) => {
+                    self.push_word_to_words()?;
+                    self.skip_one()?;
+                    return Ok(());
+                }
+                Some(_) => {
+                    self.take_one()?;
+                }
+            }
+        }
+    }
+
+    fn split_unquoted_backslash(&mut self) -> Result<(), ParseError> {
+        match self.get_current_char() {
+            None => {
+                return Err(ParseError::InvalidBackslashAtEndOfStringInMinusS {
+                    pos: self.get_parser().get_look_at_pos(),
+                    quoting: "Unquoted".into(),
+                })
+            }
+            Some(b'\n') => {
+                self.skip_one()?;
+                return Ok(());
+            }
+            Some(b'_') => {
+                self.skip_one()?;
+                self.push_word_to_words()?;
+                return Err(ParseError::ContinueWithDelimiter);
+            }
+            Some(b'c') => {
+                self.push_word_to_words()?;
+                return Err(ParseError::ReachedEnd);
+            }
+            Some(b'$') | Some(BACKSLASH) | Some(SINGLE_QUOTES) | Some(DOUBLE_QUOTES) => {
+                self.take_one()?;
+                return Ok(());
+            }
+            Some(c) if self.check_and_replace_ascii_escape_code(c)? => return Ok(()),
+            Some(c) => return Err(self.make_invalid_sequence_backslash_xin_minus_s(c)),
+        }
+    }
+
+    fn split_single_quoted(&mut self) -> Result<(), ParseError> {
+        loop {
+            match self.get_current_char() {
+                None => {
+                    return Err(ParseError::MissingClosingQuote {
+                        pos: self.get_parser().get_look_at_pos(),
+                        c: '\'',
+                    })
+                }
+                Some(SINGLE_QUOTES) => {
+                    self.skip_one()?;
+                    return Ok(());
+                }
+                Some(BACKSLASH) => {
+                    self.skip_one()?;
+                    self.split_single_quoted_backslash()?;
+                }
+                Some(_) => {
+                    self.take_one()?;
+                }
+            }
+        }
+    }
+
+    fn split_single_quoted_backslash(&mut self) -> Result<(), ParseError> {
+        match self.get_current_char() {
+            None => {
+                return Err(ParseError::MissingClosingQuote {
+                    pos: self.get_parser().get_look_at_pos(),
+                    c: '\'',
+                })
+            }
+            Some(b'\n') => {
+                self.skip_one()?;
+                return Ok(());
+            }
+            Some(SINGLE_QUOTES) | Some(BACKSLASH) => {
+                self.take_one()?;
+                return Ok(());
+            }
+            Some(c) if REPLACEMENTS.iter().any(|&x| x.0 == c) => {
+                // See GNU test-suite e11: In single quotes, \t remains as it is.
+                // Comparing with GNU behavior: \a is not accepted and issues an error.
+                // So apparently only known sequences are allowed, even though they are not expanded.... bug of GNU?
+                self.push_ascii_char_to_word(BACKSLASH)?;
+                self.take_one()?;
+                return Ok(());
+            }
+            Some(c) => return Err(self.make_invalid_sequence_backslash_xin_minus_s(c)),
+        }
+    }
+
+    fn split_double_quoted(&mut self) -> Result<(), ParseError> {
+        loop {
+            match self.get_current_char() {
+                None => {
+                    return Err(ParseError::MissingClosingQuote {
+                        pos: self.get_parser().get_look_at_pos(),
+                        c: '"',
+                    })
+                }
+                Some(b'$') => {
+                    self.substitute_variable()?;
+                }
+                Some(DOUBLE_QUOTES) => {
+                    self.skip_one()?;
+                    return Ok(());
+                }
+                Some(BACKSLASH) => {
+                    self.skip_one()?;
+                    self.split_double_quoted_backslash()?;
+                }
+                Some(_) => {
+                    self.take_one()?;
+                }
+            }
+        }
+    }
+
+    fn split_double_quoted_backslash(&mut self) -> Result<(), ParseError> {
+        match self.get_current_char() {
+            None => {
+                return Err(ParseError::MissingClosingQuote {
+                    pos: self.get_parser().get_look_at_pos(),
+                    c: '"',
+                })
+            }
+            Some(b'\n') => {
+                self.skip_one()?;
+                return Ok(());
+            }
+            Some(DOUBLE_QUOTES) | Some(b'$') | Some(BACKSLASH) => {
+                self.take_one()?;
+                return Ok(());
+            }
+            Some(b'c') => {
+                return Err(ParseError::BackslashCNotAllowedInDoubleQuotes {
+                    pos: self.get_parser().get_look_at_pos(),
+                })
+            }
+            Some(c) if self.check_and_replace_ascii_escape_code(c)? => return Ok(()),
+            Some(c) => return Err(self.make_invalid_sequence_backslash_xin_minus_s(c)),
+        }
+    }
+
+    fn split_comment(&mut self) -> Result<(), ParseError> {
+        loop {
+            match self.get_current_char() {
+                None => return Err(ParseError::ReachedEnd),
+                Some(b'\n') => {
+                    self.skip_one()?;
+                    return Ok(());
+                }
+                Some(_) => {
+                    self.get_parser_mut().skip_until_ascii_char_or_end(b'\n')?;
+                }
+            }
+        }
+    }
+
+    pub fn split(&mut self) -> Result<Vec<OsString>, ParseError> {
+        self.split_root()?;
         Ok(mem::take(&mut self.words))
     }
 }
