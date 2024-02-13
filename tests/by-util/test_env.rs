@@ -365,6 +365,22 @@ fn test_split_string_into_args_debug_output_whitespace_handling() {
 }
 
 #[test]
+fn test_gnu_e20() {
+    let scene = TestScenario::new(util_name!());
+
+    let env_bin = String::from(crate::common::util::TESTS_BINARY) + " " + util_name!();
+
+    let (input, output) =
+        ([String::from("-i"), String::from(r#"-SA="B\_C=D" "#) + env_bin.as_str() + ""], "A=B C=D\n");
+
+    let out = scene
+        .ucmd()
+        .args(&input)
+        .succeeds();
+    assert_eq!(out.stdout_str(), output);
+}
+
+#[test]
 fn test_split_string_misc() {
     use ::env::parse_args_from_str;
 

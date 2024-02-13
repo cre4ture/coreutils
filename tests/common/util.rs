@@ -391,7 +391,8 @@ impl CmdResult {
     pub fn success(&self) -> &Self {
         assert!(
             self.succeeded(),
-            "Command was expected to succeed.\nstdout = {}\n stderr = {}",
+            "Command was expected to succeed. code: {}\nstdout = {}\n stderr = {}",
+            self.code(),
             self.stdout_str(),
             self.stderr_str()
         );

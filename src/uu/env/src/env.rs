@@ -9,13 +9,14 @@ pub mod parse_error;
 pub mod raw_string_parser;
 pub mod split_iterator;
 
+use clap::builder::ValueParser;
 use clap::{crate_name, crate_version, Arg, ArgAction, Command};
 use ini::Ini;
 #[cfg(unix)]
 use nix::sys::signal::{raise, sigaction, SaFlags, SigAction, SigHandler, SigSet, Signal};
 use std::borrow::Cow;
 use std::env;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::{self, Write};
 use std::iter::Iterator;
 use std::ops::Deref;
@@ -28,6 +29,7 @@ use uucore::display::Quotable;
 use uucore::error::{ExitCode, UError, UResult, USimpleError, UUsageError};
 use uucore::line_ending::LineEnding;
 use uucore::{format_usage, help_about, help_section, help_usage, show_warning};
+use osstrtools::{Bytes, OsStrTools};
 
 const ABOUT: &str = help_about!("env.md");
 const USAGE: &str = help_usage!("env.md");
@@ -38,11 +40,11 @@ const ERROR_MSG_S_SHEBANG: &str = "use -[v]S to pass options in shebang lines";
 struct Options<'a> {
     ignore_env: bool,
     line_ending: LineEnding,
-    running_directory: Option<&'a str>,
-    files: Vec<&'a str>,
-    unsets: Vec<&'a str>,
-    sets: Vec<(&'a str, &'a str)>,
-    program: Vec<&'a str>,
+    running_directory: Option<&'a OsStr>,
+    files: Vec<&'a OsStr>,
+    unsets: Vec<&'a OsStr>,
+    sets: Vec<(&'a OsStr, &'a OsStr)>,
+    program: Vec<&'a OsStr>,
 }
 
 // print name=value env pairs on screen
@@ -55,13 +57,16 @@ fn print_env(line_ending: LineEnding) {
     }
 }
 
-fn parse_name_value_opt<'a>(opts: &mut Options<'a>, opt: &'a str) -> UResult<bool> {
+fn parse_name_value_opt<'a>(opts: &mut Options<'a>, opt: &'a OsStr) -> UResult<bool> {
     // is it a NAME=VALUE like opt ?
-    if let Some(idx) = opt.find('=') {
+    let needle = OsString::from("=");
+    let idx_o = opt.position(&needle);
+    if let Some(idx) = idx_o {
         // yes, so push name, value pair
-        let (name, value) = opt.split_at(idx);
-        opts.sets.push((name, &value['='.len_utf8()..]));
-
+        let (name, value) = opt.as_byte_slice().split_at(idx);
+        let name_str = OsStr::from_bytes(name);
+        let value_str = OsStr::from_bytes(&value[needle.as_byte_slice().len()..]);
+        opts.sets.push((name_str, value_str));
         Ok(false)
     } else {
         // no, it's a program-like opt
@@ -69,7 +74,7 @@ fn parse_name_value_opt<'a>(opts: &mut Options<'a>, opt: &'a str) -> UResult<boo
     }
 }
 
-fn parse_program_opt<'a>(opts: &mut Options<'a>, opt: &'a str) -> UResult<()> {
+fn parse_program_opt<'a>(opts: &mut Options<'a>, opt: &'a OsStr) -> UResult<()> {
     if opts.line_ending == LineEnding::Nul {
         Err(UUsageError::new(
             125,
@@ -107,7 +112,7 @@ fn load_config_file(opts: &mut Options) -> UResult<()> {
     Ok(())
 }
 
-fn build_command<'a, 'b>(args: &'a [&'b str]) -> (Cow<'b, str>, &'a [&'b str]) {
+fn build_command<'a, 'b>(args: &'a [&'b OsStr]) -> (Cow<'b, OsStr>, &'a [&'b OsStr]) {
     let progname = Cow::from(args[0]);
     (progname, &args[1..])
 }
@@ -133,6 +138,7 @@ pub fn uu_app() -> Command {
                 .long("chdir")
                 .number_of_values(1)
                 .value_name("DIR")
+                .value_parser(ValueParser::os_string())
                 .value_hint(clap::ValueHint::DirPath)
                 .help("change working directory to DIR"),
         )
@@ -152,6 +158,7 @@ pub fn uu_app() -> Command {
                 .long("file")
                 .value_name("PATH")
                 .value_hint(clap::ValueHint::FilePath)
+                .value_parser(ValueParser::os_string())
                 .action(ArgAction::Append)
                 .help(
                     "read and set variables from a \".env\"-style configuration file \
@@ -164,6 +171,7 @@ pub fn uu_app() -> Command {
                 .long("unset")
                 .value_name("NAME")
                 .action(ArgAction::Append)
+                .value_parser(ValueParser::os_string())
                 .help("remove variable from the environment"),
         )
         .arg(
@@ -179,9 +187,14 @@ pub fn uu_app() -> Command {
                 .long("split-string")
                 .value_name("S")
                 .action(ArgAction::Set)
+                .value_parser(ValueParser::os_string())
                 .help("process and split S into separate arguments; used to pass multiple arguments on shebang lines")
         )
-        .arg(Arg::new("vars").action(ArgAction::Append))
+        .arg(
+            Arg::new("vars")
+                .action(ArgAction::Append)
+                .value_parser(ValueParser::os_string())
+        )
 }
 
 pub fn parse_args_from_str(text: &str) -> UResult<Vec<String>> {
@@ -248,8 +261,8 @@ struct EnvAppData {
 }
 
 impl EnvAppData {
-    fn make_error_no_such_file_or_dir(&self, prog: &str) -> Box<dyn UError> {
-        uucore::show_error!("'{}': No such file or directory", prog);
+    fn make_error_no_such_file_or_dir(&self, prog: &OsStr) -> Box<dyn UError> {
+        uucore::show_error!("{}: No such file or directory", prog.quote());
         if !self.had_string_argument {
             uucore::show_error!("{}", ERROR_MSG_S_SHEBANG);
         }
@@ -292,7 +305,7 @@ impl EnvAppData {
 fn debug_print_args(args: &[OsString]) {
     eprintln!("input args:");
     for (i, arg) in args.iter().enumerate() {
-        eprintln!("arg[{}]: {}", i, arg.to_string_lossy());
+        eprintln!("arg[{}]: {}", i, arg.quote());
     }
 }
 
@@ -330,13 +343,13 @@ impl EnvAppData {
 
         let ignore_env = matches.get_flag("ignore-environment");
         let line_ending = LineEnding::from_zero_flag(matches.get_flag("null"));
-        let running_directory = matches.get_one::<String>("chdir").map(|s| s.as_str());
-        let files = match matches.get_many::<String>("file") {
-            Some(v) => v.map(|s| s.as_str()).collect(),
+        let running_directory = matches.get_one::<OsString>("chdir").map(|s| s.as_os_str());
+        let files = match matches.get_many::<OsString>("file") {
+            Some(v) => v.map(|s| s.as_os_str()).collect(),
             None => Vec::with_capacity(0),
         };
-        let unsets = match matches.get_many::<String>("unset") {
-            Some(v) => v.map(|s| s.as_str()).collect(),
+        let unsets = match matches.get_many::<OsString>("unset") {
+            Some(v) => v.map(|s| s.as_os_str()).collect(),
             None => Vec::with_capacity(0),
         };
 
@@ -357,14 +370,14 @@ impl EnvAppData {
                 Err(error) => {
                     return Err(USimpleError::new(
                         125,
-                        format!("cannot change directory to \"{d}\": {error}"),
+                        format!("cannot change directory to {}: {error}", d.quote()),
                     ));
                 }
             };
         }
 
         let mut begin_prog_opts = false;
-        if let Some(mut iter) = matches.get_many::<String>("vars") {
+        if let Some(mut iter) = matches.get_many::<OsString>("vars") {
             // read NAME=VALUE arguments (and up to a single program argument)
             while !begin_prog_opts {
                 if let Some(opt) = iter.next() {
@@ -407,7 +420,7 @@ impl EnvAppData {
 
         // unset specified env vars
         for name in &opts.unsets {
-            if name.is_empty() || name.contains(0 as char) || name.contains('=') {
+            if name.is_empty() || name.contains(OsString::from("\0")) || name.contains(OsString::from("=")) {
                 return Err(USimpleError::new(
                     125,
                     format!("cannot unset {}: Invalid argument", name.quote()),
@@ -456,9 +469,9 @@ impl EnvAppData {
             let (prog, args) = build_command(&opts.program);
 
             if do_debug_printing {
-                eprintln!("executable: {}", prog);
+                eprintln!("executable: {}", prog.quote());
                 for (i, arg) in args.iter().enumerate() {
-                    eprintln!("arg[{}]: {}", i, arg);
+                    eprintln!("arg[{}]: {}", i, arg.quote());
                 }
             }
 
