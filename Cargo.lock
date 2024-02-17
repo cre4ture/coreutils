@@ -387,7 +387,7 @@ dependencies = [
  "libc",
  "nix",
  "once_cell",
- "osstrtools",
+ "os_str_bytes",
  "phf",
  "phf_codegen",
  "pretty_assertions",
@@ -1122,15 +1122,6 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f56a2d0bc861f9165be4eb3442afd3c236d8a98afd426f65d92324ae1091a484"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
@@ -1452,12 +1443,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "osstrtools"
-version = "0.2.2"
+name = "os_str_bytes"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f328dada9eee3ab878d2d367d8bf323c12b20f881c5566ae6e6708b3862dcaba"
+checksum = "7ac44c994af577c799b1b4bd80dc214701e349873ad894d6cdf96f4f7526e0b9"
 dependencies = [
- "itertools 0.8.2",
+ "memchr",
 ]
 
 [[package]]
@@ -2450,7 +2441,7 @@ dependencies = [
  "clap",
  "memchr",
  "nix",
- "osstrtools",
+ "os_str_bytes",
  "rust-ini",
  "uucore",
 ]
@@ -2785,7 +2776,7 @@ version = "0.0.24"
 dependencies = [
  "chrono",
  "clap",
- "itertools 0.12.1",
+ "itertools",
  "quick-error",
  "regex",
  "uucore",
@@ -2921,7 +2912,7 @@ dependencies = [
  "compare",
  "ctrlc",
  "fnv",
- "itertools 0.12.1",
+ "itertools",
  "memchr",
  "rand",
  "rayon",
@@ -3201,7 +3192,7 @@ name = "uu_yes"
 version = "0.0.24"
 dependencies = [
  "clap",
- "itertools 0.12.1",
+ "itertools",
  "nix",
  "uucore",
 ]
@@ -3220,7 +3211,7 @@ dependencies = [
  "dunce",
  "glob",
  "hex",
- "itertools 0.12.1",
+ "itertools",
  "libc",
  "md-5",
  "memchr",

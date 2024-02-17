@@ -24,7 +24,6 @@ use std::mem;
 use std::ops::Range;
 
 use crate::parse_error::ParseError;
-use crate::raw_string_parser::is_ascii;
 use crate::raw_string_parser::RawStringExpander;
 use crate::raw_string_parser::RawStringParser;
 
@@ -50,24 +49,23 @@ pub enum State {
     Comment,
 }
 
-const BACKSLASH: u8 = b'\\';
-const DOUBLE_QUOTES: u8 = b'\"';
-const SINGLE_QUOTES: u8 = b'\'';
-const INVALID_UTF8_MARKER: char = '\u{FFFD}';
+const BACKSLASH: char = '\\';
+const DOUBLE_QUOTES: char = '\"';
+const SINGLE_QUOTES: char = '\'';
 
-const REPLACEMENTS: [(u8, u8); 9] = [
-    (b'r', b'\r'),
-    (b'n', b'\n'),
-    (b't', b'\t'),
-    (b'f', b'\x0C'),
-    (b'v', b'\x0B'),
-    (b'_', b' '),
-    (b'#', b'#'),
-    (b'$', b'$'),
-    (b'"', b'"'),
+const REPLACEMENTS: [(char, char); 9] = [
+    ('r', '\r'),
+    ('n', '\n'),
+    ('t', '\t'),
+    ('f', '\x0C'),
+    ('v', '\x0B'),
+    ('_', ' '),
+    ('#', '#'),
+    ('$', '$'),
+    ('"', '"'),
 ];
 
-const ASCII_WHITESPACE_CHARS: &[u8] = " \t\r\n\x0B\x0C".as_bytes();
+const ASCII_WHITESPACE_CHARS: [char; 6] = [' ', '\t', '\r', '\n', '\x0B', '\x0C'];
 
 pub struct SplitIterator<'a> {
     pub raw_parser: RawStringExpander<'a>,
@@ -75,26 +73,28 @@ pub struct SplitIterator<'a> {
 }
 
 impl<'a> SplitIterator<'a> {
-    pub fn new(s: &'a OsStr) -> Self {
+
+    pub fn new<S: AsRef<OsStr> + ?Sized>(s: &'a S) -> Self {
         Self {
-            raw_parser: RawStringExpander::new(s),
+            raw_parser: RawStringExpander::new(s.as_ref()),
             words: Vec::<OsString>::new(),
         }
     }
 
     fn skip_one(&mut self) -> Result<(), ParseError> {
-        Ok(self.raw_parser.get_parser_mut().skip_one()?)
+        self.raw_parser.get_parser_mut().skip_till_next_ascii()?;
+        Ok(())
     }
 
     fn take_one(&mut self) -> Result<(), ParseError> {
         Ok(self.raw_parser.take_one()?)
     }
 
-    fn get_current_char(&self) -> Option<u8> {
+    fn get_current_char(&self) -> Option<char> {
         self.raw_parser.get_parser().look_at().ok()
     }
 
-    fn push_ascii_char_to_word(&mut self, c: u8) -> Result<(), ParseError> {
+    fn push_ascii_char_to_word(&mut self, c: char) -> Result<(), ParseError> {
         Ok(self.raw_parser.put_one_ascii(c)?)
     }
 
@@ -135,10 +135,10 @@ impl<'a> SplitIterator<'a> {
                     return Err(ParseError::ParsingOfVariableNameFailed {
                         pos: self.get_parser().get_look_at_pos(), msg: "Missing closing brace".into() })
                 },
-                Some(c) if !c.is_ascii() || c.is_ascii_alphanumeric() || c == b'_' => {
+                Some(c) if !c.is_ascii() || c.is_ascii_alphanumeric() || c == '_' => {
                     self.skip_one()?;
                 }
-                Some(b':') => {
+                Some(':') => {
                     varname_end = self.get_parser().get_look_at_pos();
                     loop {
                         match self.get_current_char() {
@@ -147,7 +147,7 @@ impl<'a> SplitIterator<'a> {
                                     pos: self.get_parser().get_look_at_pos(),
                                     msg: "Missing closing brace after default value".into() })
                             },
-                            Some(b'}') => {
+                            Some('}') => {
                                 default_end = Some(self.get_parser().get_look_at_pos());
                                 self.skip_one()?;
                                 break
@@ -159,7 +159,7 @@ impl<'a> SplitIterator<'a> {
                     }
                     break;
                 },
-                Some(b'}') => {
+                Some('}') => {
                     varname_end = self.get_parser().get_look_at_pos();
                     default_end = None;
                     self.skip_one()?;
@@ -199,8 +199,8 @@ impl<'a> SplitIterator<'a> {
         loop {
             match self.get_current_char() {
                 None => break,
-                Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {
-                    self.get_parser_mut().skip_one()?;
+                Some(c) if c.is_ascii_alphanumeric() || c == '_' => {
+                    self.skip_one()?;
                 }
                 Some(_) => break,
             };
@@ -222,7 +222,7 @@ impl<'a> SplitIterator<'a> {
     }
 
     fn substitute_variable(&mut self) -> Result<(), ParseError> {
-        self.get_parser_mut().skip_one()?;
+        self.skip_one()?;
 
         let (name, default) = match self.get_current_char() {
             None => {
@@ -231,7 +231,7 @@ impl<'a> SplitIterator<'a> {
                     msg: "missing variable name".into(),
                 })
             }
-            Some(b'{') => {
+            Some('{') => {
                 self.skip_one()?;
                 self.parse_braced_variable_name()?
             }
@@ -252,7 +252,7 @@ impl<'a> SplitIterator<'a> {
         Ok(())
     }
 
-    fn check_and_replace_ascii_escape_code(&mut self, c: u8) -> Result<bool, ParseError> {
+    fn check_and_replace_ascii_escape_code(&mut self, c: char) -> Result<bool, ParseError> {
         if let Some(replace) = REPLACEMENTS.iter().find(|&x| x.0 == c) {
             self.skip_one()?;
             self.push_ascii_char_to_word(replace.1)?;
@@ -262,15 +262,10 @@ impl<'a> SplitIterator<'a> {
         Ok(false)
     }
 
-    fn make_invalid_sequence_backslash_xin_minus_s(&self, c: u8) -> ParseError {
-        let valid_char: char = if is_ascii(c) {
-            c.into()
-        } else {
-            INVALID_UTF8_MARKER
-        };
+    fn make_invalid_sequence_backslash_xin_minus_s(&self, c: char) -> ParseError {
         ParseError::InvalidSequenceBackslashXInMinusS {
             pos: self.raw_parser.get_parser().get_look_at_pos(),
-            c: valid_char,
+            c,
         }
     }
 
@@ -303,11 +298,11 @@ impl<'a> SplitIterator<'a> {
                 Some(c) if ASCII_WHITESPACE_CHARS.contains(&c) => {
                     self.skip_one()?;
                 }
-                Some(b'#') => {
+                Some('#') => {
                     self.skip_one()?;
                     self.split_comment()?;
                 }
-                Some(b'$') => {
+                Some('$') => {
                     // don't consume char!
                     self.split_unquoted()?;
                 }
@@ -325,16 +320,16 @@ impl<'a> SplitIterator<'a> {
                 pos: self.get_parser().get_look_at_pos(),
                 quoting: "Delimiter".into(),
             }),
-            Some(b'_') | Some(b'\n') => {
+            Some('_') | Some('\n') => {
                 self.skip_one()?;
                 Ok(())
             }
-            Some(b'$') | Some(BACKSLASH) | Some(b'#') | Some(SINGLE_QUOTES)
+            Some('$') | Some(BACKSLASH) | Some('#') | Some(SINGLE_QUOTES)
             | Some(DOUBLE_QUOTES) => {
                 self.take_one()?;
                 self.split_unquoted()
             }
-            Some(b'c') => Err(ParseError::ReachedEnd),
+            Some('c') => Err(ParseError::ReachedEnd),
             Some(c) if self.check_and_replace_ascii_escape_code(c)? => self.split_unquoted(),
             Some(c) => Err(self.make_invalid_sequence_backslash_xin_minus_s(c)),
         }
@@ -347,7 +342,7 @@ impl<'a> SplitIterator<'a> {
                     self.push_word_to_words()?;
                     return Err(ParseError::ReachedEnd);
                 }
-                Some(b'$') => {
+                Some('$') => {
                     self.substitute_variable()?;
                 }
                 Some(SINGLE_QUOTES) => {
@@ -380,20 +375,20 @@ impl<'a> SplitIterator<'a> {
                 pos: self.get_parser().get_look_at_pos(),
                 quoting: "Unquoted".into(),
             }),
-            Some(b'\n') => {
+            Some('\n') => {
                 self.skip_one()?;
                 Ok(())
             }
-            Some(b'_') => {
+            Some('_') => {
                 self.skip_one()?;
                 self.push_word_to_words()?;
                 Err(ParseError::ContinueWithDelimiter)
             }
-            Some(b'c') => {
+            Some('c') => {
                 self.push_word_to_words()?;
                 Err(ParseError::ReachedEnd)
             }
-            Some(b'$') | Some(BACKSLASH) | Some(SINGLE_QUOTES) | Some(DOUBLE_QUOTES) => {
+            Some('$') | Some(BACKSLASH) | Some(SINGLE_QUOTES) | Some(DOUBLE_QUOTES) => {
                 self.take_one()?;
                 Ok(())
             }
@@ -432,7 +427,7 @@ impl<'a> SplitIterator<'a> {
                 pos: self.get_parser().get_look_at_pos(),
                 c: '\'',
             }),
-            Some(b'\n') => {
+            Some('\n') => {
                 self.skip_one()?;
                 Ok(())
             }
@@ -461,7 +456,7 @@ impl<'a> SplitIterator<'a> {
                         c: '"',
                     })
                 }
-                Some(b'$') => {
+                Some('$') => {
                     self.substitute_variable()?;
                 }
                 Some(DOUBLE_QUOTES) => {
@@ -485,15 +480,15 @@ impl<'a> SplitIterator<'a> {
                 pos: self.get_parser().get_look_at_pos(),
                 c: '"',
             }),
-            Some(b'\n') => {
+            Some('\n') => {
                 self.skip_one()?;
                 Ok(())
             }
-            Some(DOUBLE_QUOTES) | Some(b'$') | Some(BACKSLASH) => {
+            Some(DOUBLE_QUOTES) | Some('$') | Some(BACKSLASH) => {
                 self.take_one()?;
                 Ok(())
             }
-            Some(b'c') => Err(ParseError::BackslashCNotAllowedInDoubleQuotes {
+            Some('c') => Err(ParseError::BackslashCNotAllowedInDoubleQuotes {
                 pos: self.get_parser().get_look_at_pos(),
             }),
             Some(c) if self.check_and_replace_ascii_escape_code(c)? => Ok(()),
@@ -505,12 +500,12 @@ impl<'a> SplitIterator<'a> {
         loop {
             match self.get_current_char() {
                 None => return Err(ParseError::ReachedEnd),
-                Some(b'\n') => {
+                Some('\n') => {
                     self.skip_one()?;
                     return Ok(());
                 }
                 Some(_) => {
-                    self.get_parser_mut().skip_until_ascii_char_or_end(b'\n')?;
+                    self.get_parser_mut().skip_until_ascii_char_or_end('\n')?;
                 }
             }
         }

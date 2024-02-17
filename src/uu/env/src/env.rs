@@ -14,15 +14,14 @@ use clap::{crate_name, crate_version, Arg, ArgAction, Command};
 use ini::Ini;
 #[cfg(unix)]
 use nix::sys::signal::{raise, sigaction, SaFlags, SigAction, SigHandler, SigSet, Signal};
-use osstrtools::{Bytes, OsStrTools};
+use os_str_bytes::OsStrBytesExt;
 use std::borrow::Cow;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Write};
 use std::iter::Iterator;
 use std::ops::Deref;
-#[cfg(unix)]
-use std::os::unix::ffi::OsStrExt;
+
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 use std::process::{self};
@@ -59,14 +58,10 @@ fn print_env(line_ending: LineEnding) {
 
 fn parse_name_value_opt<'a>(opts: &mut Options<'a>, opt: &'a OsStr) -> UResult<bool> {
     // is it a NAME=VALUE like opt ?
-    let needle = OsString::from("=");
-    let idx_o = opt.position(&needle);
-    if let Some(idx) = idx_o {
+    let split_o = opt.split_once("=");
+    if let Some((name, value)) = split_o {
         // yes, so push name, value pair
-        let (name, value) = opt.as_byte_slice().split_at(idx);
-        let name_str = OsStr::from_bytes(name);
-        let value_str = OsStr::from_bytes(&value[needle.as_byte_slice().len()..]);
-        opts.sets.push((name_str, value_str));
+        opts.sets.push((name, value));
         Ok(false)
     } else {
         // no, it's a program-like opt
@@ -224,22 +219,18 @@ fn check_and_handle_string_args(
     all_args: &mut Vec<std::ffi::OsString>,
     do_debug_print_args: Option<&Vec<OsString>>,
 ) -> UResult<bool> {
-    let arg_bytes = arg.as_byte_slice();
-    if !arg_bytes.starts_with(OsString::from(prefix_to_test).as_byte_slice()) {
-        return Ok(false);
+    if let Some(remaining_arg) = arg.strip_prefix(prefix_to_test) {
+        if let Some(input_args) = do_debug_print_args {
+            debug_print_args(input_args); // do it here, such that its also printed when we get an error/panic during parsing
+        }
+
+        let arg_strings = parse_args_from_str(remaining_arg)?;
+        all_args.extend(arg_strings);
+
+        Ok(true)
+    } else {
+        Ok(false)
     }
-
-    if let Some(input_args) = do_debug_print_args {
-        debug_print_args(input_args); // do it here, such that its also printed when we get an error/panic during parsing
-    }
-
-    let remaining_bytes = arg_bytes.get(prefix_to_test.len()..).unwrap();
-    let string = OsStr::from_bytes(remaining_bytes);
-
-    let arg_strings = parse_args_from_str(string)?;
-    all_args.extend(arg_strings);
-
-    Ok(true)
 }
 
 #[derive(Default)]
@@ -409,8 +400,8 @@ impl EnvAppData {
         // unset specified env vars
         for name in &opts.unsets {
             if name.is_empty()
-                || name.contains(OsString::from("\0"))
-                || name.contains(OsString::from("="))
+                || name.contains("\0")
+                || name.contains("=")
             {
                 return Err(USimpleError::new(
                     125,

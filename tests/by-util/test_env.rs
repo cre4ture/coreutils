@@ -912,22 +912,18 @@ mod tests_split_iterator {
 }
 
 mod test_raw_string_parser {
-    use std::{
-        ffi::{OsStr, OsString},
-        os::unix::ffi::OsStrExt,
-    };
+    use std::ffi::{OsStr, OsString};
 
     use env::raw_string_parser;
-    use osstrtools::Bytes;
 
     #[test]
     fn test_ascii_only_take_one_look_at_correct_data_and_end_behavior() {
-        let input = OsString::from("hello");
+        let input = "hello";
         let mut uut = env::raw_string_parser::RawStringExpander::new(&input);
-        for i in 0..input.len() {
+        for c in input.chars() {
             assert_eq!(
-                input.as_byte_slice().get(i).unwrap(),
-                &uut.get_parser().look_at().unwrap()
+                c,
+                uut.get_parser().look_at().unwrap()
             );
             uut.take_one().unwrap();
         }
@@ -948,15 +944,15 @@ mod test_raw_string_parser {
     #[test]
     fn test_multi_byte_codes_take_one_look_at_correct_data_and_end_behavior() {
         let input = OsString::from("🦉🦉🦉x🦉🦉x🦉x🦉🦉🦉🦉");
-        let first_byte_of_owl = *"🦉".as_bytes().first().unwrap();
+        let owl: char = '🦉';
         let mut uut = env::raw_string_parser::RawStringExpander::new(&input);
         for _i in 0..3 {
-            assert_eq!(uut.get_parser().look_at().unwrap(), first_byte_of_owl);
+            assert_eq!(uut.get_parser().look_at().unwrap(), owl);
             uut.take_one().unwrap();
-            assert_eq!(uut.get_parser().look_at().unwrap(), b'x');
+            assert_eq!(uut.get_parser().look_at().unwrap(), 'x');
             uut.take_one().unwrap();
         }
-        assert_eq!(uut.get_parser().look_at().unwrap(), first_byte_of_owl);
+        assert_eq!(uut.get_parser().look_at().unwrap(), owl);
         uut.take_one().unwrap();
         assert_eq!(
             uut.get_parser().look_at(),
@@ -975,21 +971,21 @@ mod test_raw_string_parser {
     #[test]
     fn test_multi_byte_codes_put_one_ascii_start_middle_end_try_invalid_ascii() {
         let input = OsString::from("🦉🦉🦉x🦉🦉x🦉x🦉🦉🦉🦉");
-        let first_byte_of_owl = *"🦉".as_bytes().first().unwrap();
+        let owl: char = '🦉';
         let mut uut = env::raw_string_parser::RawStringExpander::new(&input);
-        uut.put_one_ascii(b'a').unwrap();
+        uut.put_one_ascii('a').unwrap();
         for _i in 0..3 {
-            assert_eq!(uut.get_parser().look_at().unwrap(), first_byte_of_owl);
+            assert_eq!(uut.get_parser().look_at().unwrap(), owl);
             uut.take_one().unwrap();
-            uut.put_one_ascii(b'a').unwrap();
-            assert_eq!(uut.get_parser().look_at().unwrap(), b'x');
+            uut.put_one_ascii('a').unwrap();
+            assert_eq!(uut.get_parser().look_at().unwrap(), 'x');
             uut.take_one().unwrap();
-            uut.put_one_ascii(b'a').unwrap();
+            uut.put_one_ascii('a').unwrap();
         }
-        assert_eq!(uut.get_parser().look_at().unwrap(), first_byte_of_owl);
+        assert_eq!(uut.get_parser().look_at().unwrap(), owl);
         uut.take_one().unwrap();
-        uut.put_one_ascii(first_byte_of_owl).unwrap_err();
-        uut.put_one_ascii(b'a').unwrap();
+        uut.put_one_ascii(owl).unwrap_err();
+        uut.put_one_ascii('a').unwrap();
         assert_eq!(
             uut.get_parser().look_at(),
             Err(raw_string_parser::Error {
@@ -998,7 +994,7 @@ mod test_raw_string_parser {
             })
         );
         uut.take_one().unwrap_err();
-        uut.put_one_ascii(b'a').unwrap();
+        uut.put_one_ascii('a').unwrap();
         uut.take_one().unwrap_err();
         assert_eq!(
             uut.take_collected_output().unwrap(),
@@ -1024,12 +1020,12 @@ mod test_raw_string_parser {
         uut.skip_one().unwrap(); // skip x
         assert_eq!(uut.get_look_at_pos(), 22);
         uut.get_parser_mut()
-            .skip_until_ascii_char_or_end(b'x')
+            .skip_until_ascii_char_or_end('x')
             .unwrap(); // skip 🦉
         assert_eq!(uut.get_look_at_pos(), 26);
         uut.take_one().unwrap(); // take x
         uut.get_parser_mut()
-            .skip_until_ascii_char_or_end(b'x')
+            .skip_until_ascii_char_or_end('x')
             .unwrap(); // skip 🦉🦉🦉🦉 till end
         assert_eq!(uut.get_look_at_pos(), 43);
 
@@ -1094,7 +1090,7 @@ mod test_raw_string_parser {
         uut.put_string_utf8("oo🦔").unwrap();
         uut.take_one().unwrap(); // take x
         uut.get_parser_mut()
-            .skip_until_ascii_char_or_end(b'\n')
+            .skip_until_ascii_char_or_end('\n')
             .unwrap(); // skips till end
         uut.put_string_utf8("o🦔o").unwrap();
 
@@ -1104,17 +1100,17 @@ mod test_raw_string_parser {
 
     #[test]
     fn test_multi_byte_codes_look_at_remaining_start_middle_end() {
-        let input = OsString::from("🦉🦉🦉x🦉🦉x🦉x🦉🦉🦉🦉");
+        let input = "🦉🦉🦉x🦉🦉x🦉x🦉🦉🦉🦉";
         let mut uut = env::raw_string_parser::RawStringExpander::new(&input);
 
         assert_eq!(uut.get_parser().look_at_remaining().unwrap(), input);
         uut.take_one().unwrap(); // takes 🦉🦉🦉
         assert_eq!(
             uut.get_parser().look_at_remaining().unwrap(),
-            OsStr::from_bytes(input.as_byte_slice().get(12..).unwrap())
+            OsStr::new(&input[12..])
         );
         uut.get_parser_mut()
-            .skip_until_ascii_char_or_end(b'\n')
+            .skip_until_ascii_char_or_end('\n')
             .unwrap(); // skips till end
         assert_eq!(uut.get_parser().look_at_remaining().unwrap(), "");
 
