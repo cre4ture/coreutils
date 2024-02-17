@@ -488,10 +488,14 @@ run_with_retry() {
 
     for i in $(seq 1 $tries); do
         echo "Try #$i of $tries: run $*"
-        "$@" && return 0
+        "$@" && echo "Done in try#$i" && return 0
     done
 
-    return $?
+    exit_code=$?
+
+    echo "Still failing after $tries. Code: $exit_code"
+
+    return $exit_code
 }
 
 snapshot() {
@@ -513,7 +517,7 @@ snapshot() {
     echo "Installing cargo-nextest"
     # We need to install nextest via cargo currently, since there is no pre-built binary for android x86
     command="export CARGO_TERM_COLOR=always && cargo install cargo-nextest"
-    run_with_retry 5 run_command_via_ssh "$command"
+    run_with_retry 3 run_command_via_ssh "$command"
     return_code=$?
 
     echo "Info about cargo and rust - via SSH Script"
@@ -575,7 +579,7 @@ build() {
     command="export CARGO_TERM_COLOR=always;
              export CARGO_INCREMENTAL=0; \
              cd ~/coreutils && cargo build --features feat_os_unix_android"
-    run_command_via_ssh "$command" || return
+    run_with_retry 3 run_command_via_ssh "$command" || return
 
     echo "Finished build"
 }

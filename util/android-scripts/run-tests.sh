@@ -17,10 +17,14 @@ run_with_retry() {
 
     for i in $(seq 1 $tries); do
         echo "Try #$i of $tries: run $*"
-        "$@" && return 0
+        "$@" && echo "Done in try#$i" && return 0
     done
 
-    return $?
+    exit_code=$?
+
+    echo "Still failing after $tries. Code: $exit_code"
+
+    return $exit_code
 }
 
 run_tests_in_subprocess() (
@@ -48,7 +52,7 @@ run_tests_in_subprocess() (
 
     # run tests
     cd ~/coreutils && \
-        run_with_retry 5 timeout --preserve-status --verbose -k 1m 10m \
+        run_with_retry 3 timeout --preserve-status --verbose -k 1m 10m \
             cargo nextest run --no-run "${nextest_params[@]}" &&
         timeout --preserve-status --verbose -k 1m 60m \
             cargo nextest run "${nextest_params[@]}"
