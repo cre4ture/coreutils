@@ -482,6 +482,18 @@ generate_and_install_public_key() {
     echo "installed ssh public key on device"
 }
 
+run_with_retry() {
+    tries=$1
+    shift 1
+
+    for i in $(seq 1 $tries); do
+        echo "Try #$i of $tries: run $*"
+        "$@" && return 0
+    done
+
+    return $?
+}
+
 snapshot() {
     apk="$1"
     echo "Running snapshot"
@@ -500,7 +512,8 @@ snapshot() {
 
     echo "Installing cargo-nextest"
     # We need to install nextest via cargo currently, since there is no pre-built binary for android x86
-    run_command_via_ssh "export CARGO_TERM_COLOR=always && cargo install cargo-nextest"
+    command="export CARGO_TERM_COLOR=always && cargo install cargo-nextest"
+    run_with_retry 5 run_command_via_ssh "$command"
     return_code=$?
 
     echo "Info about cargo and rust - via SSH Script"

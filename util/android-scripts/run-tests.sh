@@ -11,6 +11,18 @@ export CARGO_INCREMENTAL=0
 
 echo "PATH: $PATH"
 
+run_with_retry() {
+    tries=$1
+    shift 1
+
+    for i in $(seq 1 $tries); do
+        echo "Try #$i of $tries: run $*"
+        "$@" && return 0
+    done
+
+    return $?
+}
+
 run_tests_in_subprocess() (
 
     # limit virtual memory to 3GB to avoid that OS kills sshd
@@ -32,10 +44,14 @@ run_tests_in_subprocess() (
     watchplus 2 df -h &
     watchplus 2 free -hm &
 
+    nextest_params=(--profile ci --hide-progress-bar --features feat_os_unix_android)
+
     # run tests
     cd ~/coreutils && \
+        run_with_retry 5 timeout --preserve-status --verbose -k 1m 10m \
+            cargo nextest run --no-run "${nextest_params[@]}" &&
         timeout --preserve-status --verbose -k 1m 60m \
-            cargo nextest run --profile ci --hide-progress-bar --features feat_os_unix_android
+            cargo nextest run "${nextest_params[@]}"
 
     result=$?
 
