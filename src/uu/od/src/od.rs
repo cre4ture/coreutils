@@ -213,36 +213,43 @@ impl OdOptions {
 /// opens the input and calls `odfunc` to process the input.
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
+
     let args = args.collect_ignore();
 
-    let clap_opts = uu_app();
+    std::panic::catch_unwind(move ||{
 
-    let clap_matches = clap_opts.try_get_matches_from(&args)?;
+        let clap_opts = uu_app();
 
-    let od_options = OdOptions::new(&clap_matches, &args)?;
+        let clap_matches = clap_opts.try_get_matches_from(&args)?;
 
-    let mut input_offset =
-        InputOffset::new(od_options.radix, od_options.skip_bytes, od_options.label);
+        let od_options = OdOptions::new(&clap_matches, &args)?;
 
-    let mut input = open_input_peek_reader(
-        &od_options.input_strings,
-        od_options.skip_bytes,
-        od_options.read_bytes,
-    );
-    let mut input_decoder = InputDecoder::new(
-        &mut input,
-        od_options.line_bytes,
-        PEEK_BUFFER_SIZE,
-        od_options.byte_order,
-    );
+        let mut input_offset =
+            InputOffset::new(od_options.radix, od_options.skip_bytes, od_options.label);
 
-    let output_info = OutputInfo::new(
-        od_options.line_bytes,
-        &od_options.formats[..],
-        od_options.output_duplicates,
-    );
+        let mut input = open_input_peek_reader(
+            &od_options.input_strings,
+            od_options.skip_bytes,
+            od_options.read_bytes,
+        );
+        let mut input_decoder = InputDecoder::new(
+            &mut input,
+            od_options.line_bytes,
+            PEEK_BUFFER_SIZE,
+            od_options.byte_order,
+        );
 
-    odfunc(&mut input_offset, &mut input_decoder, &output_info)
+        let output_info = OutputInfo::new(
+            od_options.line_bytes,
+            &od_options.formats[..],
+            od_options.output_duplicates,
+        );
+
+        odfunc(&mut input_offset, &mut input_decoder, &output_info)
+    }).map_err(|err_obj|{
+        show_error!("catch_unwind(odfunc) err_obj: {:?}", err_obj);
+        USimpleError::new(44, format!("panic caught! ({:?})", err_obj))
+    })?
 }
 
 pub fn uu_app() -> Command {
@@ -458,7 +465,7 @@ pub fn uu_app() -> Command {
 }
 
 /// Loops through the input line by line, calling `print_bytes` to take care of the output.
-fn odfunc<I>(
+fn odfunc<I: std::fmt::Debug>(
     input_offset: &mut InputOffset,
     input_decoder: &mut InputDecoder<I>,
     output_info: &OutputInfo,
@@ -473,11 +480,18 @@ where
     loop {
         // print each line data (or multi-format raster of several lines describing the same data).
 
-        match input_decoder.peek_read() {
+        show_error!("loop entry(), input_decoder: {:?}", input_decoder);
+
+        let read_result = input_decoder.peek_read();
+
+        show_error!("loop entry(), read_result: {:?}", read_result);
+
+        match read_result {
             Ok(mut memory_decoder) => {
                 let length = memory_decoder.length();
 
                 if length == 0 {
+                    show_error!("print_final_offset(), length: {:?}", length);
                     input_offset.print_final_offset();
                     break;
                 }
@@ -490,6 +504,7 @@ where
                         max_used = line_bytes;
                     }
 
+                    show_error!("zero_out_buffer(), length: {:?}, max_used: {:?}", length, max_used);
                     memory_decoder.zero_out_buffer(length, max_used);
                 }
 
@@ -497,6 +512,7 @@ where
                     && length == line_bytes
                     && memory_decoder.get_buffer(0) == &previous_bytes[..]
                 {
+                    show_error!("duplicate_line(), duplicate_line: {:?}", duplicate_line);
                     if !duplicate_line {
                         duplicate_line = true;
                         println!("*");
@@ -505,9 +521,11 @@ where
                     duplicate_line = false;
                     if length == line_bytes {
                         // save a copy of the input unless it is the last line
+                        show_error!("clone_buffer(), previous_bytes: {:?}", previous_bytes);
                         memory_decoder.clone_buffer(&mut previous_bytes);
                     }
 
+                    show_error!("print_bytes(), input_offset.format_byte_offset(): {:?}", input_offset.format_byte_offset());
                     print_bytes(
                         &input_offset.format_byte_offset(),
                         &memory_decoder,
@@ -515,10 +533,11 @@ where
                     );
                 }
 
+                show_error!("increase_position(), length: {:?}", length);
                 input_offset.increase_position(length as u64);
             }
             Err(e) => {
-                show_error!("{}", e);
+                show_error!("show_error: {}", e);
                 input_offset.print_final_offset();
                 return Err(1.into());
             }
@@ -526,8 +545,10 @@ where
     }
 
     if input_decoder.has_error() {
+        show_error!("input_decoder.has_error(), input_decoder: {:?}", input_decoder);
         Err(1.into())
     } else {
+        show_error!("!input_decoder.has_error(), input_decoder: {:?}", input_decoder);
         Ok(())
     }
 }
@@ -538,15 +559,24 @@ fn print_bytes(prefix: &str, input_decoder: &MemoryDecoder, output_info: &Output
     for f in output_info.spaced_formatters_iter() {
         let mut output_text = String::new();
 
+        show_error!("print_bytes() - begin: f: {:?}", f);
+
         let mut b = 0;
         while b < input_decoder.length() {
-            write!(
+
+            show_error!("print_bytes() - before write: b: {:?}, output_info: {:?} ", b, output_info);
+            let wr = write!(
                 output_text,
                 "{:>width$}",
                 "",
                 width = f.spacing[b % output_info.byte_size_block]
-            )
-            .unwrap();
+            );
+
+            show_error!("print_bytes() - after write: wr: {:?}", wr);
+
+            wr.unwrap();
+
+            show_error!("print_bytes() - after unwrap");
 
             match f.formatter_item_info.formatter {
                 FormatWriter::IntWriter(func) => {
@@ -554,16 +584,25 @@ fn print_bytes(prefix: &str, input_decoder: &MemoryDecoder, output_info: &Output
                     output_text.push_str(&func(p));
                 }
                 FormatWriter::FloatWriter(func) => {
+                    show_error!("print_bytes() - FloatWriter 1");
                     let p = input_decoder.read_float(b, f.formatter_item_info.byte_size);
+                    show_error!("print_bytes() - FloatWriter 2");
                     output_text.push_str(&func(p));
+                    show_error!("print_bytes() - FloatWriter 3");
                 }
                 FormatWriter::MultibyteWriter(func) => {
                     output_text.push_str(&func(input_decoder.get_full_buffer(b)));
                 }
             }
 
+            show_error!("print_bytes() - after match");
+
             b += f.formatter_item_info.byte_size;
+
+            show_error!("print_bytes() - after b +=: {b}, {:?}", f.formatter_item_info.byte_size);
         }
+
+        show_error!("print_bytes() - middle: output_text: {:?}", output_text);
 
         if f.add_ascii_dump {
             let missing_spacing = output_info

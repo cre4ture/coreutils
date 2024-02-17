@@ -17,6 +17,7 @@ const MAX_SKIP_BUFFER: usize = 16 * 1024;
 /// Wrapper for `std::io::Read` which can skip bytes at the beginning
 /// of the input, and it can limit the returned bytes to a particular
 /// number of bytes.
+#[derive(Debug)]
 pub struct PartialReader<R> {
     inner: R,
     skip: u64,
