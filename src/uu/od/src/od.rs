@@ -6,7 +6,7 @@
 // spell-checker:ignore (clap) dont
 // spell-checker:ignore (ToDO) formatteriteminfo inputdecoder inputoffset mockstream nrofbytes partialreader odfunc multifile exitcode
 
-mod byteorder_io;
+pub mod byteorder_io;
 mod formatteriteminfo;
 mod inputdecoder;
 mod inputoffset;

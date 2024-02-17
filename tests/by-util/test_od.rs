@@ -901,3 +901,48 @@ fn test_od_invalid_bytes() {
             .stderr_only(format!("od: {option} argument '{BIG_SIZE}' too large\n"));
     }
 }
+
+#[test]
+fn test_f16c_f16_to_f32_direct() {
+    let bo = ::od::byteorder_io::ByteOrder::Little;
+    let bits = bo.read_u16(&[0x00, 0x3c]);
+
+    let result_f16 = half::f16::from_bits(bits);
+    let result = f64::from(result_f16);
+    assert_eq!(1.0, result);
+}
+
+#[test]
+fn test_f16c_direct() {
+
+    #[cfg(target_arch = "x86_64")]
+    use std::arch::x86_64::{_mm_cvtph_ps, __m128i, __m128};
+    #[cfg(target_arch = "x86")]
+    use std::arch::x86::{_mm_cvtph_ps, __m128i, __m128};
+
+    let i = 0u16;
+
+    let result: f32 = unsafe {
+        let mut vec = std::mem::MaybeUninit::<__m128i>::zeroed();
+        vec.as_mut_ptr().cast::<u16>().write(i);
+        println!("before intrinsic");
+        let retval = _mm_cvtph_ps(vec.assume_init());
+        println!("after intrinsic");
+        *(&retval as *const __m128).cast()
+    };
+
+    assert_eq!(0.0, result);
+}
+
+#[test]
+fn test_if_f16c_is_detected() {
+
+    let detected = std::is_x86_feature_detected!("f16c");
+    if detected {
+        println!("f16c detected!");
+    } else {
+        println!("f16c not detected!");
+    }
+
+    assert_eq!(true, detected);
+}

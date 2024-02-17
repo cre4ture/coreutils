@@ -383,6 +383,7 @@ dependencies = [
  "conv",
  "filetime",
  "glob",
+ "half",
  "hex-literal",
  "libc",
  "nix",

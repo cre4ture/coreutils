@@ -198,4 +198,15 @@ mod tests {
         assert_eq!(2, mem.length());
         assert_eq!(0xffff, mem.read_uint(0, 2));
     }
+
+    #[test]
+    fn test_f16c_direct() {
+        let bo = ByteOrder::Little;
+        let bits = bo.read_u16(&[0x00, 0x3c]);
+
+        let result_f16 = f16::from_bits(bits);
+        let result = f64::from(result_f16);
+        assert_eq!(1.0, result);
+    }
+
 }
