@@ -974,6 +974,12 @@ jobs:
         # * CODECOV_FLAGS
         CODECOV_FLAGS=$( echo "${{ matrix.job.os }}" | sed 's/[^[:alnum:]]/_/g' )
         outputs CODECOV_FLAGS
+    - name: Collect information about runner ressources
+      if: always()
+      continue-on-error: true
+      run: |
+        free -mh
+        df -Th
     - name: Install/setup prerequisites
       shell: bash
       run: |
@@ -1000,6 +1006,12 @@ jobs:
           # Update binutils if MinGW due to https://github.com/rust-lang/rust/issues/112368
           windows-latest) C:/msys64/usr/bin/pacman.exe -Syu --needed mingw-w64-x86_64-gcc --noconfirm ; echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH ;;
         esac
+    - name: Collect information about runner ressources
+      if: always()
+      continue-on-error: true
+      run: |
+        free -mh
+        df -Th
     - name: Initialize toolchain-dependent workflow variables
       id: dep_vars
       shell: bash
@@ -1010,6 +1022,12 @@ jobs:
         UTILITY_LIST="$(./util/show-utils.sh ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }})"
         CARGO_UTILITY_LIST_OPTIONS="$(for u in ${UTILITY_LIST}; do echo -n "-puu_${u} "; done;)"
         outputs CARGO_UTILITY_LIST_OPTIONS
+    - name: Collect information about runner ressources
+      if: always()
+      continue-on-error: true
+      run: |
+        free -mh
+        df -Th
     - name: Test
       run: cargo nextest run --profile ci --hide-progress-bar ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} -p uucore -p coreutils
       env:
@@ -1018,6 +1036,12 @@ jobs:
         RUSTDOCFLAGS: "-Cpanic=abort"
         RUST_BACKTRACE: "1"
         # RUSTUP_TOOLCHAIN: ${{ steps.vars.outputs.TOOLCHAIN }}
+    - name: Collect information about runner ressources
+      if: always()
+      continue-on-error: true
+      run: |
+        free -mh
+        df -Th
     - name: Test individual utilities
       run: cargo nextest run --profile ci --hide-progress-bar ${{ steps.dep_vars.outputs.CARGO_UTILITY_LIST_OPTIONS }}
       env:
@@ -1026,6 +1050,12 @@ jobs:
         RUSTDOCFLAGS: "-Cpanic=abort"
         RUST_BACKTRACE: "1"
         # RUSTUP_TOOLCHAIN: ${{ steps.vars.outputs.TOOLCHAIN }}
+    - name: Collect information about runner ressources
+      if: always()
+      continue-on-error: true
+      run: |
+        free -mh
+        df -Th
     - name: Generate coverage data (via `grcov`)
       id: coverage
       shell: bash
@@ -1041,6 +1071,12 @@ jobs:
         # generate coverage report
         ~/.cargo/bin/grcov . --output-type lcov --output-path "${COVERAGE_REPORT_FILE}" --branch --ignore build.rs --ignore "vendor/*" --ignore "/*" --ignore "[a-zA-Z]:/*" --excl-br-line "^\s*((debug_)?assert(_eq|_ne)?!|#\[derive\()"
         echo "report=${COVERAGE_REPORT_FILE}" >> $GITHUB_OUTPUT
+    - name: Collect information about runner ressources
+      if: always()
+      continue-on-error: true
+      run: |
+        free -mh
+        df -Th
     - name: Upload coverage results (to Codecov.io)
       uses: codecov/codecov-action@v4
       # if: steps.vars.outputs.HAS_CODECOV_TOKEN
@@ -1051,3 +1087,9 @@ jobs:
         flags: ${{ steps.vars.outputs.CODECOV_FLAGS }}
         name: codecov-umbrella
         fail_ci_if_error: false
+    - name: Collect information about runner ressources
+      if: always()
+      continue-on-error: true
+      run: |
+        free -mh
+        df -Th
