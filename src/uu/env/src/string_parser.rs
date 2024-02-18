@@ -150,7 +150,7 @@ impl<'a> StringParser<'a> {
         self.set_pointer(end_ptr);
     }
 
-    pub fn skip_until_ascii_char_or_end(&mut self, c: char) {
+    pub fn skip_until_char_or_end(&mut self, c: char) {
         let pos = self.pointer_str.find(c);
 
         if let Some(pos) = pos {

@@ -348,7 +348,7 @@ impl<'a> SplitIterator<'a> {
                     return Ok(());
                 }
                 Some(_) => {
-                    self.get_parser_mut().skip_until_ascii_char_or_end('\n');
+                    self.get_parser_mut().skip_until_char_or_end('\n');
                 }
             }
         }

@@ -1018,10 +1018,10 @@ mod test_raw_string_parser {
 
         uut.skip_one().unwrap(); // skip x
         assert_eq!(uut.get_look_at_pos(), 22);
-        uut.get_parser_mut().skip_until_ascii_char_or_end('x'); // skip 🦉
+        uut.get_parser_mut().skip_until_char_or_end('x'); // skip 🦉
         assert_eq!(uut.get_look_at_pos(), 26);
         uut.take_one().unwrap(); // take x
-        uut.get_parser_mut().skip_until_ascii_char_or_end('x'); // skip 🦉🦉🦉🦉 till end
+        uut.get_parser_mut().skip_until_char_or_end('x'); // skip 🦉🦉🦉🦉 till end
         assert_eq!(uut.get_look_at_pos(), 43);
 
         uut.take_one().unwrap_err();
@@ -1061,7 +1061,7 @@ mod test_raw_string_parser {
         uut.take_one().unwrap(); // takes 🦉🦉🦉
         uut.put_string("oo🦔");
         uut.take_one().unwrap(); // take x
-        uut.get_parser_mut().skip_until_ascii_char_or_end('\n'); // skips till end
+        uut.get_parser_mut().skip_until_char_or_end('\n'); // skips till end
         uut.put_string("o🦔o");
 
         uut.take_one().unwrap_err();
@@ -1079,7 +1079,7 @@ mod test_raw_string_parser {
             uut.get_parser().look_at_remaining(),
             OsStr::new(&input[12..])
         );
-        uut.get_parser_mut().skip_until_ascii_char_or_end('\n'); // skips till end
+        uut.get_parser_mut().skip_until_char_or_end('\n'); // skips till end
         assert_eq!(uut.get_parser().look_at_remaining(), "");
 
         uut.take_one().unwrap_err();
@@ -1107,7 +1107,7 @@ mod test_raw_string_parser {
             OsStr::new(&input_str.as_os_str().split_at(2).1)
         );
         assert_eq!(uut.get_parser().look_at().unwrap(), '>');
-        uut.get_parser_mut().skip_until_ascii_char_or_end('\n');
+        uut.get_parser_mut().skip_until_char_or_end('\n');
         assert_eq!(uut.get_parser().look_at_remaining(), "");
 
         uut.take_one().unwrap_err();
