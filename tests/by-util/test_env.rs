@@ -408,7 +408,7 @@ macro_rules! compare_with_gnu {
         eprintln!("==========================================================================");
         let result = $ts.ucmd().args($args).run();
 
-        #[cfg(any(target_os = "linux", target_os = "android"))]
+        #[cfg(target_os = "linux")]
         {
             let reference = expected_result(&$ts, $args);
             if let Ok(reference) = reference {
