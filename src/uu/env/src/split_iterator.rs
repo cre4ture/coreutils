@@ -176,7 +176,7 @@ impl<'a> SplitIterator<'a> {
             Some(self.get_parser().get_substring(&Range {
                 start: varname_end + 1,
                 end: default_end,
-            })?)
+            }))
         } else {
             None
         };
@@ -184,7 +184,7 @@ impl<'a> SplitIterator<'a> {
         let varname = self.get_parser().get_substring(&Range {
             start: pos_start,
             end: varname_end,
-        })?;
+        });
 
         Ok((varname, default))
     }
@@ -216,7 +216,7 @@ impl<'a> SplitIterator<'a> {
         Ok(self.get_parser().get_substring(&Range {
             start: pos_start,
             end: pos_end,
-        })?)
+        }))
     }
 
     fn substitute_variable(&mut self) -> Result<(), ParseError> {

@@ -156,7 +156,7 @@ impl<'a> RawStringParser<'a> {
         Err(self.make_err(ErrorType::EndOfInput))
     }
 
-    fn get_chunk_at(&self, pointer: usize) -> Result<(Chunk<'a>, usize), Error> {
+    fn get_chunk_with_length_at(&self, pointer: usize) -> Result<(Chunk<'a>, usize), Error> {
         let (_before, after) = self.input.split_at(pointer);
         let next_chunk = after.utf8_chunks().next();
         if let Some((nuo, s)) = next_chunk {
@@ -174,11 +174,11 @@ impl<'a> RawStringParser<'a> {
     }
 
     pub fn look_at_chunk(&self) -> Option<Chunk<'a>> {
-        return self.get_chunk_at(self.pointer).ok().map(|(chunk, _)| chunk);
+        return self.get_chunk_with_length_at(self.pointer).ok().map(|(chunk, _)| chunk);
     }
 
     pub fn consume_one(&mut self) -> Result<Chunk<'a>, Error> {
-        let (chunk, len) = self.get_chunk_at(self.pointer)?;
+        let (chunk, len) = self.get_chunk_with_length_at(self.pointer)?;
         self.set_pointer(self.pointer + len);
         Ok(chunk)
     }
@@ -225,10 +225,10 @@ impl<'a> RawStringParser<'a> {
         }
     }
 
-    pub fn get_substring(&self, range: &std::ops::Range<usize>) -> Result<&'a OsStr, Error> {
+    pub fn get_substring(&self, range: &std::ops::Range<usize>) -> &'a OsStr {
         let (_before1, after1) = self.input.split_at(range.start);
         let (middle, _after2) = after1.split_at(range.end - range.start);
-        Ok(middle)
+        middle
     }
 
     pub fn look_at_remaining(&self) -> &'a OsStr {
