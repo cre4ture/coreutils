@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use crate::raw_string_parser;
+use crate::string_parser;
 
 /// An error returned when string arg splitting fails.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -31,7 +31,7 @@ pub enum ParseError {
     },
     InternalError {
         pos: usize,
-        sub_err: raw_string_parser::Error,
+        sub_err: string_parser::Error,
     },
     ReachedEnd,
     ContinueWithDelimiter,
@@ -45,8 +45,8 @@ impl fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-impl From<raw_string_parser::Error> for ParseError {
-    fn from(value: raw_string_parser::Error) -> Self {
+impl From<string_parser::Error> for ParseError {
+    fn from(value: string_parser::Error) -> Self {
         Self::InternalError {
             pos: value.look_at_pos,
             sub_err: value,

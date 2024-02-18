@@ -2,14 +2,10 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-//
-// This file is based on work from Tomasz Miąsko who published it as "shell_words" crate,
-// licensed under the Apache License, Version 2.0 <LICENSE-APACHE>
-// or the MIT license <LICENSE-MIT>, at your option.
 
 use std::{ffi::OsStr, ops::Range};
 
-use crate::{parse_error::ParseError, raw_string_parser::RawStringParser};
+use crate::{parse_error::ParseError, string_parser::RawStringParser};
 
 pub struct VariableParser<'a, 'b>
     where 'a : 'b

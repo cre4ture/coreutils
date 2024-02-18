@@ -18,15 +18,12 @@
 
 #![forbid(unsafe_code)]
 
-use std::env::vars_os;
 use std::ffi::OsStr;
 use std::ffi::OsString;
-use std::mem;
-use std::ops::Range;
 
 use crate::parse_error::ParseError;
-use crate::raw_string_parser::RawStringExpander;
-use crate::raw_string_parser::RawStringParser;
+use crate::string_parser::RawStringExpander;
+use crate::string_parser::RawStringParser;
 use crate::variable_parser::VariableParser;
 
 #[derive(Clone, Copy)]
