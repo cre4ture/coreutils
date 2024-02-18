@@ -109,11 +109,6 @@ fn load_config_file(opts: &mut Options) -> UResult<()> {
     Ok(())
 }
 
-fn build_command<'a, 'b>(args: &'a [&'b OsStr]) -> (Cow<'b, OsStr>, &'a [&'b OsStr]) {
-    let progname = Cow::from(args[0]);
-    (progname, &args[1..])
-}
-
 pub fn uu_app() -> Command {
     Command::new(crate_name!())
         .version(crate_version!())
@@ -215,6 +210,13 @@ pub fn parse_args_from_str(text: &OsStr) -> UResult<Vec<OsString>> {
     })
 }
 
+fn debug_print_args(args: &[OsString]) {
+    eprintln!("input args:");
+    for (i, arg) in args.iter().enumerate() {
+        eprintln!("arg[{}]: {}", i, arg.quote());
+    }
+}
+
 fn check_and_handle_string_args(
     arg: &OsString,
     prefix_to_test: &str,
@@ -281,16 +283,7 @@ impl EnvAppData {
 
         Ok(all_args)
     }
-}
 
-fn debug_print_args(args: &[OsString]) {
-    eprintln!("input args:");
-    for (i, arg) in args.iter().enumerate() {
-        eprintln!("arg[{}]: {}", i, arg.quote());
-    }
-}
-
-impl EnvAppData {
     #[allow(clippy::cognitive_complexity)]
     fn run_env(&mut self, original_args: impl uucore::Args) -> UResult<()> {
         let original_args: Vec<OsString> = original_args.collect();
@@ -447,7 +440,8 @@ impl EnvAppData {
             print_env(opts.line_ending);
         } else {
             // we need to execute a command
-            let (prog, args) = build_command(&opts.program);
+            let prog = Cow::from(opts.program[0]);
+            let args = &opts.program[1..];
 
             if do_debug_printing {
                 eprintln!("executable: {}", prog.quote());
