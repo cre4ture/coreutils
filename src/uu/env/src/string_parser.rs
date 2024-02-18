@@ -3,7 +3,7 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 //
-// spell-checker:ignore (words) splitted
+// spell-checker:ignore (words) splitted FFFD
 #![forbid(unsafe_code)]
 
 use std::ffi::OsStr;
