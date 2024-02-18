@@ -6,10 +6,7 @@
 // spell-checker:ignore (words) splitted
 #![forbid(unsafe_code)]
 
-use std::{
-    ffi::{OsStr, OsString},
-    mem,
-};
+use std::ffi::OsStr;
 
 use os_str_bytes::OsStrBytesExt;
 
@@ -109,7 +106,10 @@ impl<'a> StringParser<'a> {
     }
 
     pub fn look_at_chunk(&self) -> Option<Chunk<'a>> {
-        return self.get_chunk_with_length_at(self.pointer).ok().map(|(chunk, _)| chunk);
+        return self
+            .get_chunk_with_length_at(self.pointer)
+            .ok()
+            .map(|(chunk, _)| chunk);
     }
 
     pub fn consume_one(&mut self) -> Result<Chunk<'a>, Error> {

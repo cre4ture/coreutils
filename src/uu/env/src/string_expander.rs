@@ -3,12 +3,12 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-use std::{ffi::{OsStr, OsString}, mem};
+use std::{
+    ffi::{OsStr, OsString},
+    mem,
+};
 
 use crate::string_parser::{Chunk, Error, StringParser};
-
-
-
 
 /// This class makes parsing and word collection more convenient.
 ///
@@ -20,8 +20,6 @@ pub struct StringExpander<'a> {
     parser: StringParser<'a>,
     output: OsString,
 }
-
-
 
 impl<'a> StringExpander<'a> {
     pub fn new<S: AsRef<OsStr> + ?Sized>(input: &'a S) -> Self {

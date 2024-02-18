@@ -8,13 +8,13 @@ use std::{ffi::OsStr, ops::Range};
 use crate::{parse_error::ParseError, string_parser::StringParser};
 
 pub struct VariableParser<'a, 'b>
-    where 'a : 'b
+where
+    'a: 'b,
 {
-    pub parser: &'b mut StringParser<'a>
+    pub parser: &'b mut StringParser<'a>,
 }
 
 impl<'a, 'b> VariableParser<'a, 'b> {
-
     fn get_current_char(&self) -> Option<char> {
         self.parser.look_at().ok()
     }
