@@ -2354,22 +2354,25 @@ pub fn whoami() -> String {
         })
 }
 
+fn do_hosts_coreutils_have_g_prefix() -> bool {
+    cfg!(all(not(target_os = "linux"), not(target_os = "android")))
+}
+
 /// Add prefix 'g' for `util_name` if not on linux
 #[cfg(unix)]
 pub fn host_name_for(util_name: &str) -> Cow<str> {
     // In some environments, e.g. macOS/freebsd, the GNU coreutils are prefixed with "g"
     // to not interfere with the BSD counterparts already in `$PATH`.
-    #[cfg(all(not(target_os = "linux"), not(target_os = "android")))]
-    {
+    if do_hosts_coreutils_have_g_prefix() {
         // make call to `host_name_for` idempotent
         if util_name.starts_with('g') && util_name != "groups" {
             util_name.into()
         } else {
             format!("g{util_name}").into()
         }
+    } else {
+        util_name.into()
     }
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    util_name.into()
 }
 
 // GNU coreutils version 8.32 is the reference version since it is the latest version and the
@@ -2499,18 +2502,18 @@ pub fn expected_result(ts: &TestScenario, args: &[&str]) -> std::result::Result<
         .args(args)
         .run();
 
-    let (stdout, stderr): (String, String) = if cfg!(target_os = "linux") {
-        (
-            result.stdout_str().to_string(),
-            result.stderr_str_lossy().to_string(),
-        )
-    } else {
+    let (stdout, stderr): (String, String) = if do_hosts_coreutils_have_g_prefix() {
         // `host_name_for` added prefix, strip 'g' prefix from results:
         let from = util_name.to_string() + ":";
         let to = &from[1..];
         (
             result.stdout_str().replace(&from, to),
             result.stderr_str_lossy().replace(&from, to),
+        )
+    } else {
+        (
+            result.stdout_str().to_string(),
+            result.stderr_str_lossy().to_string(),
         )
     };
 
