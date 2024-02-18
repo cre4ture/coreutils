@@ -3,19 +3,6 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 //
-//! SAFETY: This module does "unsafe" byte by byte operations on a UTF8 encoded string.
-//! UTF8 encodes all non-ASCII characters as multi-byte characters. Meaning that the UTF8
-//! string contains short sequences of bytes which should not be splitted or individually modified.
-//! All bytes that belong to a multi-byte character sequence are defined to have a different value
-//! than any ASCII single byte char. This can be used to easily detect where multi-byte character sequences
-//! start and end.
-//! To guarantee that after processing the output is again valid UTF8, the following rules must apply:
-//! 1. Move multi-byte characters as a whole.
-//! 2. Insert characters only on ASCII boundaries.
-//! We also want to support even strings that contain partially invalid utf8. Thats why we can't rely
-//! on std library functionality when dealing with multi-byte characters.
-//!
-//! The general idea of this module is to encapsulate the unsafe parts in a small and easily testable unit.
 // spell-checker:ignore (words) splitted
 #![forbid(unsafe_code)]
 
@@ -34,19 +21,31 @@ pub struct Error {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ErrorType {
-    NoAsciiBoundary,
-    NoAsciiChar,
-    NoAsciiCharInput,
     EndOfInput,
     InternalError,
 }
 
+/// Provides a valid char or a invalid sequence of bytes.
+///
+/// Invalid byte sequences can't be splitted in any meaningful way.
+/// Thus, they need to be consumed as one piece.
+pub enum Chunk<'a> {
+    InvalidEncoding(&'a OsStr),
+    ValidChar(char),
+}
+
+/// This class makes parsing a OsString char by char more convenient.
+///
+/// It also allows to capturing of intermediate positions for later splitting.
 pub struct RawStringParser<'a> {
     pub input: &'a OsStr,
     pointer: usize,
     pointer_str: &'a OsStr,
 }
 
+/// This class makes parsing and word collection more convenient.
+///
+/// It manages an "output" buffer that is automatically filled.
 pub struct RawStringExpander<'a> {
     parser: RawStringParser<'a>,
     output: OsString,
@@ -96,7 +95,7 @@ impl<'a> RawStringExpander<'a> {
         Ok(())
     }
 
-    pub fn put_one_ascii(&mut self, c: char) -> Result<(), Error> {
+    pub fn put_one_char(&mut self, c: char) -> Result<(), Error> {
         self.output.push(c.to_string());
         Ok(())
     }
@@ -110,14 +109,9 @@ impl<'a> RawStringExpander<'a> {
         self.put_string(&OsString::from(str))
     }
 
-    pub fn take_collected_output(&mut self) -> Result<OsString, Error> {
-        Ok(mem::take(&mut self.output))
+    pub fn take_collected_output(&mut self) -> OsString {
+        mem::take(&mut self.output)
     }
-}
-
-pub enum Chunk<'a> {
-    InvalidEncoding(&'a OsStr),
-    ValidChar(char),
 }
 
 impl<'a> RawStringParser<'a> {
@@ -185,7 +179,7 @@ impl<'a> RawStringParser<'a> {
         Err(self.make_err(ErrorType::EndOfInput))
     }
 
-    pub fn peek_one(&self) -> Option<Chunk<'a>> {
+    pub fn look_at_chunk(&self) -> Option<Chunk<'a>> {
         return self.get_chunk_at(self.pointer).ok().map(|(chunk, _)| chunk);
     }
 
@@ -209,7 +203,7 @@ impl<'a> RawStringParser<'a> {
                 return Ok(result);
             }
 
-            match self.peek_one() {
+            match self.look_at_chunk() {
                 Some(Chunk::ValidChar(c)) if c.is_ascii() => return Ok(result),
                 None => return Ok(result),
                 _ => {}

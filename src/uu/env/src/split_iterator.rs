@@ -94,13 +94,12 @@ impl<'a> SplitIterator<'a> {
     }
 
     fn push_ascii_char_to_word(&mut self, c: char) -> Result<(), ParseError> {
-        Ok(self.raw_parser.put_one_ascii(c)?)
+        Ok(self.raw_parser.put_one_char(c)?)
     }
 
-    fn push_word_to_words(&mut self) -> Result<(), ParseError> {
-        let word = self.raw_parser.take_collected_output()?;
+    fn push_word_to_words(&mut self) {
+        let word = self.raw_parser.take_collected_output();
         self.words.push(word);
-        Ok(())
     }
 
     fn check_variable_name_start(&self) -> Result<(), ParseError> {
@@ -282,13 +281,9 @@ impl<'a> SplitIterator<'a> {
         loop {
             match self.get_current_char() {
                 None => return Ok(()),
-                Some(SINGLE_QUOTES) => {
-                    // don't consume char!
-                    self.split_unquoted()?;
-                }
-                Some(DOUBLE_QUOTES) => {
-                    // don't consume char!
-                    self.split_unquoted()?;
+                Some('#') => {
+                    self.skip_one()?;
+                    self.split_comment()?;
                 }
                 Some(BACKSLASH) => {
                     self.skip_one()?;
@@ -297,16 +292,8 @@ impl<'a> SplitIterator<'a> {
                 Some(c) if ASCII_WHITESPACE_CHARS.contains(&c) => {
                     self.skip_one()?;
                 }
-                Some('#') => {
-                    self.skip_one()?;
-                    self.split_comment()?;
-                }
-                Some('$') => {
-                    // don't consume char!
-                    self.split_unquoted()?;
-                }
                 Some(_) => {
-                    // don't consume char!
+                    // Don't consume char. Will be done in unquoted state.
                     self.split_unquoted()?;
                 }
             }
@@ -337,7 +324,7 @@ impl<'a> SplitIterator<'a> {
         loop {
             match self.get_current_char() {
                 None => {
-                    self.push_word_to_words()?;
+                    self.push_word_to_words();
                     return Err(ParseError::ReachedEnd);
                 }
                 Some('$') => {
@@ -356,7 +343,7 @@ impl<'a> SplitIterator<'a> {
                     self.split_unquoted_backslash()?;
                 }
                 Some(c) if ASCII_WHITESPACE_CHARS.contains(&c) => {
-                    self.push_word_to_words()?;
+                    self.push_word_to_words();
                     self.skip_one()?;
                     return Ok(());
                 }
@@ -379,11 +366,11 @@ impl<'a> SplitIterator<'a> {
             }
             Some('_') => {
                 self.skip_one()?;
-                self.push_word_to_words()?;
+                self.push_word_to_words();
                 Err(ParseError::ContinueWithDelimiter)
             }
             Some('c') => {
-                self.push_word_to_words()?;
+                self.push_word_to_words();
                 Err(ParseError::ReachedEnd)
             }
             Some('$') | Some(BACKSLASH) | Some(SINGLE_QUOTES) | Some(DOUBLE_QUOTES) => {

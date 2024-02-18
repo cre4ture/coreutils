@@ -931,9 +931,9 @@ mod test_raw_string_parser {
         );
         uut.take_one().unwrap_err();
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output().unwrap(), input);
+        assert_eq!(uut.take_collected_output(), input);
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output().unwrap(), "");
+        assert_eq!(uut.take_collected_output(), "");
     }
 
     #[test]
@@ -958,9 +958,9 @@ mod test_raw_string_parser {
         );
         uut.take_one().unwrap_err();
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output().unwrap(), input);
+        assert_eq!(uut.take_collected_output(), input);
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output().unwrap(), "");
+        assert_eq!(uut.take_collected_output(), "");
     }
 
     #[test]
@@ -968,19 +968,19 @@ mod test_raw_string_parser {
         let input = OsString::from("🦉🦉🦉x🦉🦉x🦉x🦉🦉🦉🦉");
         let owl: char = '🦉';
         let mut uut = env::raw_string_parser::RawStringExpander::new(&input);
-        uut.put_one_ascii('a').unwrap();
+        uut.put_one_char('a').unwrap();
         for _i in 0..3 {
             assert_eq!(uut.get_parser().look_at().unwrap(), owl);
             uut.take_one().unwrap();
-            uut.put_one_ascii('a').unwrap();
+            uut.put_one_char('a').unwrap();
             assert_eq!(uut.get_parser().look_at().unwrap(), 'x');
             uut.take_one().unwrap();
-            uut.put_one_ascii('a').unwrap();
+            uut.put_one_char('a').unwrap();
         }
         assert_eq!(uut.get_parser().look_at().unwrap(), owl);
         uut.take_one().unwrap();
-        uut.put_one_ascii(owl).unwrap();
-        uut.put_one_ascii('a').unwrap();
+        uut.put_one_char(owl).unwrap();
+        uut.put_one_char('a').unwrap();
         assert_eq!(
             uut.get_parser().look_at(),
             Err(raw_string_parser::Error {
@@ -989,14 +989,14 @@ mod test_raw_string_parser {
             })
         );
         uut.take_one().unwrap_err();
-        uut.put_one_ascii('a').unwrap();
+        uut.put_one_char('a').unwrap();
         uut.take_one().unwrap_err();
         assert_eq!(
-            uut.take_collected_output().unwrap(),
+            uut.take_collected_output(),
             "a🦉🦉🦉axa🦉🦉axa🦉axa🦉🦉🦉🦉🦉aa"
         );
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output().unwrap(), "");
+        assert_eq!(uut.take_collected_output(), "");
     }
 
     #[test]
@@ -1014,16 +1014,14 @@ mod test_raw_string_parser {
 
         uut.skip_one().unwrap(); // skip x
         assert_eq!(uut.get_look_at_pos(), 22);
-        uut.get_parser_mut()
-            .skip_until_ascii_char_or_end('x'); // skip 🦉
+        uut.get_parser_mut().skip_until_ascii_char_or_end('x'); // skip 🦉
         assert_eq!(uut.get_look_at_pos(), 26);
         uut.take_one().unwrap(); // take x
-        uut.get_parser_mut()
-            .skip_until_ascii_char_or_end('x'); // skip 🦉🦉🦉🦉 till end
+        uut.get_parser_mut().skip_until_ascii_char_or_end('x'); // skip 🦉🦉🦉🦉 till end
         assert_eq!(uut.get_look_at_pos(), 43);
 
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output().unwrap(), "🦉🦉x");
+        assert_eq!(uut.take_collected_output(), "🦉🦉x");
     }
 
     #[test]
@@ -1033,24 +1031,21 @@ mod test_raw_string_parser {
 
         uut.get_parser_mut().skip_multiple_ascii_bounded(0);
         assert_eq!(uut.get_look_at_pos(), 0);
-        uut.get_parser_mut()
-            .skip_multiple_ascii_bounded(12); // skips 🦉🦉🦉
+        uut.get_parser_mut().skip_multiple_ascii_bounded(12); // skips 🦉🦉🦉
         assert_eq!(uut.get_look_at_pos(), 12);
 
         uut.take_one().unwrap(); // take x
         assert_eq!(uut.get_look_at_pos(), 13);
-        uut.get_parser_mut()
-            .skip_multiple_ascii_bounded(13); // skips 🦉🦉x🦉
+        uut.get_parser_mut().skip_multiple_ascii_bounded(13); // skips 🦉🦉x🦉
         assert_eq!(uut.get_look_at_pos(), 26);
         uut.take_one().unwrap(); // take x
 
         assert_eq!(uut.get_look_at_pos(), 27);
-        uut.get_parser_mut()
-            .skip_multiple_ascii_bounded(16); // skips 🦉🦉🦉🦉
+        uut.get_parser_mut().skip_multiple_ascii_bounded(16); // skips 🦉🦉🦉🦉
         assert_eq!(uut.get_look_at_pos(), 43);
 
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output().unwrap(), "xx");
+        assert_eq!(uut.take_collected_output(), "xx");
     }
 
     #[test]
@@ -1062,12 +1057,11 @@ mod test_raw_string_parser {
         uut.take_one().unwrap(); // takes 🦉🦉🦉
         uut.put_string_utf8("oo🦔").unwrap();
         uut.take_one().unwrap(); // take x
-        uut.get_parser_mut()
-            .skip_until_ascii_char_or_end('\n'); // skips till end
+        uut.get_parser_mut().skip_until_ascii_char_or_end('\n'); // skips till end
         uut.put_string_utf8("o🦔o").unwrap();
 
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output().unwrap(), "🦔oo🦉🦉🦉oo🦔xo🦔o");
+        assert_eq!(uut.take_collected_output(), "🦔oo🦉🦉🦉oo🦔xo🦔o");
     }
 
     #[test]
@@ -1081,11 +1075,10 @@ mod test_raw_string_parser {
             uut.get_parser().look_at_remaining(),
             OsStr::new(&input[12..])
         );
-        uut.get_parser_mut()
-            .skip_until_ascii_char_or_end('\n'); // skips till end
+        uut.get_parser_mut().skip_until_ascii_char_or_end('\n'); // skips till end
         assert_eq!(uut.get_parser().look_at_remaining(), "");
 
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output().unwrap(), "🦉🦉🦉");
+        assert_eq!(uut.take_collected_output(), "🦉🦉🦉");
     }
 }
