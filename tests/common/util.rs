@@ -3032,13 +3032,13 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn test_host_name_for() {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         {
             std::assert_eq!(host_name_for("id"), "id");
             std::assert_eq!(host_name_for("groups"), "groups");
             std::assert_eq!(host_name_for("who"), "who");
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(all(not(target_os = "linux"), not(target_os = "android")))]
         {
             // spell-checker:ignore (strings) ggroups gwho
             std::assert_eq!(host_name_for("id"), "gid");
