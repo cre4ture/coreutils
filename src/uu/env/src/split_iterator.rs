@@ -26,28 +26,6 @@ use crate::string_expander::StringExpander;
 use crate::string_parser::StringParser;
 use crate::variable_parser::VariableParser;
 
-#[derive(Clone, Copy)]
-pub enum State {
-    /// Within a delimiter.
-    Delimiter,
-    /// After backslash, but before starting word.
-    DelimiterBackslash,
-    /// Within an unquoted word.
-    Unquoted,
-    /// After backslash in an unquoted word.
-    UnquotedBackslash,
-    /// Within a single quoted word.
-    SingleQuoted,
-    /// After backslash inside a double quoted word.
-    SingleQuotedBackslash,
-    /// Within a double quoted word.
-    DoubleQuoted,
-    /// After backslash inside a double quoted word.
-    DoubleQuotedBackslash,
-    /// Inside a comment.
-    Comment,
-}
-
 const BACKSLASH: char = '\\';
 const DOUBLE_QUOTES: char = '\"';
 const SINGLE_QUOTES: char = '\'';
