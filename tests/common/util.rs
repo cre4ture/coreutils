@@ -2368,7 +2368,7 @@ pub fn host_name_for(util_name: &str) -> Cow<str> {
             format!("g{util_name}").into()
         }
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     util_name.into()
 }
 
