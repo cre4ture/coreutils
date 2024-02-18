@@ -8,6 +8,7 @@
 pub mod parse_error;
 pub mod raw_string_parser;
 pub mod split_iterator;
+pub mod variable_parser;
 
 use clap::builder::ValueParser;
 use clap::{crate_name, crate_version, Arg, ArgAction, Command};

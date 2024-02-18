@@ -18,6 +18,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::env::vars_os;
 use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::mem;
@@ -26,6 +27,7 @@ use std::ops::Range;
 use crate::parse_error::ParseError;
 use crate::raw_string_parser::RawStringExpander;
 use crate::raw_string_parser::RawStringParser;
+use crate::variable_parser::VariableParser;
 
 #[derive(Clone, Copy)]
 pub enum State {
@@ -68,8 +70,8 @@ const REPLACEMENTS: [(char, char); 9] = [
 const ASCII_WHITESPACE_CHARS: [char; 6] = [' ', '\t', '\r', '\n', '\x0B', '\x0C'];
 
 pub struct SplitIterator<'a> {
-    pub raw_parser: RawStringExpander<'a>,
-    pub words: Vec<OsString>,
+    raw_parser: RawStringExpander<'a>,
+    words: Vec<OsString>,
 }
 
 impl<'a> SplitIterator<'a> {
@@ -102,17 +104,6 @@ impl<'a> SplitIterator<'a> {
         self.words.push(word);
     }
 
-    fn check_variable_name_start(&self) -> Result<(), ParseError> {
-        if let Some(c) = self.get_current_char() {
-            if c.is_ascii_digit() {
-                return Err(ParseError::ParsingOfVariableNameFailed {
-                    pos: self.raw_parser.get_parser().get_look_at_pos(),
-                    msg: format!("Unexpected character: '{}', expected variable name must not start with 0..9", c) });
-            }
-        }
-        Ok(())
-    }
-
     fn get_parser(&self) -> &RawStringParser<'a> {
         self.raw_parser.get_parser()
     }
@@ -121,120 +112,13 @@ impl<'a> SplitIterator<'a> {
         self.raw_parser.get_parser_mut()
     }
 
-    fn parse_braced_variable_name(&mut self) -> Result<(&'a OsStr, Option<&'a OsStr>), ParseError> {
-        let pos_start = self.get_parser().get_look_at_pos();
-
-        self.check_variable_name_start()?;
-
-        let (varname_end, default_end);
-        loop {
-            match self.get_current_char() {
-                None => {
-                    return Err(ParseError::ParsingOfVariableNameFailed {
-                        pos: self.get_parser().get_look_at_pos(), msg: "Missing closing brace".into() })
-                },
-                Some(c) if !c.is_ascii() || c.is_ascii_alphanumeric() || c == '_' => {
-                    self.skip_one()?;
-                }
-                Some(':') => {
-                    varname_end = self.get_parser().get_look_at_pos();
-                    loop {
-                        match self.get_current_char() {
-                            None => {
-                                return Err(ParseError::ParsingOfVariableNameFailed {
-                                    pos: self.get_parser().get_look_at_pos(),
-                                    msg: "Missing closing brace after default value".into() })
-                            },
-                            Some('}') => {
-                                default_end = Some(self.get_parser().get_look_at_pos());
-                                self.skip_one()?;
-                                break
-                            },
-                            Some(_) => {
-                                self.skip_one()?;
-                            },
-                        }
-                    }
-                    break;
-                },
-                Some('}') => {
-                    varname_end = self.get_parser().get_look_at_pos();
-                    default_end = None;
-                    self.skip_one()?;
-                    break;
-                },
-                Some(c) => {
-                    return Err(ParseError::ParsingOfVariableNameFailed {
-                        pos: self.get_parser().get_look_at_pos(),
-                        msg: format!("Unexpected character: '{}', expected a closing brace ('}}') or colon (':')", c)
-                    })
-                },
-            };
-        }
-
-        let default = if let Some(default_end) = default_end {
-            Some(self.get_parser().get_substring(&Range {
-                start: varname_end + 1,
-                end: default_end,
-            }))
-        } else {
-            None
+    fn substitute_variable(&mut self) -> Result<(), ParseError>
+    {
+        let mut var_parse = VariableParser::<'a, '_>{
+            parser: self.get_parser_mut()
         };
 
-        let varname = self.get_parser().get_substring(&Range {
-            start: pos_start,
-            end: varname_end,
-        });
-
-        Ok((varname, default))
-    }
-
-    fn parse_unbraced_variable_name(&mut self) -> Result<&OsStr, ParseError> {
-        let pos_start = self.get_parser().get_look_at_pos();
-
-        self.check_variable_name_start()?;
-
-        loop {
-            match self.get_current_char() {
-                None => break,
-                Some(c) if c.is_ascii_alphanumeric() || c == '_' => {
-                    self.skip_one()?;
-                }
-                Some(_) => break,
-            };
-        }
-
-        let pos_end = self.get_parser().get_look_at_pos();
-
-        if pos_end == pos_start {
-            return Err(ParseError::ParsingOfVariableNameFailed {
-                pos: pos_start,
-                msg: "Missing variable name".into(),
-            });
-        }
-
-        Ok(self.get_parser().get_substring(&Range {
-            start: pos_start,
-            end: pos_end,
-        }))
-    }
-
-    fn substitute_variable(&mut self) -> Result<(), ParseError> {
-        self.skip_one()?;
-
-        let (name, default) = match self.get_current_char() {
-            None => {
-                return Err(ParseError::ParsingOfVariableNameFailed {
-                    pos: self.get_parser().get_look_at_pos(),
-                    msg: "missing variable name".into(),
-                })
-            }
-            Some('{') => {
-                self.skip_one()?;
-                self.parse_braced_variable_name()?
-            }
-            Some(_) => (self.parse_unbraced_variable_name()?, None),
-        };
+        let (name, default) = var_parse.parse_variable()?;
 
         let value = std::env::var_os(name);
         match (&value, default) {
