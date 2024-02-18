@@ -262,17 +262,6 @@ fn test_fail_change_directory() {
     assert!(out.contains("env: cannot change directory to "));
 }
 
-fn modify_newlines_according_platform(input: &str) -> String {
-    #[cfg(target_os = "windows")]
-    {
-        input.replace("\n", "\r\n")
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        input.into()
-    }
-}
-
 #[cfg(not(target_os = "windows"))] // windows has no executable "echo", its only supported as part of a batch-file
 #[test]
 fn test_split_string_into_args_one_argument_no_quotes() {
@@ -283,7 +272,7 @@ fn test_split_string_into_args_one_argument_no_quotes() {
         .arg("-S echo hello world")
         .succeeds()
         .stdout_move_str();
-    assert_eq!(out, modify_newlines_according_platform("hello world\n"));
+    assert_eq!(out, "hello world\n");
 }
 
 #[cfg(not(target_os = "windows"))] // windows has no executable "echo", its only supported as part of a batch-file
@@ -296,7 +285,7 @@ fn test_split_string_into_args_one_argument() {
         .arg("-S echo \"hello world\"")
         .succeeds()
         .stdout_move_str();
-    assert_eq!(out, modify_newlines_according_platform("hello world\n"));
+    assert_eq!(out, "hello world\n");
 }
 
 #[cfg(not(target_os = "windows"))] // windows has no executable "echo", its only supported as part of a batch-file
@@ -309,10 +298,7 @@ fn test_split_string_into_args_s_escaping_challenge() {
         .args(&[r#"-S echo "hello \"great\" world""#])
         .succeeds()
         .stdout_move_str();
-    assert_eq!(
-        out,
-        modify_newlines_according_platform("hello \"great\" world\n")
-    );
+    assert_eq!(out, "hello \"great\" world\n");
 }
 
 #[test]
@@ -910,13 +896,10 @@ mod tests_split_iterator {
 }
 
 mod test_raw_string_parser {
-    use std::{
-        ffi::{OsStr, OsString},
-        os::unix::ffi::OsStringExt,
-    };
+    use std::ffi::{OsStr, OsString};
 
     use env::{string_expander::StringExpander, string_parser};
-    use os_str_bytes::OsStrBytesExt;
+    use os_str_bytes::{OsStrBytesExt, OsStringBytes};
 
     #[test]
     fn test_ascii_only_take_one_look_at_correct_data_and_end_behavior() {
@@ -1090,7 +1073,7 @@ mod test_raw_string_parser {
     fn test_deal_with_invalid_encoding() {
         let owl_b = "🦉".bytes().next().unwrap();
         let input_u8 = [b'<', owl_b, b'>'];
-        let input_str = OsString::from_vec(input_u8.to_vec());
+        let input_str = OsString::from_io_vec(input_u8.to_vec()).unwrap();
         let mut uut = StringExpander::new(&input_str);
 
         assert_eq!(uut.get_parser().look_at_remaining(), input_str);
