@@ -496,9 +496,9 @@ impl<'a> SplitIterator<'a> {
         }
     }
 
-    pub fn split(&mut self) -> Result<Vec<OsString>, ParseError> {
+    pub fn split(mut self) -> Result<Vec<OsString>, ParseError> {
         self.state_root()?;
-        Ok(mem::take(&mut self.words))
+        Ok(self.words)
     }
 }
 
