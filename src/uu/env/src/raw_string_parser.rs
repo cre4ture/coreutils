@@ -20,7 +20,8 @@
 #![forbid(unsafe_code)]
 
 use std::{
-    ffi::{OsStr, OsString}, mem
+    ffi::{OsStr, OsString},
+    mem,
 };
 
 use os_str_bytes::OsStrBytesExt;
@@ -75,7 +76,8 @@ impl<'a> RawStringExpander<'a> {
     }
 
     pub fn skip_one(&mut self) -> Result<(), Error> {
-        self.get_parser_mut().consumer_one_ascii_or_all_non_ascii()?;
+        self.get_parser_mut()
+            .consumer_one_ascii_or_all_non_ascii()?;
         Ok(())
     }
 
@@ -84,7 +86,6 @@ impl<'a> RawStringExpander<'a> {
     }
 
     pub fn take_one(&mut self) -> Result<(), Error> {
-
         let chunks = self.parser.consumer_one_ascii_or_all_non_ascii()?;
         for chunk in chunks {
             match chunk {
@@ -157,7 +158,7 @@ impl<'a> RawStringParser<'a> {
     pub fn look_at_pointer(&self, at_pointer: usize) -> Result<char, Error> {
         let mut split = self.input.split_at(at_pointer).1.utf8_chunks();
         let next = split.next();
-        if let Some((a,b)) = next {
+        if let Some((a, b)) = next {
             if a.as_os_str().is_empty() {
                 return Ok(b.chars().next().unwrap());
             } else {
@@ -190,7 +191,7 @@ impl<'a> RawStringParser<'a> {
 
     pub fn consume_one(&mut self) -> Result<Chunk<'a>, Error> {
         let (chunk, len) = self.get_chunk_at(self.pointer)?;
-        self.set_pointer(self.pointer + len)?;
+        self.set_pointer(self.pointer + len);
         Ok(chunk)
     }
 
@@ -198,7 +199,11 @@ impl<'a> RawStringParser<'a> {
         let mut result = Vec::<Chunk<'a>>::new();
         loop {
             let data = self.consume_one()?;
-            let was_ascii = if let Chunk::ValidChar(c) = &data { c.is_ascii() } else { false };
+            let was_ascii = if let Chunk::ValidChar(c) = &data {
+                c.is_ascii()
+            } else {
+                false
+            };
             result.push(data);
             if was_ascii {
                 return Ok(result);
@@ -217,22 +222,19 @@ impl<'a> RawStringParser<'a> {
         Ok(())
     }
 
-    pub fn skip_multiple_ascii_bounded(&mut self, skip_byte_count: usize) -> Result<(), Error> {
+    pub fn skip_multiple_ascii_bounded(&mut self, skip_byte_count: usize) {
         let end_ptr = self.pointer + skip_byte_count;
-        self.set_pointer(end_ptr)?;
-        Ok(())
+        self.set_pointer(end_ptr);
     }
 
-    pub fn skip_until_ascii_char_or_end(&mut self, c: char) -> Result<(), Error> {
-
+    pub fn skip_until_ascii_char_or_end(&mut self, c: char) {
         let pos = self.pointer_str.find(c);
 
         if let Some(pos) = pos {
-            self.set_pointer(self.pointer + pos)?;
+            self.set_pointer(self.pointer + pos);
         } else {
-            self.set_pointer(self.input.len())?;
+            self.set_pointer(self.input.len());
         }
-        return Ok(());
     }
 
     pub fn get_substring(&self, range: &std::ops::Range<usize>) -> Result<&'a OsStr, Error> {
@@ -246,9 +248,8 @@ impl<'a> RawStringParser<'a> {
         after
     }
 
-    fn set_pointer(&mut self, new_pointer: usize) -> Result<(), Error> {
+    fn set_pointer(&mut self, new_pointer: usize) {
         self.pointer = new_pointer;
         self.pointer_str = self.look_at_remaining();
-        Ok(())
     }
 }

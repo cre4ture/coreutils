@@ -553,7 +553,8 @@ fn test_env_with_gnu_reference() {
         .no_stdout()
         .stderr_is("env: invalid sequence '\\`' in -S\n");
 
-    ts.ucmd().args(&[r#"-S\🦉"#]) // ` escaped in single quotes
+    ts.ucmd()
+        .args(&[r#"-S\🦉"#]) // ` escaped in single quotes
         .fails()
         .code_is(125)
         .no_stdout()
@@ -860,10 +861,7 @@ mod tests_split_iterator {
         );
         assert_eq!(
             split(r#"\🦉"#),
-            Err(ParseError::InvalidSequenceBackslashXInMinusS {
-                pos: 1,
-                c: '🦉'
-            })
+            Err(ParseError::InvalidSequenceBackslashXInMinusS { pos: 1, c: '🦉' })
         );
     }
 
@@ -921,10 +919,7 @@ mod test_raw_string_parser {
         let input = "hello";
         let mut uut = env::raw_string_parser::RawStringExpander::new(&input);
         for c in input.chars() {
-            assert_eq!(
-                c,
-                uut.get_parser().look_at().unwrap()
-            );
+            assert_eq!(c, uut.get_parser().look_at().unwrap());
             uut.take_one().unwrap();
         }
         assert_eq!(
@@ -1020,13 +1015,11 @@ mod test_raw_string_parser {
         uut.skip_one().unwrap(); // skip x
         assert_eq!(uut.get_look_at_pos(), 22);
         uut.get_parser_mut()
-            .skip_until_ascii_char_or_end('x')
-            .unwrap(); // skip 🦉
+            .skip_until_ascii_char_or_end('x'); // skip 🦉
         assert_eq!(uut.get_look_at_pos(), 26);
         uut.take_one().unwrap(); // take x
         uut.get_parser_mut()
-            .skip_until_ascii_char_or_end('x')
-            .unwrap(); // skip 🦉🦉🦉🦉 till end
+            .skip_until_ascii_char_or_end('x'); // skip 🦉🦉🦉🦉 till end
         assert_eq!(uut.get_look_at_pos(), 43);
 
         uut.take_one().unwrap_err();
@@ -1038,25 +1031,22 @@ mod test_raw_string_parser {
         let input = OsString::from("🦉🦉🦉x🦉🦉x🦉x🦉🦉🦉🦉");
         let mut uut = env::raw_string_parser::RawStringExpander::new(&input);
 
-        uut.get_parser_mut().skip_multiple_ascii_bounded(0).unwrap();
+        uut.get_parser_mut().skip_multiple_ascii_bounded(0);
         assert_eq!(uut.get_look_at_pos(), 0);
         uut.get_parser_mut()
-            .skip_multiple_ascii_bounded(12)
-            .unwrap(); // skips 🦉🦉🦉
+            .skip_multiple_ascii_bounded(12); // skips 🦉🦉🦉
         assert_eq!(uut.get_look_at_pos(), 12);
 
         uut.take_one().unwrap(); // take x
         assert_eq!(uut.get_look_at_pos(), 13);
         uut.get_parser_mut()
-            .skip_multiple_ascii_bounded(13)
-            .unwrap(); // skips 🦉🦉x🦉
+            .skip_multiple_ascii_bounded(13); // skips 🦉🦉x🦉
         assert_eq!(uut.get_look_at_pos(), 26);
         uut.take_one().unwrap(); // take x
 
         assert_eq!(uut.get_look_at_pos(), 27);
         uut.get_parser_mut()
-            .skip_multiple_ascii_bounded(16)
-            .unwrap(); // skips 🦉🦉🦉🦉
+            .skip_multiple_ascii_bounded(16); // skips 🦉🦉🦉🦉
         assert_eq!(uut.get_look_at_pos(), 43);
 
         uut.take_one().unwrap_err();
@@ -1073,8 +1063,7 @@ mod test_raw_string_parser {
         uut.put_string_utf8("oo🦔").unwrap();
         uut.take_one().unwrap(); // take x
         uut.get_parser_mut()
-            .skip_until_ascii_char_or_end('\n')
-            .unwrap(); // skips till end
+            .skip_until_ascii_char_or_end('\n'); // skips till end
         uut.put_string_utf8("o🦔o").unwrap();
 
         uut.take_one().unwrap_err();
@@ -1093,8 +1082,7 @@ mod test_raw_string_parser {
             OsStr::new(&input[12..])
         );
         uut.get_parser_mut()
-            .skip_until_ascii_char_or_end('\n')
-            .unwrap(); // skips till end
+            .skip_until_ascii_char_or_end('\n'); // skips till end
         assert_eq!(uut.get_parser().look_at_remaining(), "");
 
         uut.take_one().unwrap_err();

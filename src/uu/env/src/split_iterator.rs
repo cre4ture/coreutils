@@ -73,7 +73,6 @@ pub struct SplitIterator<'a> {
 }
 
 impl<'a> SplitIterator<'a> {
-
     pub fn new<S: AsRef<OsStr> + ?Sized>(s: &'a S) -> Self {
         Self {
             raw_parser: RawStringExpander::new(s.as_ref()),
@@ -109,7 +108,7 @@ impl<'a> SplitIterator<'a> {
             if c.is_ascii_digit() {
                 return Err(ParseError::ParsingOfVariableNameFailed {
                     pos: self.raw_parser.get_parser().get_look_at_pos(),
-                    msg: format!("Unexpected character: '{}', expected variable name must not start with 0..9", c as char) });
+                    msg: format!("Unexpected character: '{}', expected variable name must not start with 0..9", c) });
             }
         }
         Ok(())
@@ -168,7 +167,7 @@ impl<'a> SplitIterator<'a> {
                 Some(c) => {
                     return Err(ParseError::ParsingOfVariableNameFailed {
                         pos: self.get_parser().get_look_at_pos(),
-                        msg: format!("Unexpected character: '{}', expected a closing brace ('}}') or colon (':')", c as char)
+                        msg: format!("Unexpected character: '{}', expected a closing brace ('}}') or colon (':')", c)
                     })
                 },
             };
@@ -324,8 +323,7 @@ impl<'a> SplitIterator<'a> {
                 self.skip_one()?;
                 Ok(())
             }
-            Some('$') | Some(BACKSLASH) | Some('#') | Some(SINGLE_QUOTES)
-            | Some(DOUBLE_QUOTES) => {
+            Some('$') | Some(BACKSLASH) | Some('#') | Some(SINGLE_QUOTES) | Some(DOUBLE_QUOTES) => {
                 self.take_one()?;
                 self.split_unquoted()
             }
@@ -505,7 +503,7 @@ impl<'a> SplitIterator<'a> {
                     return Ok(());
                 }
                 Some(_) => {
-                    self.get_parser_mut().skip_until_ascii_char_or_end('\n')?;
+                    self.get_parser_mut().skip_until_ascii_char_or_end('\n');
                 }
             }
         }

@@ -399,10 +399,7 @@ impl EnvAppData {
 
         // unset specified env vars
         for name in &opts.unsets {
-            if name.is_empty()
-                || name.contains("\0")
-                || name.contains("=")
-            {
+            if name.is_empty() || name.contains("\0") || name.contains("=") {
                 return Err(USimpleError::new(
                     125,
                     format!("cannot unset {}: Invalid argument", name.quote()),
