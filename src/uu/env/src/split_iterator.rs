@@ -267,9 +267,9 @@ impl<'a> SplitIterator<'a> {
         }
     }
 
-    fn split_root(&mut self) -> Result<(), ParseError> {
+    fn state_root(&mut self) -> Result<(), ParseError> {
         loop {
-            match self.split_delimiter() {
+            match self.state_delimiter() {
                 Err(ParseError::ContinueWithDelimiter) => {}
                 Err(ParseError::ReachedEnd) => return Ok(()),
                 result => return result,
@@ -277,30 +277,30 @@ impl<'a> SplitIterator<'a> {
         }
     }
 
-    fn split_delimiter(&mut self) -> Result<(), ParseError> {
+    fn state_delimiter(&mut self) -> Result<(), ParseError> {
         loop {
             match self.get_current_char() {
                 None => return Ok(()),
                 Some('#') => {
                     self.skip_one()?;
-                    self.split_comment()?;
+                    self.state_comment()?;
                 }
                 Some(BACKSLASH) => {
                     self.skip_one()?;
-                    self.split_delimiter_backslash()?;
+                    self.state_delimiter_backslash()?;
                 }
                 Some(c) if ASCII_WHITESPACE_CHARS.contains(&c) => {
                     self.skip_one()?;
                 }
                 Some(_) => {
                     // Don't consume char. Will be done in unquoted state.
-                    self.split_unquoted()?;
+                    self.state_unquoted()?;
                 }
             }
         }
     }
 
-    fn split_delimiter_backslash(&mut self) -> Result<(), ParseError> {
+    fn state_delimiter_backslash(&mut self) -> Result<(), ParseError> {
         match self.get_current_char() {
             None => Err(ParseError::InvalidBackslashAtEndOfStringInMinusS {
                 pos: self.get_parser().get_look_at_pos(),
@@ -312,15 +312,15 @@ impl<'a> SplitIterator<'a> {
             }
             Some('$') | Some(BACKSLASH) | Some('#') | Some(SINGLE_QUOTES) | Some(DOUBLE_QUOTES) => {
                 self.take_one()?;
-                self.split_unquoted()
+                self.state_unquoted()
             }
             Some('c') => Err(ParseError::ReachedEnd),
-            Some(c) if self.check_and_replace_ascii_escape_code(c)? => self.split_unquoted(),
+            Some(c) if self.check_and_replace_ascii_escape_code(c)? => self.state_unquoted(),
             Some(c) => Err(self.make_invalid_sequence_backslash_xin_minus_s(c)),
         }
     }
 
-    fn split_unquoted(&mut self) -> Result<(), ParseError> {
+    fn state_unquoted(&mut self) -> Result<(), ParseError> {
         loop {
             match self.get_current_char() {
                 None => {
@@ -332,15 +332,15 @@ impl<'a> SplitIterator<'a> {
                 }
                 Some(SINGLE_QUOTES) => {
                     self.skip_one()?;
-                    self.split_single_quoted()?;
+                    self.state_single_quoted()?;
                 }
                 Some(DOUBLE_QUOTES) => {
                     self.skip_one()?;
-                    self.split_double_quoted()?;
+                    self.state_double_quoted()?;
                 }
                 Some(BACKSLASH) => {
                     self.skip_one()?;
-                    self.split_unquoted_backslash()?;
+                    self.state_unquoted_backslash()?;
                 }
                 Some(c) if ASCII_WHITESPACE_CHARS.contains(&c) => {
                     self.push_word_to_words();
@@ -354,7 +354,7 @@ impl<'a> SplitIterator<'a> {
         }
     }
 
-    fn split_unquoted_backslash(&mut self) -> Result<(), ParseError> {
+    fn state_unquoted_backslash(&mut self) -> Result<(), ParseError> {
         match self.get_current_char() {
             None => Err(ParseError::InvalidBackslashAtEndOfStringInMinusS {
                 pos: self.get_parser().get_look_at_pos(),
@@ -382,7 +382,7 @@ impl<'a> SplitIterator<'a> {
         }
     }
 
-    fn split_single_quoted(&mut self) -> Result<(), ParseError> {
+    fn state_single_quoted(&mut self) -> Result<(), ParseError> {
         loop {
             match self.get_current_char() {
                 None => {
@@ -432,7 +432,7 @@ impl<'a> SplitIterator<'a> {
         }
     }
 
-    fn split_double_quoted(&mut self) -> Result<(), ParseError> {
+    fn state_double_quoted(&mut self) -> Result<(), ParseError> {
         loop {
             match self.get_current_char() {
                 None => {
@@ -450,7 +450,7 @@ impl<'a> SplitIterator<'a> {
                 }
                 Some(BACKSLASH) => {
                     self.skip_one()?;
-                    self.split_double_quoted_backslash()?;
+                    self.state_double_quoted_backslash()?;
                 }
                 Some(_) => {
                     self.take_one()?;
@@ -459,7 +459,7 @@ impl<'a> SplitIterator<'a> {
         }
     }
 
-    fn split_double_quoted_backslash(&mut self) -> Result<(), ParseError> {
+    fn state_double_quoted_backslash(&mut self) -> Result<(), ParseError> {
         match self.get_current_char() {
             None => Err(ParseError::MissingClosingQuote {
                 pos: self.get_parser().get_look_at_pos(),
@@ -481,7 +481,7 @@ impl<'a> SplitIterator<'a> {
         }
     }
 
-    fn split_comment(&mut self) -> Result<(), ParseError> {
+    fn state_comment(&mut self) -> Result<(), ParseError> {
         loop {
             match self.get_current_char() {
                 None => return Err(ParseError::ReachedEnd),
@@ -497,7 +497,7 @@ impl<'a> SplitIterator<'a> {
     }
 
     pub fn split(&mut self) -> Result<Vec<OsString>, ParseError> {
-        self.split_root()?;
+        self.state_root()?;
         Ok(mem::take(&mut self.words))
     }
 }
