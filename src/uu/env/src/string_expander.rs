@@ -5,7 +5,7 @@
 
 use std::{ffi::{OsStr, OsString}, mem};
 
-use crate::string_parser::{Chunk, Error, RawStringParser};
+use crate::string_parser::{Chunk, Error, StringParser};
 
 
 
@@ -16,33 +16,33 @@ use crate::string_parser::{Chunk, Error, RawStringParser};
 /// It provides "skip_one" and "take_one" that focus on
 /// working with ASCII separators. Thus they will skip or take
 /// all consecutive non-ascii char sequences at once.
-pub struct RawStringExpander<'a> {
-    parser: RawStringParser<'a>,
+pub struct StringExpander<'a> {
+    parser: StringParser<'a>,
     output: OsString,
 }
 
 
 
-impl<'a> RawStringExpander<'a> {
+impl<'a> StringExpander<'a> {
     pub fn new<S: AsRef<OsStr> + ?Sized>(input: &'a S) -> Self {
         Self {
-            parser: RawStringParser::new(input),
+            parser: StringParser::new(input),
             output: OsString::default(),
         }
     }
 
     pub fn new_at(input: &'a OsStr, pos: usize) -> Result<Self, Error> {
         Ok(Self {
-            parser: RawStringParser::new_at(input, pos)?,
+            parser: StringParser::new_at(input, pos)?,
             output: OsString::default(),
         })
     }
 
-    pub fn get_parser(&self) -> &RawStringParser<'a> {
+    pub fn get_parser(&self) -> &StringParser<'a> {
         &self.parser
     }
 
-    pub fn get_parser_mut(&mut self) -> &mut RawStringParser<'a> {
+    pub fn get_parser_mut(&mut self) -> &mut StringParser<'a> {
         &mut self.parser
     }
 

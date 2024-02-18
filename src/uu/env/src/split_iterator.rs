@@ -23,7 +23,7 @@ use std::ffi::OsString;
 
 use crate::parse_error::ParseError;
 use crate::string_parser::RawStringExpander;
-use crate::string_parser::RawStringParser;
+use crate::string_parser::StringParser;
 use crate::variable_parser::VariableParser;
 
 #[derive(Clone, Copy)]
@@ -101,11 +101,11 @@ impl<'a> SplitIterator<'a> {
         self.words.push(word);
     }
 
-    fn get_parser(&self) -> &RawStringParser<'a> {
+    fn get_parser(&self) -> &StringParser<'a> {
         self.raw_parser.get_parser()
     }
 
-    fn get_parser_mut(&mut self) -> &mut RawStringParser<'a> {
+    fn get_parser_mut(&mut self) -> &mut StringParser<'a> {
         self.raw_parser.get_parser_mut()
     }
 

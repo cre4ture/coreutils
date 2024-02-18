@@ -5,12 +5,12 @@
 
 use std::{ffi::OsStr, ops::Range};
 
-use crate::{parse_error::ParseError, string_parser::RawStringParser};
+use crate::{parse_error::ParseError, string_parser::StringParser};
 
 pub struct VariableParser<'a, 'b>
     where 'a : 'b
 {
-    pub parser: &'b mut RawStringParser<'a>
+    pub parser: &'b mut StringParser<'a>
 }
 
 impl<'a, 'b> VariableParser<'a, 'b> {
