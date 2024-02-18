@@ -95,18 +95,12 @@ impl<'a> RawStringExpander<'a> {
         Ok(())
     }
 
-    pub fn put_one_char(&mut self, c: char) -> Result<(), Error> {
+    pub fn put_one_char(&mut self, c: char) {
         self.output.push(c.to_string());
-        Ok(())
     }
 
-    pub fn put_string(&mut self, str: &OsStr) -> Result<(), Error> {
+    pub fn put_string<S: AsRef<OsStr>>(&mut self, str: S) {
         self.output.push(str);
-        Ok(())
-    }
-
-    pub fn put_string_utf8(&mut self, str: &str) -> Result<(), Error> {
-        self.put_string(&OsString::from(str))
     }
 
     pub fn take_collected_output(&mut self) -> OsString {

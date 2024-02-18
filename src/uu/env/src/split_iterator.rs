@@ -93,8 +93,8 @@ impl<'a> SplitIterator<'a> {
         self.raw_parser.get_parser().look_at().ok()
     }
 
-    fn push_ascii_char_to_word(&mut self, c: char) -> Result<(), ParseError> {
-        Ok(self.raw_parser.put_one_char(c)?)
+    fn push_char_to_word(&mut self, c: char) {
+        self.raw_parser.put_one_char(c)
     }
 
     fn push_word_to_words(&mut self) {
@@ -240,10 +240,10 @@ impl<'a> SplitIterator<'a> {
         match (&value, default) {
             (None, None) => {} // do nothing, just replace it with ""
             (Some(value), _) => {
-                self.raw_parser.put_string(value)?;
+                self.raw_parser.put_string(value);
             }
             (None, Some(default)) => {
-                self.raw_parser.put_string(default)?;
+                self.raw_parser.put_string(default);
             }
         };
 
@@ -253,7 +253,7 @@ impl<'a> SplitIterator<'a> {
     fn check_and_replace_ascii_escape_code(&mut self, c: char) -> Result<bool, ParseError> {
         if let Some(replace) = REPLACEMENTS.iter().find(|&x| x.0 == c) {
             self.skip_one()?;
-            self.push_ascii_char_to_word(replace.1)?;
+            self.push_char_to_word(replace.1);
             return Ok(true);
         }
 
@@ -424,7 +424,7 @@ impl<'a> SplitIterator<'a> {
                 // See GNU test-suite e11: In single quotes, \t remains as it is.
                 // Comparing with GNU behavior: \a is not accepted and issues an error.
                 // So apparently only known sequences are allowed, even though they are not expanded.... bug of GNU?
-                self.push_ascii_char_to_word(BACKSLASH)?;
+                self.push_char_to_word(BACKSLASH);
                 self.take_one()?;
                 Ok(())
             }

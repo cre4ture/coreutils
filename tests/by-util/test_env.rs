@@ -968,19 +968,19 @@ mod test_raw_string_parser {
         let input = OsString::from("🦉🦉🦉x🦉🦉x🦉x🦉🦉🦉🦉");
         let owl: char = '🦉';
         let mut uut = env::raw_string_parser::RawStringExpander::new(&input);
-        uut.put_one_char('a').unwrap();
+        uut.put_one_char('a');
         for _i in 0..3 {
             assert_eq!(uut.get_parser().look_at().unwrap(), owl);
             uut.take_one().unwrap();
-            uut.put_one_char('a').unwrap();
+            uut.put_one_char('a');
             assert_eq!(uut.get_parser().look_at().unwrap(), 'x');
             uut.take_one().unwrap();
-            uut.put_one_char('a').unwrap();
+            uut.put_one_char('a');
         }
         assert_eq!(uut.get_parser().look_at().unwrap(), owl);
         uut.take_one().unwrap();
-        uut.put_one_char(owl).unwrap();
-        uut.put_one_char('a').unwrap();
+        uut.put_one_char(owl);
+        uut.put_one_char('a');
         assert_eq!(
             uut.get_parser().look_at(),
             Err(raw_string_parser::Error {
@@ -989,7 +989,7 @@ mod test_raw_string_parser {
             })
         );
         uut.take_one().unwrap_err();
-        uut.put_one_char('a').unwrap();
+        uut.put_one_char('a');
         uut.take_one().unwrap_err();
         assert_eq!(
             uut.take_collected_output(),
@@ -1053,12 +1053,12 @@ mod test_raw_string_parser {
         let input = OsString::from("🦉🦉🦉x🦉🦉x🦉x🦉🦉🦉🦉");
         let mut uut = env::raw_string_parser::RawStringExpander::new(&input);
 
-        uut.put_string_utf8("🦔oo").unwrap();
+        uut.put_string("🦔oo");
         uut.take_one().unwrap(); // takes 🦉🦉🦉
-        uut.put_string_utf8("oo🦔").unwrap();
+        uut.put_string("oo🦔");
         uut.take_one().unwrap(); // take x
         uut.get_parser_mut().skip_until_ascii_char_or_end('\n'); // skips till end
-        uut.put_string_utf8("o🦔o").unwrap();
+        uut.put_string("o🦔o");
 
         uut.take_one().unwrap_err();
         assert_eq!(uut.take_collected_output(), "🦔oo🦉🦉🦉oo🦔xo🦔o");
