@@ -910,9 +910,10 @@ mod tests_split_iterator {
 }
 
 mod test_raw_string_parser {
-    use std::ffi::{OsStr, OsString};
+    use std::{ffi::{OsStr, OsString}, os::unix::ffi::OsStringExt};
 
     use env::raw_string_parser;
+    use os_str_bytes::OsStrBytesExt;
 
     #[test]
     fn test_ascii_only_take_one_look_at_correct_data_and_end_behavior() {
@@ -1080,5 +1081,33 @@ mod test_raw_string_parser {
 
         uut.take_one().unwrap_err();
         assert_eq!(uut.take_collected_output(), "🦉🦉🦉");
+    }
+
+    #[test]
+    fn test_deal_with_invalid_encoding() {
+        let owl_b = "🦉".bytes().next().unwrap();
+        let input_u8 = [b'<', owl_b, b'>'];
+        let input_str = OsString::from_vec(input_u8.to_vec());
+        let mut uut = env::raw_string_parser::RawStringExpander::new(&input_str);
+
+        assert_eq!(uut.get_parser().look_at_remaining(), input_str);
+        assert_eq!(uut.get_parser().look_at().unwrap(), '<');
+        uut.take_one().unwrap(); // takes "<"
+        assert_eq!(
+            uut.get_parser().look_at_remaining(),
+            OsStr::new(&input_str.as_os_str().split_at(1).1)
+        );
+        assert_eq!(uut.get_parser().look_at().unwrap(), '\u{FFFD}');
+        uut.take_one().unwrap(); // takes owl_b
+        assert_eq!(
+            uut.get_parser().look_at_remaining(),
+            OsStr::new(&input_str.as_os_str().split_at(2).1)
+        );
+        assert_eq!(uut.get_parser().look_at().unwrap(), '>');
+        uut.get_parser_mut().skip_until_ascii_char_or_end('\n');
+        assert_eq!(uut.get_parser().look_at_remaining(), "");
+
+        uut.take_one().unwrap_err();
+        assert_eq!(uut.take_collected_output(), input_str.split_at(2).0);
     }
 }
