@@ -343,7 +343,7 @@ blake2b_simd = "1.0.2"
 blake3 = "1.5.0"
 sm3 = "0.4.2"
 digest = "0.10.7"
-os_str_bytes = "7.0"
+os_str_bytes = { version = "6.6.1", features = ["conversions", "nightly", "raw_os_str"] }
 
 uucore = { version = ">=0.0.19", package = "uucore", path = "src/uucore" }
 uucore_procs = { version = ">=0.0.19", package = "uucore_procs", path = "src/uucore_procs" }

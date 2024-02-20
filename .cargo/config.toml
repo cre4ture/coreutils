@@ -11,3 +11,5 @@ rustflags = [
     "-Wclippy::if_not_else",
 ]
 
+[env]
+OS_STR_BYTES_NIGHTLY=""
