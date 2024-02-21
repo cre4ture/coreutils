@@ -46,12 +46,12 @@ const REPLACEMENTS: [(char, char); 9] = [
 
 const ASCII_WHITESPACE_CHARS: [char; 6] = [' ', '\t', '\r', '\n', '\x0B', '\x0C'];
 
-pub struct SplitIterator<'a> {
-    expander: StringExpander<'a>,
+pub struct SplitIterator<'a, 'b> {
+    expander: StringExpander<'a, 'b>,
     words: Vec<OsString>,
 }
 
-impl<'a> SplitIterator<'a> {
+impl<'a, 'b> SplitIterator<'a, 'b> {
     pub fn new<S: AsRef<OsStr> + ?Sized>(s: &'a S) -> Self {
         Self {
             expander: StringExpander::new(s.as_ref()),
@@ -83,11 +83,11 @@ impl<'a> SplitIterator<'a> {
         self.words.push(word);
     }
 
-    fn get_parser(&self) -> &StringParser<'a> {
+    fn get_parser(&self) -> &StringParser<'a, 'b> {
         self.expander.get_parser()
     }
 
-    fn get_parser_mut(&mut self) -> &mut StringParser<'a> {
+    fn get_parser_mut(&mut self) -> &mut StringParser<'a, 'b> {
         self.expander.get_parser_mut()
     }
 
