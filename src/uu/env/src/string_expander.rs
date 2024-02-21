@@ -16,12 +16,12 @@ use crate::string_parser::{Chunk, Error, StringParser};
 /// It provides "skip_one" and "take_one" that focus on
 /// working with ASCII separators. Thus they will skip or take
 /// all consecutive non-ascii char sequences at once.
-pub struct StringExpander<'a> {
-    parser: StringParser<'a>,
+pub struct StringExpander<'a, 'b> {
+    parser: StringParser<'a, 'b>,
     output: OsString,
 }
 
-impl<'a> StringExpander<'a> {
+impl<'a, 'b> StringExpander<'a, 'b> {
     pub fn new<S: AsRef<OsStr> + ?Sized>(input: &'a S) -> Self {
         Self {
             parser: StringParser::new(input),
@@ -36,11 +36,11 @@ impl<'a> StringExpander<'a> {
         })
     }
 
-    pub fn get_parser(&self) -> &StringParser<'a> {
+    pub fn get_parser(&self) -> &StringParser<'a, 'b> {
         &self.parser
     }
 
-    pub fn get_parser_mut(&mut self) -> &mut StringParser<'a> {
+    pub fn get_parser_mut(&mut self) -> &mut StringParser<'a, 'b> {
         &mut self.parser
     }
 

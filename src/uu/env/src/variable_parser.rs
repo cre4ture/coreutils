@@ -8,10 +8,8 @@ use std::{ffi::OsStr, ops::Range};
 use crate::{parse_error::ParseError, string_parser::StringParser};
 
 pub struct VariableParser<'a, 'b>
-where
-    'a: 'b,
 {
-    pub parser: &'b mut StringParser<'a>,
+    pub parser: &'b mut StringParser<'a, 'b>,
 }
 
 impl<'a, 'b> VariableParser<'a, 'b> {
