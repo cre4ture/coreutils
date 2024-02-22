@@ -847,7 +847,10 @@ mod tests_split_iterator {
         );
         assert_eq!(
             split(r#"\🦉"#),
-            Err(ParseError::InvalidSequenceBackslashXInMinusS { pos: 1, c: '\u{FFFD}' })
+            Err(ParseError::InvalidSequenceBackslashXInMinusS {
+                pos: 1,
+                c: '\u{FFFD}'
+            })
         );
     }
 
@@ -896,9 +899,16 @@ mod tests_split_iterator {
 }
 
 mod test_raw_string_parser {
-    use std::{borrow::Cow, ffi::{OsStr, OsString}};
+    use std::{
+        borrow::Cow,
+        ffi::{OsStr, OsString},
+    };
 
-    use env::{native_int_str::{from_native_int_representation, to_native_int_representation}, string_expander::StringExpander, string_parser};
+    use env::{
+        native_int_str::{from_native_int_representation, to_native_int_representation},
+        string_expander::StringExpander,
+        string_parser,
+    };
     use os_str_bytes::OsStrBytesExt;
 
     #[test]

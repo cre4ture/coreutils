@@ -5,10 +5,12 @@
 
 use std::{borrow::Cow, ffi::OsStr, ops::Range};
 
-use crate::{native_int_str::from_native_int_representation, parse_error::ParseError, string_parser::StringParser};
+use crate::{
+    native_int_str::from_native_int_representation, parse_error::ParseError,
+    string_parser::StringParser,
+};
 
-pub struct VariableParser<'a, 'b>
-{
+pub struct VariableParser<'a, 'b> {
     pub parser: &'b mut StringParser<'a>,
 }
 
@@ -33,7 +35,9 @@ impl<'a, 'b> VariableParser<'a, 'b> {
         Ok(())
     }
 
-    fn parse_braced_variable_name(&mut self) -> Result<(Cow<'a, OsStr>, Option<Cow<'a, OsStr>>), ParseError> {
+    fn parse_braced_variable_name(
+        &mut self,
+    ) -> Result<(Cow<'a, OsStr>, Option<Cow<'a, OsStr>>), ParseError> {
         let pos_start = self.parser.get_peek_position();
 
         self.check_variable_name_start()?;
@@ -102,7 +106,6 @@ impl<'a, 'b> VariableParser<'a, 'b> {
         let default_opt_cow = default.map(|x| from_native_int_representation(Cow::Borrowed(x)));
 
         Ok((varname_cow, default_opt_cow))
-
     }
 
     fn parse_unbraced_variable_name(&mut self) -> Result<Cow<'a, OsStr>, ParseError> {
@@ -138,7 +141,9 @@ impl<'a, 'b> VariableParser<'a, 'b> {
         Ok(from_native_int_representation(varname_cow))
     }
 
-    pub fn parse_variable(&mut self) -> Result<(Cow<'a, OsStr>, Option<Cow<'a, OsStr>>), ParseError> {
+    pub fn parse_variable(
+        &mut self,
+    ) -> Result<(Cow<'a, OsStr>, Option<Cow<'a, OsStr>>), ParseError> {
         self.skip_one()?;
 
         let (name, default) = match self.get_current_char() {

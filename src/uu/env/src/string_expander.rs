@@ -4,10 +4,18 @@
 // file that was distributed with this source code.
 
 use std::{
-    borrow::Cow, ffi::{OsStr, OsString}, mem, ops::Deref
+    borrow::Cow,
+    ffi::{OsStr, OsString},
+    mem,
+    ops::Deref,
 };
 
-use crate::{native_int_str::{from_native_int_representation, to_native_int_representation, NativeCharIntT, NativeIntStrT}, string_parser::{Chunk, Error, StringParser}};
+use crate::{
+    native_int_str::{
+        from_native_int_representation, to_native_int_representation, NativeCharIntT, NativeIntStrT,
+    },
+    string_parser::{Chunk, Error, StringParser},
+};
 
 /// This class makes parsing and word collection more convenient.
 ///

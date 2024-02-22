@@ -8,8 +8,10 @@
 
 use std::{borrow::Cow, ffi::OsStr};
 
-use crate::native_int_str::{from_native_int_representation, get_char_from_native_int, get_single_native_int_value, NativeCharIntT, NativeIntStrT};
-
+use crate::native_int_str::{
+    from_native_int_representation, get_char_from_native_int, get_single_native_int_value,
+    NativeCharIntT, NativeIntStrT,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Error {
@@ -35,8 +37,7 @@ pub enum Chunk<'a> {
 /// This class makes parsing a OsString char by char more convenient.
 ///
 /// It also allows to capturing of intermediate positions for later splitting.
-pub struct StringParser<'a>
-{
+pub struct StringParser<'a> {
     input: &'a NativeIntStrT,
     pointer: usize,
     remaining: &'a NativeIntStrT,
@@ -80,7 +81,7 @@ impl<'a> StringParser<'a> {
 
     pub fn peek_char_at_pointer(&self, at_pointer: usize) -> Result<char, Error> {
         let split = self.input.split_at(at_pointer).1;
-        if split.len() == 0 {
+        if split.is_empty() {
             return Err(self.make_err(ErrorType::EndOfInput));
         }
         if let Some((c, _ni)) = get_char_from_native_int(split[0]) {
@@ -92,8 +93,8 @@ impl<'a> StringParser<'a> {
 
     fn get_chunk_with_length_at(&self, pointer: usize) -> Result<(Chunk<'a>, usize), Error> {
         let (_before, after) = self.input.split_at(pointer);
-        if after.len() == 0 {
-            return Err(self.make_err(ErrorType::EndOfInput))
+        if after.is_empty() {
+            return Err(self.make_err(ErrorType::EndOfInput));
         }
 
         if let Some(c_ni) = get_char_from_native_int(after[0]) {

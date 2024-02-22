@@ -95,7 +95,7 @@ impl<'a> SplitIterator<'a> {
 
     fn substitute_variable<'x>(&'x mut self) -> Result<(), ParseError> {
         let mut var_parse = VariableParser::<'a, '_> {
-            parser: self.get_parser_mut()
+            parser: self.get_parser_mut(),
         };
 
         let (name, default) = var_parse.parse_variable()?;
