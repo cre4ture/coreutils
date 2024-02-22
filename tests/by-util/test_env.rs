@@ -544,7 +544,7 @@ fn test_env_with_gnu_reference() {
         .fails()
         .code_is(125)
         .no_stdout()
-        .stderr_is("env: invalid sequence '\\🦉' in -S\n"); // gnu doesn't show the owl. Instead a invalid unicode ?
+        .stderr_is("env: invalid sequence '\\\u{FFFD}' in -S\n"); // gnu doesn't show the owl. Instead a invalid unicode ?
 }
 
 #[cfg(test)]
@@ -847,7 +847,7 @@ mod tests_split_iterator {
         );
         assert_eq!(
             split(r#"\🦉"#),
-            Err(ParseError::InvalidSequenceBackslashXInMinusS { pos: 1, c: '🦉' })
+            Err(ParseError::InvalidSequenceBackslashXInMinusS { pos: 1, c: '\u{FFFD}' })
         );
     }
 
@@ -896,15 +896,16 @@ mod tests_split_iterator {
 }
 
 mod test_raw_string_parser {
-    use std::ffi::{OsStr, OsString};
+    use std::{borrow::Cow, ffi::{OsStr, OsString}};
 
-    use env::{string_expander::StringExpander, string_parser};
-    use os_str_bytes::{OsStrBytesExt, OsStringBytes};
+    use env::{native_int_str::{from_native_int_representation, to_native_int_representation}, string_expander::StringExpander, string_parser};
+    use os_str_bytes::OsStrBytesExt;
 
     #[test]
     fn test_ascii_only_take_one_look_at_correct_data_and_end_behavior() {
         let input = "hello";
-        let mut uut = StringExpander::new(&input);
+        let cow = to_native_int_representation(OsStr::new(input));
+        let mut uut = StringExpander::new(&cow);
         for c in input.chars() {
             assert_eq!(c, uut.get_parser().peek().unwrap());
             uut.take_one().unwrap();
@@ -926,15 +927,15 @@ mod test_raw_string_parser {
     #[test]
     fn test_multi_byte_codes_take_one_look_at_correct_data_and_end_behavior() {
         let input = OsString::from("🦉🦉🦉x🦉🦉x🦉x🦉🦉🦉🦉");
-        let owl: char = '🦉';
-        let mut uut = StringExpander::new(&input);
+        let cow = to_native_int_representation(input.as_os_str());
+        let mut uut = StringExpander::new(&cow);
         for _i in 0..3 {
-            assert_eq!(uut.get_parser().peek().unwrap(), owl);
+            assert_eq!(uut.get_parser().peek().unwrap(), '\u{FFFD}');
             uut.take_one().unwrap();
             assert_eq!(uut.get_parser().peek().unwrap(), 'x');
             uut.take_one().unwrap();
         }
-        assert_eq!(uut.get_parser().peek().unwrap(), owl);
+        assert_eq!(uut.get_parser().peek().unwrap(), '\u{FFFD}');
         uut.take_one().unwrap();
         assert_eq!(
             uut.get_parser().peek(),
@@ -953,18 +954,19 @@ mod test_raw_string_parser {
     #[test]
     fn test_multi_byte_codes_put_one_ascii_start_middle_end_try_invalid_ascii() {
         let input = OsString::from("🦉🦉🦉x🦉🦉x🦉x🦉🦉🦉🦉");
+        let cow = to_native_int_representation(input.as_os_str());
         let owl: char = '🦉';
-        let mut uut = StringExpander::new(&input);
+        let mut uut = StringExpander::new(&cow);
         uut.put_one_char('a');
         for _i in 0..3 {
-            assert_eq!(uut.get_parser().peek().unwrap(), owl);
+            assert_eq!(uut.get_parser().peek().unwrap(), '\u{FFFD}');
             uut.take_one().unwrap();
             uut.put_one_char('a');
             assert_eq!(uut.get_parser().peek().unwrap(), 'x');
             uut.take_one().unwrap();
             uut.put_one_char('a');
         }
-        assert_eq!(uut.get_parser().peek().unwrap(), owl);
+        assert_eq!(uut.get_parser().peek().unwrap(), '\u{FFFD}');
         uut.take_one().unwrap();
         uut.put_one_char(owl);
         uut.put_one_char('a');
@@ -989,7 +991,8 @@ mod test_raw_string_parser {
     #[test]
     fn test_multi_byte_codes_skip_one_take_one_skip_until_ascii_char_or_end() {
         let input = OsString::from("🦉🦉🦉x🦉🦉x🦉x🦉🦉🦉🦉");
-        let mut uut = StringExpander::new(&input);
+        let cow = to_native_int_representation(input.as_os_str());
+        let mut uut = StringExpander::new(&cow);
 
         uut.skip_one().unwrap(); // skip 🦉🦉🦉
         assert_eq!(uut.get_peek_position(), 12);
@@ -1014,7 +1017,8 @@ mod test_raw_string_parser {
     #[test]
     fn test_multi_byte_codes_skip_multiple_ascii_bounded_good_and_bad() {
         let input = OsString::from("🦉🦉🦉x🦉🦉x🦉x🦉🦉🦉🦉");
-        let mut uut = StringExpander::new(&input);
+        let cow = to_native_int_representation(input.as_os_str());
+        let mut uut = StringExpander::new(&cow);
 
         uut.get_parser_mut().skip_multiple(0);
         assert_eq!(uut.get_peek_position(), 0);
@@ -1038,7 +1042,8 @@ mod test_raw_string_parser {
     #[test]
     fn test_multi_byte_codes_put_string_utf8_start_middle_end() {
         let input = OsString::from("🦉🦉🦉x🦉🦉x🦉x🦉🦉🦉🦉");
-        let mut uut = StringExpander::new(&input);
+        let cow = to_native_int_representation(input.as_os_str());
+        let mut uut = StringExpander::new(&cow);
 
         uut.put_string("🦔oo");
         uut.take_one().unwrap(); // takes 🦉🦉🦉
@@ -1054,13 +1059,14 @@ mod test_raw_string_parser {
     #[test]
     fn test_multi_byte_codes_look_at_remaining_start_middle_end() {
         let input = "🦉🦉🦉x🦉🦉x🦉x🦉🦉🦉🦉";
-        let mut uut = StringExpander::new(&input);
+        let cow = to_native_int_representation(OsStr::new(input));
+        let mut uut = StringExpander::new(&cow);
 
-        assert_eq!(uut.get_parser().peek_remaining(), input);
+        assert_eq!(uut.get_parser().peek_remaining(), OsStr::new(input));
         uut.take_one().unwrap(); // takes 🦉🦉🦉
         assert_eq!(uut.get_parser().peek_remaining(), OsStr::new(&input[12..]));
         uut.get_parser_mut().skip_until_char_or_end('\n'); // skips till end
-        assert_eq!(uut.get_parser().peek_remaining(), "");
+        assert_eq!(uut.get_parser().peek_remaining(), OsStr::new(""));
 
         uut.take_one().unwrap_err();
         assert_eq!(uut.take_collected_output(), "🦉🦉🦉");
@@ -1068,27 +1074,46 @@ mod test_raw_string_parser {
 
     #[test]
     fn test_deal_with_invalid_encoding() {
-        let owl_b = "🦉".bytes().next().unwrap();
-        let input_u8 = [b'<', owl_b, b'>'];
-        let input_str = OsString::from_io_vec(input_u8.to_vec()).unwrap();
-        let mut uut = StringExpander::new(&input_str);
+        let owl_invalid_part;
+        let (brace_1, brace_2);
+        #[cfg(target_os = "windows")]
+        {
+            let mut buffer = [0u16; 2];
+            let owl = '🦉'.encode_utf16(&mut buffer);
+            owl_invalid_part = owl[0];
+            brace_1 = '<'.encode_utf16(&mut buffer).to_vec();
+            brace_2 = '>'.encode_utf16(&mut buffer).to_vec();
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let mut buffer = [0u8; 4];
+            let owl = '🦉'.encode_utf8(&mut buffer);
+            owl_invalid_part = owl.bytes().next().unwrap();
+            brace_1 = [b'<'].to_vec();
+            brace_2 = [b'>'].to_vec();
+        }
+        let mut input_ux = brace_1;
+        input_ux.push(owl_invalid_part);
+        input_ux.extend(brace_2);
+        let input_str = from_native_int_representation(Cow::Borrowed(&input_ux));
+        let mut uut = StringExpander::new(&input_ux);
 
         assert_eq!(uut.get_parser().peek_remaining(), input_str);
         assert_eq!(uut.get_parser().peek().unwrap(), '<');
         uut.take_one().unwrap(); // takes "<"
         assert_eq!(
             uut.get_parser().peek_remaining(),
-            OsStr::new(&input_str.as_os_str().split_at(1).1)
+            OsStr::new(&input_str.split_at(1).1)
         );
         assert_eq!(uut.get_parser().peek().unwrap(), '\u{FFFD}');
         uut.take_one().unwrap(); // takes owl_b
         assert_eq!(
             uut.get_parser().peek_remaining(),
-            OsStr::new(&input_str.as_os_str().split_at(2).1)
+            OsStr::new(&input_str.split_at(2).1)
         );
         assert_eq!(uut.get_parser().peek().unwrap(), '>');
         uut.get_parser_mut().skip_until_char_or_end('\n');
-        assert_eq!(uut.get_parser().peek_remaining(), "");
+        assert_eq!(uut.get_parser().peek_remaining(), OsStr::new(""));
 
         uut.take_one().unwrap_err();
         assert_eq!(uut.take_collected_output(), input_str.split_at(2).0);

@@ -21,6 +21,8 @@
 use std::ffi::OsStr;
 use std::ffi::OsString;
 
+use crate::native_int_str::to_native_int_representation;
+use crate::native_int_str::NativeIntStrT;
 use crate::parse_error::ParseError;
 use crate::string_expander::StringExpander;
 use crate::string_parser::StringParser;
@@ -46,15 +48,15 @@ const REPLACEMENTS: [(char, char); 9] = [
 
 const ASCII_WHITESPACE_CHARS: [char; 6] = [' ', '\t', '\r', '\n', '\x0B', '\x0C'];
 
-pub struct SplitIterator<'a, 'b> {
-    expander: StringExpander<'a, 'b>,
+pub struct SplitIterator<'a> {
+    expander: StringExpander<'a>,
     words: Vec<OsString>,
 }
 
-impl<'a, 'b> SplitIterator<'a, 'b> {
-    pub fn new<S: AsRef<OsStr> + ?Sized>(s: &'a S) -> Self {
+impl<'a> SplitIterator<'a> {
+    pub fn new(s: &'a NativeIntStrT) -> Self {
         Self {
-            expander: StringExpander::new(s.as_ref()),
+            expander: StringExpander::new(s),
             words: Vec::<OsString>::new(),
         }
     }
@@ -83,17 +85,17 @@ impl<'a, 'b> SplitIterator<'a, 'b> {
         self.words.push(word);
     }
 
-    fn get_parser(&self) -> &StringParser<'a, 'b> {
+    fn get_parser(&self) -> &StringParser<'a> {
         self.expander.get_parser()
     }
 
-    fn get_parser_mut(&mut self) -> &mut StringParser<'a, 'b> {
+    fn get_parser_mut(&mut self) -> &mut StringParser<'a> {
         self.expander.get_parser_mut()
     }
 
-    fn substitute_variable(&mut self) -> Result<(), ParseError> {
+    fn substitute_variable<'x>(&'x mut self) -> Result<(), ParseError> {
         let mut var_parse = VariableParser::<'a, '_> {
-            parser: self.get_parser_mut(),
+            parser: self.get_parser_mut()
         };
 
         let (name, default) = var_parse.parse_variable()?;
@@ -366,5 +368,6 @@ impl<'a, 'b> SplitIterator<'a, 'b> {
 }
 
 pub fn split(s: &OsStr) -> Result<Vec<OsString>, ParseError> {
-    SplitIterator::new(s).split()
+    let native = to_native_int_representation(s);
+    SplitIterator::new(&native).split()
 }

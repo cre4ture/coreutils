@@ -6,6 +6,7 @@
 // spell-checker:ignore (ToDO) chdir execvp progname subcommand subcommands unsets setenv putenv spawnp SIGSEGV SIGBUS sigaction
 
 pub mod parse_error;
+pub mod native_int_str;
 pub mod split_iterator;
 pub mod string_expander;
 pub mod string_parser;

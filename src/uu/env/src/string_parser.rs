@@ -7,10 +7,9 @@
 #![forbid(unsafe_code)]
 
 use std::{borrow::Cow, ffi::OsStr};
-#[cfg(target_os = "windows")]
-use std::os::windows::prelude::*;
-#[cfg(target_os = "windows")]
-use std::ffi::OsString;
+
+use crate::native_int_str::{from_native_int_representation, get_char_from_native_int, get_single_native_int_value, NativeCharIntT, NativeIntStrT};
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Error {
@@ -29,107 +28,39 @@ pub enum ErrorType {
 /// Invalid byte sequences can't be splitted in any meaningful way.
 /// Thus, they need to be consumed as one piece.
 pub enum Chunk<'a> {
-    InvalidEncoding(Cow<'a, OsStr>),
-    ValidChar(char),
-}
-
-#[cfg(target_os = "windows")]
-use u16 as NativeCharIntT;
-#[cfg(not(target_os = "windows"))]
-use u8 as NativeCharIntT;
-
-fn to_native_int_representation<'a>(input: &'a OsStr) -> Cow<'a, [NativeCharIntT]> {
-    #[cfg(target_os = "windows")]
-    {
-        Cow::Owned(input.encode_wide().collect())
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        use std::os::unix::ffi::OsStrExt;
-        Cow::Borrowed::<'a>(input.as_bytes())
-    }
-}
-
-fn from_native_int_representation<'a>(input: &'a [NativeCharIntT]) -> Cow<'a, OsStr> {
-    #[cfg(target_os = "windows")]
-    {
-        Cow::Owned(OsString::from_wide(input))
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        use std::os::unix::ffi::OsStrExt;
-        Cow::Borrowed(OsStr::from_bytes(input))
-    }
-}
-
-fn get_single_native_int_value(c: char) -> Option<NativeCharIntT> {
-    #[cfg(target_os = "windows")]
-    {
-        let mut buf = [0u16,0];
-        let s = c.encode_utf16(&mut buf);
-        if s.len() == 1 {
-            Some(buf[0])
-        } else {
-            None
-        }
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let mut buf = [0u8,0,0,0];
-        let s = c.encode_utf8(&mut buf);
-        if s.len() == 1 {
-            Some(buf[0])
-        } else {
-            None
-        }
-    }
-}
-
-fn get_char_from_single_native_int_value(ni: NativeCharIntT) -> Option<char> {
-    #[cfg(target_os = "windows")]
-    {
-        // (ni <= 0xD7FF) || (0xE000 >= ni && ni <= 0xFFFF)
-        char::decode_utf16([ni;1]).next().unwrap().ok()
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        char::try_from(ni).ok()
-    }
+    InvalidEncoding(&'a NativeIntStrT),
+    ValidSingleIntChar((char, NativeCharIntT)),
 }
 
 /// This class makes parsing a OsString char by char more convenient.
 ///
 /// It also allows to capturing of intermediate positions for later splitting.
-pub struct StringParser<'a, 'b>{
-    input_cow: Cow<'a, [NativeCharIntT]>,
-    input: &'b [NativeCharIntT],
+pub struct StringParser<'a>
+{
+    input: &'a NativeIntStrT,
     pointer: usize,
-    remaining: &'b [NativeCharIntT],
-    //remaining_str: &'b OsStr,
+    remaining: &'a NativeIntStrT,
 }
 
-impl<'a, 'b> StringParser<'a, 'b> {
-    pub fn new<S: AsRef<OsStr> + ?Sized>(input_str: &'a S) -> Self {
-        let input_cow = to_native_int_representation(input_str.as_ref());
+impl<'a> StringParser<'a> {
+    pub fn new(input: &'a NativeIntStrT) -> Self {
         let mut instance = Self {
-            input_cow,
-            input: &[0;0],
+            input,
             pointer: 0,
-            remaining: &[0;0],
-            //remaining_str: &OsStr::new("")
+            remaining: input,
         };
         instance.set_pointer(0);
         instance
     }
 
-    pub fn new_at(input: &'a OsStr, pos: usize) -> Result<Self, Error> {
+    pub fn new_at(input: &'a NativeIntStrT, pos: usize) -> Self {
         let mut instance = Self::new(input);
         instance.set_pointer(pos);
-        Ok(instance)
+        instance
+    }
+
+    pub fn get_input(&self) -> &'a NativeIntStrT {
+        self.input
     }
 
     pub fn get_peek_position(&self) -> usize {
@@ -152,8 +83,7 @@ impl<'a, 'b> StringParser<'a, 'b> {
         if split.len() == 0 {
             return Err(self.make_err(ErrorType::EndOfInput));
         }
-        let next = split[0];
-        if let Some(c) = get_char_from_single_native_int_value(next) {
+        if let Some((c, _ni)) = get_char_from_native_int(split[0]) {
             Ok(c)
         } else {
             Ok('\u{FFFD}')
@@ -166,21 +96,19 @@ impl<'a, 'b> StringParser<'a, 'b> {
             return Err(self.make_err(ErrorType::EndOfInput))
         }
 
-        let next_int = after[0];
-        if let Some(c) = get_char_from_single_native_int_value(next_int) {
-            Ok((Chunk::ValidChar(c), 1))
+        if let Some(c_ni) = get_char_from_native_int(after[0]) {
+            Ok((Chunk::ValidSingleIntChar(c_ni), 1))
         } else {
             let mut i = 1;
             while i < after.len() {
-                if let Some(c) = get_char_from_single_native_int_value(after[i]) {
+                if let Some(_c) = get_char_from_native_int(after[i]) {
                     break;
                 }
                 i += 1;
             }
 
             let chunk = &after[0..i];
-            let str = from_native_int_representation(chunk);
-            Ok((Chunk::InvalidEncoding(str), chunk.len()))
+            Ok((Chunk::InvalidEncoding(chunk), chunk.len()))
         }
     }
 
@@ -201,7 +129,7 @@ impl<'a, 'b> StringParser<'a, 'b> {
         let mut result = Vec::<Chunk<'a>>::new();
         loop {
             let data = self.consume_chunk()?;
-            let was_ascii = if let Chunk::ValidChar(c) = &data {
+            let was_ascii = if let Chunk::ValidSingleIntChar((c, _ni)) = &data {
                 c.is_ascii()
             } else {
                 false
@@ -212,7 +140,7 @@ impl<'a, 'b> StringParser<'a, 'b> {
             }
 
             match self.peek_chunk() {
-                Some(Chunk::ValidChar(c)) if c.is_ascii() => return Ok(result),
+                Some(Chunk::ValidSingleIntChar((c, _ni))) if c.is_ascii() => return Ok(result),
                 None => return Ok(result),
                 _ => {}
             }
@@ -235,20 +163,19 @@ impl<'a, 'b> StringParser<'a, 'b> {
         }
     }
 
-    pub fn substring(&self, range: &std::ops::Range<usize>) -> Cow<'a, OsStr> {
+    pub fn substring(&self, range: &std::ops::Range<usize>) -> &'a NativeIntStrT {
         let (_before1, after1) = self.input.split_at(range.start);
         let (middle, _after2) = after1.split_at(range.end - range.start);
-        from_native_int_representation(middle)
+        middle
     }
 
     pub fn peek_remaining(&self) -> Cow<'a, OsStr> {
-        from_native_int_representation(&*self.remaining)
+        from_native_int_representation(Cow::Borrowed(self.remaining))
     }
 
     pub fn set_pointer(&mut self, new_pointer: usize) {
         self.pointer = new_pointer;
         let (_before, after) = self.input.split_at(self.pointer);
-        self.remaining = after.into();
-        //self.remaining_str = self.peek_remaining();
+        self.remaining = after;
     }
 }

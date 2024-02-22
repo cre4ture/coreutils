@@ -3,13 +3,13 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-use std::{ffi::OsStr, ops::Range};
+use std::{borrow::Cow, ffi::OsStr, ops::Range};
 
-use crate::{parse_error::ParseError, string_parser::StringParser};
+use crate::{native_int_str::from_native_int_representation, parse_error::ParseError, string_parser::StringParser};
 
 pub struct VariableParser<'a, 'b>
 {
-    pub parser: &'b mut StringParser<'a, 'b>,
+    pub parser: &'b mut StringParser<'a>,
 }
 
 impl<'a, 'b> VariableParser<'a, 'b> {
@@ -33,7 +33,7 @@ impl<'a, 'b> VariableParser<'a, 'b> {
         Ok(())
     }
 
-    fn parse_braced_variable_name(&mut self) -> Result<(&'a OsStr, Option<&'a OsStr>), ParseError> {
+    fn parse_braced_variable_name(&mut self) -> Result<(Cow<'a, OsStr>, Option<Cow<'a, OsStr>>), ParseError> {
         let pos_start = self.parser.get_peek_position();
 
         self.check_variable_name_start()?;
@@ -98,10 +98,14 @@ impl<'a, 'b> VariableParser<'a, 'b> {
             end: varname_end,
         });
 
-        Ok((varname, default))
+        let varname_cow = from_native_int_representation(Cow::Borrowed(varname));
+        let default_opt_cow = default.map(|x| from_native_int_representation(Cow::Borrowed(x)));
+
+        Ok((varname_cow, default_opt_cow))
+
     }
 
-    fn parse_unbraced_variable_name(&mut self) -> Result<&'a OsStr, ParseError> {
+    fn parse_unbraced_variable_name(&mut self) -> Result<Cow<'a, OsStr>, ParseError> {
         let pos_start = self.parser.get_peek_position();
 
         self.check_variable_name_start()?;
@@ -125,13 +129,16 @@ impl<'a, 'b> VariableParser<'a, 'b> {
             });
         }
 
-        Ok(self.parser.substring(&Range {
+        let varname = self.parser.substring(&Range {
             start: pos_start,
             end: pos_end,
-        }))
+        });
+        let varname_cow = Cow::Borrowed(varname);
+
+        Ok(from_native_int_representation(varname_cow))
     }
 
-    pub fn parse_variable(&mut self) -> Result<(&'a OsStr, Option<&'a OsStr>), ParseError> {
+    pub fn parse_variable(&mut self) -> Result<(Cow<'a, OsStr>, Option<Cow<'a, OsStr>>), ParseError> {
         self.skip_one()?;
 
         let (name, default) = match self.get_current_char() {
