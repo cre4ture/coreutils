@@ -18,9 +18,11 @@
 
 #![forbid(unsafe_code)]
 
+use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::ffi::OsString;
 
+use crate::native_int_str::from_native_int_representation;
 use crate::native_int_str::from_native_int_representation_owned;
 use crate::native_int_str::to_native_int_representation;
 use crate::native_int_str::NativeCharInt;
@@ -103,14 +105,15 @@ impl<'a> SplitIterator<'a> {
 
         let (name, default) = var_parse.parse_variable()?;
 
-        let value = std::env::var_os(name);
+        let varname_os_str_cow = from_native_int_representation(Cow::Borrowed(name));
+        let value = std::env::var_os(varname_os_str_cow);
         match (&value, default) {
             (None, None) => {} // do nothing, just replace it with ""
             (Some(value), _) => {
                 self.expander.put_string(value);
             }
             (None, Some(default)) => {
-                self.expander.put_string(default);
+                self.expander.put_native_string(default);
             }
         };
 
