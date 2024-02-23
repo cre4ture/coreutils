@@ -905,7 +905,7 @@ mod test_raw_string_parser {
     };
 
     use env::{
-        native_int_str::{from_native_int_representation, to_native_int_representation},
+        native_int_str::{from_native_int_representation, from_native_int_representation_owned, to_native_int_representation},
         string_expander::StringExpander,
         string_parser,
     };
@@ -929,9 +929,9 @@ mod test_raw_string_parser {
         );
         uut.take_one().unwrap_err();
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output(), input);
+        assert_eq!(from_native_int_representation_owned(uut.take_collected_output()), input);
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output(), "");
+        assert_eq!(from_native_int_representation_owned(uut.take_collected_output()), "");
     }
 
     #[test]
@@ -956,9 +956,9 @@ mod test_raw_string_parser {
         );
         uut.take_one().unwrap_err();
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output(), input);
+        assert_eq!(from_native_int_representation_owned(uut.take_collected_output()), input);
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output(), "");
+        assert_eq!(from_native_int_representation_owned(uut.take_collected_output()), "");
     }
 
     #[test]
@@ -991,11 +991,11 @@ mod test_raw_string_parser {
         uut.put_one_char('a');
         uut.take_one().unwrap_err();
         assert_eq!(
-            uut.take_collected_output(),
+            from_native_int_representation_owned(uut.take_collected_output()),
             "a🦉🦉🦉axa🦉🦉axa🦉axa🦉🦉🦉🦉🦉aa"
         );
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output(), "");
+        assert_eq!(from_native_int_representation_owned(uut.take_collected_output()), "");
     }
 
     #[test]
@@ -1021,7 +1021,7 @@ mod test_raw_string_parser {
         assert_eq!(uut.get_peek_position(), 43);
 
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output(), "🦉🦉x");
+        assert_eq!(from_native_int_representation_owned(uut.take_collected_output()), "🦉🦉x");
     }
 
     #[test]
@@ -1046,7 +1046,7 @@ mod test_raw_string_parser {
         assert_eq!(uut.get_peek_position(), 43);
 
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output(), "xx");
+        assert_eq!(from_native_int_representation_owned(uut.take_collected_output()), "xx");
     }
 
     #[test]
@@ -1063,7 +1063,7 @@ mod test_raw_string_parser {
         uut.put_string("o🦔o");
 
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output(), "🦔oo🦉🦉🦉oo🦔xo🦔o");
+        assert_eq!(from_native_int_representation_owned(uut.take_collected_output()), "🦔oo🦉🦉🦉oo🦔xo🦔o");
     }
 
     #[test]
@@ -1079,7 +1079,7 @@ mod test_raw_string_parser {
         assert_eq!(uut.get_parser().peek_remaining(), OsStr::new(""));
 
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output(), "🦉🦉🦉");
+        assert_eq!(from_native_int_representation_owned(uut.take_collected_output()), "🦉🦉🦉");
     }
 
     #[test]
@@ -1126,6 +1126,6 @@ mod test_raw_string_parser {
         assert_eq!(uut.get_parser().peek_remaining(), OsStr::new(""));
 
         uut.take_one().unwrap_err();
-        assert_eq!(uut.take_collected_output(), input_str.split_at(2).0);
+        assert_eq!(from_native_int_representation_owned(uut.take_collected_output()), input_str.split_at(2).0);
     }
 }

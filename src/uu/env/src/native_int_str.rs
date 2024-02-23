@@ -1,3 +1,9 @@
+// This file is part of the uutils coreutils package.
+//
+// For the full copyright and license information, please view the LICENSE
+// file that was distributed with this source code.
+
+
 use std::ffi::OsString;
 #[cfg(target_os = "windows")]
 use std::os::windows::prelude::*;
@@ -10,6 +16,7 @@ use u8 as NativeIntCharU;
 
 pub type NativeCharIntT = NativeIntCharU;
 pub type NativeIntStrT = [NativeCharIntT];
+pub type NativeIntString = Vec<NativeCharIntT>;
 
 pub fn to_native_int_representation(input: &OsStr) -> Cow<'_, NativeIntStrT> {
     #[cfg(target_os = "windows")]
@@ -38,6 +45,19 @@ pub fn from_native_int_representation(input: Cow<'_, NativeIntStrT>) -> Cow<'_, 
             Cow::Borrowed(borrow) => Cow::Borrowed(OsStr::from_bytes(borrow)),
             Cow::Owned(own) => Cow::Owned(OsString::from_vec(own)),
         }
+    }
+}
+
+pub fn from_native_int_representation_owned(input: NativeIntString) -> OsString {
+    #[cfg(target_os = "windows")]
+    {
+        Cow::Owned(OsString::from_wide(&input))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        OsString::from_vec(input)
     }
 }
 

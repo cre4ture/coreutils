@@ -4,7 +4,6 @@
 // file that was distributed with this source code.
 
 use std::{
-    borrow::Cow,
     ffi::{OsStr, OsString},
     mem,
     ops::Deref,
@@ -12,7 +11,7 @@ use std::{
 
 use crate::{
     native_int_str::{
-        from_native_int_representation, to_native_int_representation, NativeCharIntT, NativeIntStrT,
+        to_native_int_representation, NativeCharIntT, NativeIntStrT,
     },
     string_parser::{Chunk, Error, StringParser},
 };
@@ -85,13 +84,7 @@ impl<'a> StringExpander<'a> {
         self.output.extend(native.deref());
     }
 
-    pub fn take_collected_output(&mut self) -> OsString {
-        let out = mem::take(&mut self.output);
-        let cow = Cow::Owned(out);
-        if let Cow::Owned(vec) = from_native_int_representation(cow) {
-            return vec;
-        }
-
-        panic!("assert failed: owned in, owned out");
+    pub fn take_collected_output(&mut self) -> Vec<NativeCharIntT> {
+        mem::take(&mut self.output)
     }
 }

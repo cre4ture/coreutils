@@ -18,11 +18,16 @@
 
 #![forbid(unsafe_code)]
 
+
 use std::ffi::OsStr;
 use std::ffi::OsString;
 
+
+use crate::native_int_str::from_native_int_representation_owned;
 use crate::native_int_str::to_native_int_representation;
+use crate::native_int_str::NativeCharIntT;
 use crate::native_int_str::NativeIntStrT;
+use crate::native_int_str::NativeIntString;
 use crate::parse_error::ParseError;
 use crate::string_expander::StringExpander;
 use crate::string_parser::StringParser;
@@ -50,14 +55,14 @@ const ASCII_WHITESPACE_CHARS: [char; 6] = [' ', '\t', '\r', '\n', '\x0B', '\x0C'
 
 pub struct SplitIterator<'a> {
     expander: StringExpander<'a>,
-    words: Vec<OsString>,
+    words: Vec<Vec<NativeCharIntT>>,
 }
 
 impl<'a> SplitIterator<'a> {
     pub fn new(s: &'a NativeIntStrT) -> Self {
         Self {
             expander: StringExpander::new(s),
-            words: Vec::<OsString>::new(),
+            words: Vec::new(),
         }
     }
 
@@ -361,7 +366,7 @@ impl<'a> SplitIterator<'a> {
         }
     }
 
-    pub fn split(mut self) -> Result<Vec<OsString>, ParseError> {
+    pub fn split(mut self) -> Result<Vec<NativeIntString>, ParseError> {
         self.state_root()?;
         Ok(self.words)
     }
@@ -369,5 +374,8 @@ impl<'a> SplitIterator<'a> {
 
 pub fn split(s: &OsStr) -> Result<Vec<OsString>, ParseError> {
     let native = to_native_int_representation(s);
-    SplitIterator::new(&native).split()
+    let splitted_args = SplitIterator::new(&native).split()?;
+    Ok(splitted_args.into_iter().map(
+        |x| from_native_int_representation_owned(x)
+        ).collect())
 }
