@@ -3,7 +3,6 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-
 use std::ffi::OsString;
 #[cfg(target_os = "windows")]
 use std::os::windows::prelude::*;
@@ -14,11 +13,11 @@ use u16 as NativeIntCharU;
 #[cfg(not(target_os = "windows"))]
 use u8 as NativeIntCharU;
 
-pub type NativeCharIntT = NativeIntCharU;
-pub type NativeIntStrT = [NativeCharIntT];
-pub type NativeIntString = Vec<NativeCharIntT>;
+pub type NativeCharInt = NativeIntCharU;
+pub type NativeIntStr = [NativeCharInt];
+pub type NativeIntString = Vec<NativeCharInt>;
 
-pub fn to_native_int_representation(input: &OsStr) -> Cow<'_, NativeIntStrT> {
+pub fn to_native_int_representation(input: &OsStr) -> Cow<'_, NativeIntStr> {
     #[cfg(target_os = "windows")]
     {
         Cow::Owned(input.encode_wide().collect())
@@ -31,7 +30,7 @@ pub fn to_native_int_representation(input: &OsStr) -> Cow<'_, NativeIntStrT> {
     }
 }
 
-pub fn from_native_int_representation(input: Cow<'_, NativeIntStrT>) -> Cow<'_, OsStr> {
+pub fn from_native_int_representation(input: Cow<'_, NativeIntStr>) -> Cow<'_, OsStr> {
     #[cfg(target_os = "windows")]
     {
         Cow::Owned(OsString::from_wide(&input))
@@ -51,7 +50,7 @@ pub fn from_native_int_representation(input: Cow<'_, NativeIntStrT>) -> Cow<'_, 
 pub fn from_native_int_representation_owned(input: NativeIntString) -> OsString {
     #[cfg(target_os = "windows")]
     {
-        Cow::Owned(OsString::from_wide(&input))
+        OsString::from_wide(&input)
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -61,7 +60,7 @@ pub fn from_native_int_representation_owned(input: NativeIntString) -> OsString 
     }
 }
 
-pub fn get_single_native_int_value(c: char) -> Option<NativeCharIntT> {
+pub fn get_single_native_int_value(c: char) -> Option<NativeCharInt> {
     #[cfg(target_os = "windows")]
     {
         let mut buf = [0u16, 0];
@@ -85,7 +84,7 @@ pub fn get_single_native_int_value(c: char) -> Option<NativeCharIntT> {
     }
 }
 
-pub fn get_char_from_native_int(ni: NativeCharIntT) -> Option<(char, NativeCharIntT)> {
+pub fn get_char_from_native_int(ni: NativeCharInt) -> Option<(char, NativeCharInt)> {
     let c_opt;
     #[cfg(target_os = "windows")]
     {

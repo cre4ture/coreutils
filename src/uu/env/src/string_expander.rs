@@ -10,9 +10,7 @@ use std::{
 };
 
 use crate::{
-    native_int_str::{
-        to_native_int_representation, NativeCharIntT, NativeIntStrT,
-    },
+    native_int_str::{to_native_int_representation, NativeCharInt, NativeIntStr},
     string_parser::{Chunk, Error, StringParser},
 };
 
@@ -24,18 +22,18 @@ use crate::{
 /// all consecutive non-ascii char sequences at once.
 pub struct StringExpander<'a> {
     parser: StringParser<'a>,
-    output: Vec<NativeCharIntT>,
+    output: Vec<NativeCharInt>,
 }
 
 impl<'a> StringExpander<'a> {
-    pub fn new(input: &'a NativeIntStrT) -> Self {
+    pub fn new(input: &'a NativeIntStr) -> Self {
         Self {
             parser: StringParser::new(input),
             output: Vec::default(),
         }
     }
 
-    pub fn new_at(input: &'a NativeIntStrT, pos: usize) -> Self {
+    pub fn new_at(input: &'a NativeIntStr, pos: usize) -> Self {
         Self {
             parser: StringParser::new_at(input, pos),
             output: Vec::default(),
@@ -84,7 +82,7 @@ impl<'a> StringExpander<'a> {
         self.output.extend(native.deref());
     }
 
-    pub fn take_collected_output(&mut self) -> Vec<NativeCharIntT> {
+    pub fn take_collected_output(&mut self) -> Vec<NativeCharInt> {
         mem::take(&mut self.output)
     }
 }

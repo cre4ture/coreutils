@@ -10,7 +10,7 @@ use std::{borrow::Cow, ffi::OsStr};
 
 use crate::native_int_str::{
     from_native_int_representation, get_char_from_native_int, get_single_native_int_value,
-    NativeCharIntT, NativeIntStrT,
+    NativeCharInt, NativeIntStr,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -30,21 +30,21 @@ pub enum ErrorType {
 /// Invalid byte sequences can't be splitted in any meaningful way.
 /// Thus, they need to be consumed as one piece.
 pub enum Chunk<'a> {
-    InvalidEncoding(&'a NativeIntStrT),
-    ValidSingleIntChar((char, NativeCharIntT)),
+    InvalidEncoding(&'a NativeIntStr),
+    ValidSingleIntChar((char, NativeCharInt)),
 }
 
 /// This class makes parsing a OsString char by char more convenient.
 ///
 /// It also allows to capturing of intermediate positions for later splitting.
 pub struct StringParser<'a> {
-    input: &'a NativeIntStrT,
+    input: &'a NativeIntStr,
     pointer: usize,
-    remaining: &'a NativeIntStrT,
+    remaining: &'a NativeIntStr,
 }
 
 impl<'a> StringParser<'a> {
-    pub fn new(input: &'a NativeIntStrT) -> Self {
+    pub fn new(input: &'a NativeIntStr) -> Self {
         let mut instance = Self {
             input,
             pointer: 0,
@@ -54,13 +54,13 @@ impl<'a> StringParser<'a> {
         instance
     }
 
-    pub fn new_at(input: &'a NativeIntStrT, pos: usize) -> Self {
+    pub fn new_at(input: &'a NativeIntStr, pos: usize) -> Self {
         let mut instance = Self::new(input);
         instance.set_pointer(pos);
         instance
     }
 
-    pub fn get_input(&self) -> &'a NativeIntStrT {
+    pub fn get_input(&self) -> &'a NativeIntStr {
         self.input
     }
 
@@ -164,7 +164,7 @@ impl<'a> StringParser<'a> {
         }
     }
 
-    pub fn substring(&self, range: &std::ops::Range<usize>) -> &'a NativeIntStrT {
+    pub fn substring(&self, range: &std::ops::Range<usize>) -> &'a NativeIntStr {
         let (_before1, after1) = self.input.split_at(range.start);
         let (middle, _after2) = after1.split_at(range.end - range.start);
         middle
