@@ -373,6 +373,14 @@ impl CmdResult {
 
     #[track_caller]
     pub fn code_is(&self, expected_code: i32) -> &Self {
+        let fails = self.code() != expected_code;
+        if fails {
+            eprintln!(
+                "stdout:\n{}\nstderr:\n{}",
+                self.stdout_str(),
+                self.stderr_str()
+            );
+        }
         assert_eq!(self.code(), expected_code);
         self
     }
