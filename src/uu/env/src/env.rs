@@ -510,7 +510,7 @@ impl EnvAppData {
                     return Err(self.make_error_no_such_file_or_dir(prog.deref()));
                 }
                 Err(e) => {
-                    eprintln!("unknown error: {:?}", e);
+                    uucore::show_error!("unknown error: {:?}", e);
                     return Err(126.into());
                 }
                 Ok(_) => (),

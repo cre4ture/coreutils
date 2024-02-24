@@ -4,7 +4,7 @@
 // file that was distributed with this source code.
 // spell-checker:ignore (words) bamf chdir rlimit prlimit COMSPEC cout cerr FFFD
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(target_os = "linux")]
 use crate::common::util::expected_result;
 use crate::common::util::TestScenario;
 use ::env::native_int_str::{Convert, NCvt};
@@ -351,7 +351,6 @@ fn test_split_string_into_args_debug_output_whitespace_handling() {
     assert_eq!(out.stderr_str(), "input args:\narg[0]: 'env'\narg[1]: $'-vS printf x%sx\\\\n A \\t B \\x0B\\x0C\\r\\n'\nexecutable: 'printf'\narg[0]: $'x%sx\\n'\narg[1]: 'A'\narg[2]: 'B'\n");
 }
 
-
 // FixMe: This test fails on MACOS:
 // thread 'test_env::test_gnu_e20' panicked at 'assertion failed: `(left == right)`
 // left: `"A=B C=D\n__CF_USER_TEXT_ENCODING=0x1F5:0x0:0x0\n"`,
@@ -412,7 +411,7 @@ fn test_split_string_environment_vars_test() {
 #[macro_export]
 macro_rules! compare_with_gnu {
     ( $ts:expr, $args:expr ) => {{
-        eprintln!("==========================================================================");
+        println!("==========================================================================");
         let result = $ts.ucmd().args($args).run();
 
         #[cfg(target_os = "linux")]
@@ -423,12 +422,12 @@ macro_rules! compare_with_gnu {
                     && result.stdout_str() == reference.stdout_str()
                     && result.stderr_str() == reference.stderr_str();
                 if !success {
-                    eprintln!("reference.code: {}", reference.code());
-                    eprintln!("   result.code: {}", result.code());
-                    eprintln!("reference.cout: {}", reference.stdout_str());
-                    eprintln!("   result.cout: {}", result.stdout_str());
-                    eprintln!("reference.cerr: {}", reference.stderr_str_lossy());
-                    eprintln!("   result.cerr: {}", result.stderr_str_lossy());
+                    println!("reference.code: {}", reference.code());
+                    println!("   result.code: {}", result.code());
+                    println!("reference.cout: {}", reference.stdout_str());
+                    println!("   result.cout: {}", result.stdout_str());
+                    println!("reference.cerr: {}", reference.stderr_str_lossy());
+                    println!("   result.cerr: {}", result.stderr_str_lossy());
                 }
                 assert_eq!(result.code(), reference.code());
                 assert_eq!(result.stdout_str(), reference.stdout_str());
