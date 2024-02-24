@@ -15,9 +15,10 @@ pub mod variable_parser;
 use clap::builder::ValueParser;
 use clap::{crate_name, crate_version, Arg, ArgAction, Command};
 use ini::Ini;
+use native_int_str::{Convert, from_native_int_representation_owned, NCvt, NativeIntStr, NativeIntString, NativeStr}
+;
 #[cfg(unix)]
 use nix::sys::signal::{raise, sigaction, SaFlags, SigAction, SigHandler, SigSet, Signal};
-use os_str_bytes::OsStrBytesExt;
 use std::borrow::Cow;
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -44,7 +45,7 @@ struct Options<'a> {
     running_directory: Option<&'a OsStr>,
     files: Vec<&'a OsStr>,
     unsets: Vec<&'a OsStr>,
-    sets: Vec<(&'a OsStr, &'a OsStr)>,
+    sets: Vec<(Cow<'a, OsStr>, Cow<'a, OsStr>)>,
     program: Vec<&'a OsStr>,
 }
 
@@ -58,9 +59,11 @@ fn print_env(line_ending: LineEnding) {
     }
 }
 
-fn parse_name_value_opt<'a>(opts: &mut Options<'a>, opt: &'a OsStr) -> UResult<bool> {
+fn parse_name_value_opt<'a>(opts: &mut Options<'a>, opt: &'a OsStr) -> UResult<bool>
+{
     // is it a NAME=VALUE like opt ?
-    let split_o = opt.split_once("=");
+    let wrap = NativeStr::<'a>::new(&opt);
+    let split_o = wrap.split_once(&'=');
     if let Some((name, value)) = split_o {
         // yes, so push name, value pair
         opts.sets.push((name, value));
@@ -71,7 +74,8 @@ fn parse_name_value_opt<'a>(opts: &mut Options<'a>, opt: &'a OsStr) -> UResult<b
     }
 }
 
-fn parse_program_opt<'a>(opts: &mut Options<'a>, opt: &'a OsStr) -> UResult<()> {
+fn parse_program_opt<'a>(opts: &mut Options<'a>, opt: &'a OsStr) -> UResult<()>
+{
     if opts.line_ending == LineEnding::Nul {
         Err(UUsageError::new(
             125,
@@ -189,7 +193,7 @@ pub fn uu_app() -> Command {
         )
 }
 
-pub fn parse_args_from_str(text: &OsStr) -> UResult<Vec<OsString>> {
+pub fn parse_args_from_str(text: &NativeIntStr) -> UResult<Vec<NativeIntString>> {
     split_iterator::split(text).map_err(|e| match e {
         parse_error::ParseError::BackslashCNotAllowedInDoubleQuotes { pos: _ } => {
             USimpleError::new(125, "'\\c' must not appear in double-quoted -S string")
@@ -223,13 +227,14 @@ fn check_and_handle_string_args(
     all_args: &mut Vec<std::ffi::OsString>,
     do_debug_print_args: Option<&Vec<OsString>>,
 ) -> UResult<bool> {
-    if let Some(remaining_arg) = arg.strip_prefix(prefix_to_test) {
+    let native_arg = NCvt::convert(arg);
+    if let Some(remaining_arg) = native_arg.strip_prefix(&*NCvt::convert(prefix_to_test)) {
         if let Some(input_args) = do_debug_print_args {
             debug_print_args(input_args); // do it here, such that its also printed when we get an error/panic during parsing
         }
 
         let arg_strings = parse_args_from_str(remaining_arg)?;
-        all_args.extend(arg_strings);
+        all_args.extend(arg_strings.into_iter().map(from_native_int_representation_owned));
 
         Ok(true)
     } else {
@@ -394,7 +399,9 @@ impl EnvAppData {
 
         // unset specified env vars
         for name in &opts.unsets {
-            if name.is_empty() || name.contains("\0") || name.contains("=") {
+            let native_name = NativeStr::new(name);
+            if name.is_empty() || native_name.contains(&'\0').unwrap() || native_name.contains(&'=').unwrap()
+            {
                 return Err(USimpleError::new(
                     125,
                     format!("cannot unset {}: Invalid argument", name.quote()),
@@ -405,7 +412,7 @@ impl EnvAppData {
         }
 
         // set specified env vars
-        for &(name, val) in &opts.sets {
+        for (name, val) in &opts.sets {
             /*
              * set_var panics if name is an empty string
              * set_var internally calls setenv (on unix at least), while GNU env calls putenv instead.

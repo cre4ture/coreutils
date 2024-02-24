@@ -19,12 +19,8 @@
 #![forbid(unsafe_code)]
 
 use std::borrow::Cow;
-use std::ffi::OsStr;
-use std::ffi::OsString;
 
 use crate::native_int_str::from_native_int_representation;
-use crate::native_int_str::from_native_int_representation_owned;
-use crate::native_int_str::to_native_int_representation;
 use crate::native_int_str::NativeCharInt;
 use crate::native_int_str::NativeIntStr;
 use crate::native_int_str::NativeIntString;
@@ -373,11 +369,7 @@ impl<'a> SplitIterator<'a> {
     }
 }
 
-pub fn split(s: &OsStr) -> Result<Vec<OsString>, ParseError> {
-    let native = to_native_int_representation(s);
-    let splitted_args = SplitIterator::new(&native).split()?;
-    Ok(splitted_args
-        .into_iter()
-        .map(from_native_int_representation_owned)
-        .collect())
+pub fn split(s: &NativeIntStr) -> Result<Vec<NativeIntString>, ParseError> {
+    let splitted_args = SplitIterator::new(s).split()?;
+    Ok(splitted_args)
 }

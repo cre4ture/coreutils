@@ -8,8 +8,8 @@
 use crate::common::util::expected_result;
 use crate::common::util::TestScenario;
 use std::env;
-use std::ffi::OsString;
 use std::path::Path;
+use ::env::native_int_str::{Convert, NCvt};
 use tempfile::tempdir;
 
 #[test]
@@ -372,23 +372,24 @@ fn test_gnu_e20() {
 #[test]
 fn test_split_string_misc() {
     use ::env::parse_args_from_str;
+    use ::env::native_int_str::NCvt;
 
     assert_eq!(
-        vec!["A=B", "FOO=AR", "sh", "-c", "echo $A$FOO"],
-        parse_args_from_str(&OsString::from(r#"A=B FOO=AR  sh -c "echo \$A\$FOO""#)).unwrap(),
+        NCvt::convert(vec!["A=B", "FOO=AR", "sh", "-c", "echo $A$FOO"]),
+        parse_args_from_str(&*NCvt::convert(r#"A=B FOO=AR  sh -c "echo \$A\$FOO""#)).unwrap(),
     );
     assert_eq!(
-        vec!["A=B", "FOO=AR", "sh", "-c", "echo $A$FOO"],
-        parse_args_from_str(&OsString::from(r#"A=B FOO=AR  sh -c 'echo $A$FOO'"#)).unwrap(),
+        NCvt::convert(vec!["A=B", "FOO=AR", "sh", "-c", "echo $A$FOO"]),
+        parse_args_from_str(&*NCvt::convert(r#"A=B FOO=AR  sh -c 'echo $A$FOO'"#)).unwrap()
     );
     assert_eq!(
-        vec!["A=B", "FOO=AR", "sh", "-c", "echo $A$FOO"],
-        parse_args_from_str(&OsString::from(r#"A=B FOO=AR  sh -c 'echo $A$FOO'"#)).unwrap(),
+        NCvt::convert(vec!["A=B", "FOO=AR", "sh", "-c", "echo $A$FOO"]),
+        parse_args_from_str(&*NCvt::convert(r#"A=B FOO=AR  sh -c 'echo $A$FOO'"#)).unwrap()
     );
 
     assert_eq!(
-        vec!["-i", "A=B ' C"],
-        parse_args_from_str(&OsString::from(r#"-i A='B \' C'"#)).unwrap(),
+        NCvt::convert(vec!["-i", "A=B ' C"]),
+        parse_args_from_str(&*NCvt::convert(r#"-i A='B \' C'"#)).unwrap()
     );
 }
 
@@ -396,8 +397,8 @@ fn test_split_string_misc() {
 fn test_split_string_environment_vars_test() {
     std::env::set_var("FOO", "BAR");
     assert_eq!(
-        vec!["FOO=bar", "sh", "-c", "echo xBARx =$FOO="],
-        ::env::parse_args_from_str(&OsString::from(r#"FOO=bar sh -c "echo x${FOO}x =\$FOO=""#))
+        NCvt::convert(vec!["FOO=bar", "sh", "-c", "echo xBARx =$FOO="]),
+        ::env::parse_args_from_str(&*NCvt::convert(r#"FOO=bar sh -c "echo x${FOO}x =\$FOO=""#))
             .unwrap(),
     );
 }
@@ -670,10 +671,13 @@ mod tests_split_iterator {
 
     use std::ffi::OsString;
 
+    use env::native_int_str::{from_native_int_representation_owned, Convert, NCvt};
     use ::env::parse_error::ParseError;
 
     fn split(input: &str) -> Result<Vec<OsString>, ParseError> {
-        ::env::split_iterator::split(&OsString::from(input))
+        ::env::split_iterator::split(&*NCvt::convert(input)).map(
+            |vec| vec.into_iter()
+                .map(|x| from_native_int_representation_owned(x)).collect())
     }
 
     fn split_ok(cases: &[(&str, &[&str])]) {
@@ -907,12 +911,11 @@ mod test_raw_string_parser {
     use env::{
         native_int_str::{
             from_native_int_representation, from_native_int_representation_owned,
-            to_native_int_representation,
+            to_native_int_representation, NativeStr,
         },
         string_expander::StringExpander,
         string_parser,
     };
-    use os_str_bytes::OsStrBytesExt;
 
     #[test]
     fn test_ascii_only_take_one_look_at_correct_data_and_end_behavior() {
@@ -1143,13 +1146,13 @@ mod test_raw_string_parser {
         uut.take_one().unwrap(); // takes "<"
         assert_eq!(
             uut.get_parser().peek_remaining(),
-            OsStr::new(&input_str.split_at(1).1)
+            NativeStr::new(&input_str).split_at(1).1
         );
         assert_eq!(uut.get_parser().peek().unwrap(), '\u{FFFD}');
         uut.take_one().unwrap(); // takes owl_b
         assert_eq!(
             uut.get_parser().peek_remaining(),
-            OsStr::new(&input_str.split_at(2).1)
+            NativeStr::new(&input_str).split_at(2).1
         );
         assert_eq!(uut.get_parser().peek().unwrap(), '>');
         uut.get_parser_mut().skip_until_char_or_end('\n');
@@ -1158,7 +1161,7 @@ mod test_raw_string_parser {
         uut.take_one().unwrap_err();
         assert_eq!(
             from_native_int_representation_owned(uut.take_collected_output()),
-            input_str.split_at(2).0
+            NativeStr::new(&input_str).split_at(2).0
         );
     }
 }
