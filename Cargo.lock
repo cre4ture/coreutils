@@ -2429,7 +2429,6 @@ name = "uu_env"
 version = "0.0.24"
 dependencies = [
  "clap",
- "memchr",
  "nix",
  "rust-ini",
  "uucore",
