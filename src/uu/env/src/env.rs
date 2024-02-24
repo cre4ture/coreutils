@@ -392,7 +392,7 @@ impl EnvAppData {
 
         // remove all env vars if told to ignore presets
         if opts.ignore_env {
-            for (ref name, _) in env::vars() {
+            for (ref name, _) in env::vars_os() {
                 env::remove_var(name);
             }
         }
