@@ -351,6 +351,12 @@ fn test_split_string_into_args_debug_output_whitespace_handling() {
     assert_eq!(out.stderr_str(), "input args:\narg[0]: 'env'\narg[1]: $'-vS printf x%sx\\\\n A \\t B \\x0B\\x0C\\r\\n'\nexecutable: 'printf'\narg[0]: $'x%sx\\n'\narg[1]: 'A'\narg[2]: 'B'\n");
 }
 
+
+// FixMe: This test fails on MACOS:
+// thread 'test_env::test_gnu_e20' panicked at 'assertion failed: `(left == right)`
+// left: `"A=B C=D\n__CF_USER_TEXT_ENCODING=0x1F5:0x0:0x0\n"`,
+// right: `"A=B C=D\n"`', tests/by-util/test_env.rs:369:5
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn test_gnu_e20() {
     let scene = TestScenario::new(util_name!());
