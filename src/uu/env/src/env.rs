@@ -15,8 +15,9 @@ pub mod variable_parser;
 use clap::builder::ValueParser;
 use clap::{crate_name, crate_version, Arg, ArgAction, Command};
 use ini::Ini;
-use native_int_str::{Convert, from_native_int_representation_owned, NCvt, NativeIntStr, NativeIntString, NativeStr}
-;
+use native_int_str::{
+    from_native_int_representation_owned, Convert, NCvt, NativeIntStr, NativeIntString, NativeStr,
+};
 #[cfg(unix)]
 use nix::sys::signal::{raise, sigaction, SaFlags, SigAction, SigHandler, SigSet, Signal};
 use std::borrow::Cow;
@@ -59,10 +60,9 @@ fn print_env(line_ending: LineEnding) {
     }
 }
 
-fn parse_name_value_opt<'a>(opts: &mut Options<'a>, opt: &'a OsStr) -> UResult<bool>
-{
+fn parse_name_value_opt<'a>(opts: &mut Options<'a>, opt: &'a OsStr) -> UResult<bool> {
     // is it a NAME=VALUE like opt ?
-    let wrap = NativeStr::<'a>::new(&opt);
+    let wrap = NativeStr::<'a>::new(opt);
     let split_o = wrap.split_once(&'=');
     if let Some((name, value)) = split_o {
         // yes, so push name, value pair
@@ -74,8 +74,7 @@ fn parse_name_value_opt<'a>(opts: &mut Options<'a>, opt: &'a OsStr) -> UResult<b
     }
 }
 
-fn parse_program_opt<'a>(opts: &mut Options<'a>, opt: &'a OsStr) -> UResult<()>
-{
+fn parse_program_opt<'a>(opts: &mut Options<'a>, opt: &'a OsStr) -> UResult<()> {
     if opts.line_ending == LineEnding::Nul {
         Err(UUsageError::new(
             125,
@@ -234,7 +233,11 @@ fn check_and_handle_string_args(
         }
 
         let arg_strings = parse_args_from_str(remaining_arg)?;
-        all_args.extend(arg_strings.into_iter().map(from_native_int_representation_owned));
+        all_args.extend(
+            arg_strings
+                .into_iter()
+                .map(from_native_int_representation_owned),
+        );
 
         Ok(true)
     } else {
@@ -400,7 +403,9 @@ impl EnvAppData {
         // unset specified env vars
         for name in &opts.unsets {
             let native_name = NativeStr::new(name);
-            if name.is_empty() || native_name.contains(&'\0').unwrap() || native_name.contains(&'=').unwrap()
+            if name.is_empty()
+                || native_name.contains(&'\0').unwrap()
+                || native_name.contains(&'=').unwrap()
             {
                 return Err(USimpleError::new(
                     125,

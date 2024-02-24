@@ -3,13 +3,11 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
+use std::ffi::OsString;
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 #[cfg(target_os = "windows")]
 use std::os::windows::prelude::*;
-use std::
-    ffi::OsString
-;
 use std::{borrow::Cow, ffi::OsStr};
 
 #[cfg(target_os = "windows")]
@@ -73,7 +71,6 @@ impl<'a> Convert<String, Cow<'a, NativeIntStr>> for NCvt {
 
 // ================ OsStr/OsString =================
 
-
 impl<'a> Convert<&'a OsStr, Cow<'a, NativeIntStr>> for NCvt {
     fn convert(f: &'a OsStr) -> Cow<'a, NativeIntStr> {
         to_native_int_representation(f)
@@ -102,31 +99,29 @@ impl<'a> Convert<OsString, Cow<'a, NativeIntStr>> for NCvt {
 
 // ================ Vec<Str/String> =================
 
-
-impl<'a> Convert<&'a Vec<&'a str> , Vec<Cow<'a, NativeIntStr>>> for NCvt {
+impl<'a> Convert<&'a Vec<&'a str>, Vec<Cow<'a, NativeIntStr>>> for NCvt {
     fn convert(f: &'a Vec<&'a str>) -> Vec<Cow<'a, NativeIntStr>> {
-        f.iter().map(|x| NCvt::convert(*x)).collect()
+        f.iter().map(|x| Self::convert(*x)).collect()
     }
 }
 
-impl<'a> Convert<Vec<&'a str> , Vec<Cow<'a, NativeIntStr>>> for NCvt {
+impl<'a> Convert<Vec<&'a str>, Vec<Cow<'a, NativeIntStr>>> for NCvt {
     fn convert(f: Vec<&'a str>) -> Vec<Cow<'a, NativeIntStr>> {
-        f.iter().map(|x| NCvt::convert(*x)).collect()
+        f.iter().map(|x| Self::convert(*x)).collect()
     }
 }
 
-impl<'a> Convert<&'a Vec<String> , Vec<Cow<'a, NativeIntStr>>> for NCvt {
+impl<'a> Convert<&'a Vec<String>, Vec<Cow<'a, NativeIntStr>>> for NCvt {
     fn convert(f: &'a Vec<String>) -> Vec<Cow<'a, NativeIntStr>> {
-        f.iter().map(NCvt::convert).collect()
+        f.iter().map(Self::convert).collect()
     }
 }
 
-impl<'a> Convert<Vec<String> , Vec<Cow<'a, NativeIntStr>>> for NCvt {
+impl<'a> Convert<Vec<String>, Vec<Cow<'a, NativeIntStr>>> for NCvt {
     fn convert(f: Vec<String>) -> Vec<Cow<'a, NativeIntStr>> {
-        f.into_iter().map(NCvt::convert).collect()
+        f.into_iter().map(Self::convert).collect()
     }
 }
-
 
 pub fn to_native_int_representation(input: &OsStr) -> Cow<'_, NativeIntStr> {
     #[cfg(target_os = "windows")]
@@ -136,11 +131,11 @@ pub fn to_native_int_representation(input: &OsStr) -> Cow<'_, NativeIntStr> {
 
     #[cfg(not(target_os = "windows"))]
     {
-        Cow::Borrowed(&input.as_bytes())
+        Cow::Borrowed(input.as_bytes())
     }
 }
 
-pub fn from_native_int_representation<'a>(input: Cow<'a, NativeIntStr>) -> Cow<'a, OsStr> {
+pub fn from_native_int_representation(input: Cow<'_, NativeIntStr>) -> Cow<'_, OsStr> {
     #[cfg(target_os = "windows")]
     {
         Cow::Owned(OsString::from_wide(&input))
@@ -219,7 +214,7 @@ pub struct NativeStr<'a> {
 impl<'a> NativeStr<'a> {
     pub fn new(str: &'a OsStr) -> Self {
         Self {
-            native: to_native_int_representation(str.as_ref()),
+            native: to_native_int_representation(str),
         }
     }
 
@@ -242,7 +237,7 @@ impl<'a> NativeStr<'a> {
     }
 
     pub fn split_once(&self, pred: &char) -> Option<(Cow<'a, OsStr>, Cow<'a, OsStr>)> {
-        let n_c = get_single_native_int_value(&pred)?;
+        let n_c = get_single_native_int_value(pred)?;
         let p = self.native.iter().position(|&x| x == n_c)?;
         let before = self.slice(0, p);
         let after = self.slice(p + 1, self.native.len());
@@ -290,9 +285,8 @@ impl<'a> NativeStr<'a> {
             }
             Cow::Owned(o) => {
                 let slice = f_owned(o);
-                let os_str = slice.map(|x| from_native_int_representation_owned(x));
-                let cow = os_str.map(|x| Cow::Owned(x));
-                cow
+                let os_str = slice.map(from_native_int_representation_owned);
+                os_str.map(Cow::Owned)
             }
         }
     }
@@ -309,13 +303,11 @@ impl<'a> NativeStr<'a> {
         match &self.native {
             Cow::Borrowed(b) => {
                 let slice = f_borrow(b);
-                let os_str = slice.map(|x| Cow::Borrowed(x));
-                os_str
+                slice.map(Cow::Borrowed)
             }
             Cow::Owned(o) => {
                 let slice = f_owned(o);
-                let cow = slice.map(|x| Cow::Owned(x));
-                cow
+                slice.map(Cow::Owned)
             }
         }
     }

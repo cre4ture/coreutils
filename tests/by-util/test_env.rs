@@ -7,9 +7,9 @@
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use crate::common::util::expected_result;
 use crate::common::util::TestScenario;
+use ::env::native_int_str::{Convert, NCvt};
 use std::env;
 use std::path::Path;
-use ::env::native_int_str::{Convert, NCvt};
 use tempfile::tempdir;
 
 #[test]
@@ -371,25 +371,25 @@ fn test_gnu_e20() {
 
 #[test]
 fn test_split_string_misc() {
-    use ::env::parse_args_from_str;
     use ::env::native_int_str::NCvt;
+    use ::env::parse_args_from_str;
 
     assert_eq!(
         NCvt::convert(vec!["A=B", "FOO=AR", "sh", "-c", "echo $A$FOO"]),
-        parse_args_from_str(&*NCvt::convert(r#"A=B FOO=AR  sh -c "echo \$A\$FOO""#)).unwrap(),
+        parse_args_from_str(&NCvt::convert(r#"A=B FOO=AR  sh -c "echo \$A\$FOO""#)).unwrap(),
     );
     assert_eq!(
         NCvt::convert(vec!["A=B", "FOO=AR", "sh", "-c", "echo $A$FOO"]),
-        parse_args_from_str(&*NCvt::convert(r#"A=B FOO=AR  sh -c 'echo $A$FOO'"#)).unwrap()
+        parse_args_from_str(&NCvt::convert(r#"A=B FOO=AR  sh -c 'echo $A$FOO'"#)).unwrap()
     );
     assert_eq!(
         NCvt::convert(vec!["A=B", "FOO=AR", "sh", "-c", "echo $A$FOO"]),
-        parse_args_from_str(&*NCvt::convert(r#"A=B FOO=AR  sh -c 'echo $A$FOO'"#)).unwrap()
+        parse_args_from_str(&NCvt::convert(r#"A=B FOO=AR  sh -c 'echo $A$FOO'"#)).unwrap()
     );
 
     assert_eq!(
         NCvt::convert(vec!["-i", "A=B ' C"]),
-        parse_args_from_str(&*NCvt::convert(r#"-i A='B \' C'"#)).unwrap()
+        parse_args_from_str(&NCvt::convert(r#"-i A='B \' C'"#)).unwrap()
     );
 }
 
@@ -398,7 +398,7 @@ fn test_split_string_environment_vars_test() {
     std::env::set_var("FOO", "BAR");
     assert_eq!(
         NCvt::convert(vec!["FOO=bar", "sh", "-c", "echo xBARx =$FOO="]),
-        ::env::parse_args_from_str(&*NCvt::convert(r#"FOO=bar sh -c "echo x${FOO}x =\$FOO=""#))
+        ::env::parse_args_from_str(&NCvt::convert(r#"FOO=bar sh -c "echo x${FOO}x =\$FOO=""#))
             .unwrap(),
     );
 }
@@ -671,13 +671,15 @@ mod tests_split_iterator {
 
     use std::ffi::OsString;
 
-    use env::native_int_str::{from_native_int_representation_owned, Convert, NCvt};
     use ::env::parse_error::ParseError;
+    use env::native_int_str::{from_native_int_representation_owned, Convert, NCvt};
 
     fn split(input: &str) -> Result<Vec<OsString>, ParseError> {
-        ::env::split_iterator::split(&*NCvt::convert(input)).map(
-            |vec| vec.into_iter()
-                .map(|x| from_native_int_representation_owned(x)).collect())
+        ::env::split_iterator::split(&NCvt::convert(input)).map(|vec| {
+            vec.into_iter()
+                .map(from_native_int_representation_owned)
+                .collect()
+        })
     }
 
     fn split_ok(cases: &[(&str, &[&str])]) {
