@@ -3,6 +3,15 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
+// This module contains classes and functions for dealing with the differences
+// between operating systems regarding the lossless processing of OsStr/OsString.
+// In contrast to existing crates with similar purpose, this module does not use any
+// `unsafe` features or functions.
+// Due to a suboptimal design aspect of OsStr/OsString on windows, we need to
+// encode/decode to wide chars on windows operating system.
+// This prevents borrowing from OsStr on windows. Anyway, if optimally used,#
+// this conversion needs to be done only once in the beginning and at the end.
+
 use std::ffi::OsString;
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
