@@ -919,6 +919,8 @@ mod test_raw_string_parser {
         string_parser,
     };
 
+    const LEN_OWL: usize = if cfg!(target_os = "windows") { 2 } else { 4 };
+
     #[test]
     fn test_ascii_only_take_one_look_at_correct_data_and_end_behavior() {
         let input = "hello";
@@ -964,7 +966,7 @@ mod test_raw_string_parser {
         assert_eq!(
             uut.get_parser().peek(),
             Err(string_parser::Error {
-                peek_position: 43,
+                peek_position: 10 * LEN_OWL + 3,
                 err_type: string_parser::ErrorType::EndOfInput
             })
         );
@@ -1003,7 +1005,7 @@ mod test_raw_string_parser {
         assert_eq!(
             uut.get_parser().peek(),
             Err(string_parser::Error {
-                peek_position: 43,
+                peek_position: LEN_OWL * 10 + 3,
                 err_type: string_parser::ErrorType::EndOfInput
             })
         );
@@ -1028,20 +1030,24 @@ mod test_raw_string_parser {
         let mut uut = StringExpander::new(&cow);
 
         uut.skip_one().unwrap(); // skip 🦉🦉🦉
-        assert_eq!(uut.get_peek_position(), 12);
+        let p = LEN_OWL * 3;
+        assert_eq!(uut.get_peek_position(), p);
 
         uut.skip_one().unwrap(); // skip x
-        assert_eq!(uut.get_peek_position(), 13);
+        assert_eq!(uut.get_peek_position(), p + 1);
         uut.take_one().unwrap(); // take 🦉🦉
-        assert_eq!(uut.get_peek_position(), 21);
+        let p = p + 1 + LEN_OWL * 2;
+        assert_eq!(uut.get_peek_position(), p);
 
         uut.skip_one().unwrap(); // skip x
-        assert_eq!(uut.get_peek_position(), 22);
+        assert_eq!(uut.get_peek_position(), p + 1);
         uut.get_parser_mut().skip_until_char_or_end('x'); // skip 🦉
-        assert_eq!(uut.get_peek_position(), 26);
+        let p = p + 1 + LEN_OWL;
+        assert_eq!(uut.get_peek_position(), p);
         uut.take_one().unwrap(); // take x
         uut.get_parser_mut().skip_until_char_or_end('x'); // skip 🦉🦉🦉🦉 till end
-        assert_eq!(uut.get_peek_position(), 43);
+        let p = p + 1 + LEN_OWL * 4;
+        assert_eq!(uut.get_peek_position(), p);
 
         uut.take_one().unwrap_err();
         assert_eq!(
@@ -1058,18 +1064,23 @@ mod test_raw_string_parser {
 
         uut.get_parser_mut().skip_multiple(0);
         assert_eq!(uut.get_peek_position(), 0);
-        uut.get_parser_mut().skip_multiple(12); // skips 🦉🦉🦉
-        assert_eq!(uut.get_peek_position(), 12);
+        let p = LEN_OWL * 3;
+        uut.get_parser_mut().skip_multiple(p); // skips 🦉🦉🦉
+        assert_eq!(uut.get_peek_position(), p);
 
         uut.take_one().unwrap(); // take x
-        assert_eq!(uut.get_peek_position(), 13);
-        uut.get_parser_mut().skip_multiple(13); // skips 🦉🦉x🦉
-        assert_eq!(uut.get_peek_position(), 26);
+        assert_eq!(uut.get_peek_position(), p + 1);
+        let step = LEN_OWL * 3 + 1;
+        uut.get_parser_mut().skip_multiple(step); // skips 🦉🦉x🦉
+        let p = p + 1 + step;
+        assert_eq!(uut.get_peek_position(), p);
         uut.take_one().unwrap(); // take x
 
-        assert_eq!(uut.get_peek_position(), 27);
-        uut.get_parser_mut().skip_multiple(16); // skips 🦉🦉🦉🦉
-        assert_eq!(uut.get_peek_position(), 43);
+        assert_eq!(uut.get_peek_position(), p + 1);
+        let step = 4 * LEN_OWL;
+        uut.get_parser_mut().skip_multiple(step); // skips 🦉🦉🦉🦉
+        let p = p + 1 + step;
+        assert_eq!(uut.get_peek_position(), p);
 
         uut.take_one().unwrap_err();
         assert_eq!(
