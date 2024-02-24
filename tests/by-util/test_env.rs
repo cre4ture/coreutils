@@ -360,7 +360,7 @@ fn test_gnu_e20() {
     let (input, output) = (
         [
             String::from("-i"),
-            String::from(r#"-SA="B\_C=D" "#) + env_bin.as_str() + "",
+            String::from(r#"-SA="B\_C=D" "#) + env_bin.escape_default().to_string().as_str() + "",
         ],
         "A=B C=D\n",
     );
