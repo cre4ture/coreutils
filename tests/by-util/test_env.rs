@@ -445,7 +445,7 @@ macro_rules! compare_with_gnu {
 }
 
 #[test]
-fn test_env_with_gnu_reference() {
+fn test_env_with_gnu_reference_parsing_errors() {
     let ts = TestScenario::new(util_name!());
 
     compare_with_gnu!(ts, &["-S\\|echo hallo"]) // no quotes, invalid escape sequence |
@@ -514,19 +514,6 @@ fn test_env_with_gnu_reference() {
         .no_stdout()
         .stderr_is("env: invalid sequence '\\`' in -S\n");
 
-    ts.ucmd()
-        .args(&["-S\\'\\'"]) // empty single quotes, considered as program name
-        .fails()
-        .code_is(127)
-        .no_stdout()
-        .stderr_is("env: \"''\": No such file or directory\n"); // gnu version again adds escaping here
-
-    compare_with_gnu!(ts, &["-S\\\"\\\""]) // empty double quotes, considered as program name
-        .failure()
-        .code_is(127)
-        .no_stdout()
-        .stderr_is("env: '\"\"': No such file or directory\n");
-
     compare_with_gnu!(ts, &[r#"-S\`"#]) // ` escaped without quotes
         .failure()
         .code_is(125)
@@ -551,6 +538,29 @@ fn test_env_with_gnu_reference() {
         .code_is(125)
         .no_stdout()
         .stderr_is("env: invalid sequence '\\\u{FFFD}' in -S\n"); // gnu doesn't show the owl. Instead a invalid unicode ?
+}
+
+#[test]
+fn test_env_with_gnu_reference_empty_executable_single_quotes() {
+    let ts = TestScenario::new(util_name!());
+
+    ts.ucmd()
+        .args(&["-S''"]) // empty single quotes, considered as program name
+        .fails()
+        .code_is(127)
+        .no_stdout()
+        .stderr_is("env: '': No such file or directory\n"); // gnu version again adds escaping here
+}
+
+#[test]
+fn test_env_with_gnu_reference_empty_executable_double_quotes() {
+    let ts = TestScenario::new(util_name!());
+
+    compare_with_gnu!(ts, &["-S\"\""]) // empty double quotes, considered as program name
+        .failure()
+        .code_is(127)
+        .no_stdout()
+        .stderr_is("env: '': No such file or directory\n");
 }
 
 #[cfg(test)]
