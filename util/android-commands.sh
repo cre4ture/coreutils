@@ -552,12 +552,13 @@ ls -la ${cache_dest}"
 }
 
 build() {
+
     echo "Running build"
 
     reinit_ssh_connection
 
-    echo "Read /proc/cpuinfo"
-    run_command_via_ssh "cat /proc/cpuinfo"
+    echo "Info about cargo and rust - via SSH Script"
+    run_script_file_via_ssh "$this_repo/util/android-scripts/collect-info.sh"
 
     command="export CARGO_TERM_COLOR=always;
              export CARGO_INCREMENTAL=0; \
