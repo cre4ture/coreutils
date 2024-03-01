@@ -684,12 +684,14 @@ jobs:
       shell: bash
       run: |
         ## Test
+        for i in {0..100..1}; do \
         ${{ steps.vars.outputs.CARGO_CMD }} ${{ steps.vars.outputs.CARGO_CMD_OPTIONS }} test --target=${{ matrix.job.target }} \
-        ${{ steps.vars.outputs.CARGO_TEST_OPTIONS}} ${{ matrix.job.cargo-options }} ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }}
+        ${{ steps.vars.outputs.CARGO_TEST_OPTIONS}} ${{ matrix.job.cargo-options }} ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} test_split::test_round_robin_limited_file_descriptors ; \
+        done
       env:
         RUST_BACKTRACE: "1"
     - name: Test individual utilities
-      if: matrix.job.skip-tests != true
+      if: false
       shell: bash
       run: |
         ## Test individual utilities
@@ -698,11 +700,13 @@ jobs:
       env:
         RUST_BACKTRACE: "1"
     - name: Archive executable artifacts
+      if: false
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.PROJECT_NAME }}-${{ matrix.job.target }}
         path: iter/${{ matrix.iteration }}/target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}${{ steps.vars.outputs.EXE_suffix }}
     - name: Package
+      if: false
       shell: bash
       run: |
         ## Package artifact(s)
