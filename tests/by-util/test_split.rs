@@ -1641,8 +1641,15 @@ fn test_round_robin() {
 #[test]
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn test_round_robin_limited_file_descriptors() {
-    new_ucmd!()
-        .args(&["-n", "r/40", "onehundredlines.txt"])
+    let scene = TestScenario::new(util_name!());
+
+    let mut shell_cmd = String::from("sleep 0.5 && "); // to ensure that the limit is applied
+    shell_cmd += &scene.bin_path.to_string_lossy();
+    shell_cmd += " split -n r/40 onehundredlines.txt";
+
+    scene
+        .cmd("sh")
+        .pipe_in(shell_cmd)
         .limit(Resource::NOFILE, 9, 9)
         .succeeds();
 }
