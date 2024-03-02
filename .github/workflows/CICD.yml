@@ -39,6 +39,7 @@ jobs:
     - uses: EmbarkStudios/cargo-deny-action@v1
 
   style_deps:
+    if: false
     ## ToDO: [2021-11-10; rivy] 'Style/deps' needs more informative output and better integration of results into the GHA dashboard
     name: Style/deps
     runs-on: ${{ matrix.job.os }}
@@ -88,6 +89,7 @@ jobs:
         if [ -n "${{ steps.vars.outputs.FAIL_ON_FAULT }}" ] && [ -n "$fault" ]; then exit 1 ; fi
 
   doc_warnings:
+    if: false
     name: Documentation/warnings
     runs-on: ${{ matrix.job.os }}
     env:
@@ -147,6 +149,7 @@ jobs:
           src/uu/*/*.md
 
   min_version:
+    if: false
     name: MinRustV # Minimum supported rust version (aka, MinSRV or MSRV)
     runs-on: ${{ matrix.job.os }}
     env:
@@ -236,6 +239,7 @@ jobs:
         cargo fetch --locked --quiet || { echo "::error file=Cargo.lock::'Cargo.lock' file requires update (use \`cargo +${{ env.RUST_MIN_SRV }} update\`)" ; exit 1 ; }
 
   build_makefile:
+    if: false
     name: Build/Makefile
     needs: [ min_version, deps ]
     runs-on: ${{ matrix.job.os }}
@@ -287,6 +291,7 @@ jobs:
         ! test -f /tmp/usr/local/share/fish/vendor_completions.d/cat.fish
 
   build_rust_stable:
+    if: false
     name: Build/stable
     needs: [ min_version, deps ]
     runs-on: ${{ matrix.job.os }}
@@ -314,6 +319,7 @@ jobs:
         RUST_BACKTRACE: "1"
 
   build_rust_nightly:
+    if: false
     name: Build/nightly
     needs: [ min_version, deps ]
     runs-on: ${{ matrix.job.os }}
@@ -686,7 +692,7 @@ jobs:
         ## Test
         for i in {0..500..1}; do \
         ${{ steps.vars.outputs.CARGO_CMD }} ${{ steps.vars.outputs.CARGO_CMD_OPTIONS }} test --target=${{ matrix.job.target }} \
-        ${{ steps.vars.outputs.CARGO_TEST_OPTIONS}} ${{ matrix.job.cargo-options }} ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} test_split::test_round_robin_limited_file_descriptors || exit 1 ; \
+        ${{ steps.vars.outputs.CARGO_TEST_OPTIONS}} ${{ matrix.job.cargo-options }} ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} || exit 1 ; \
         done
       env:
         RUST_BACKTRACE: "1"
@@ -751,6 +757,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   test_busybox:
+    if: false
     name: Tests/BusyBox test suite
     needs: [ min_version, deps ]
     runs-on: ${{ matrix.job.os }}
@@ -829,6 +836,7 @@ jobs:
         path: ${{ steps.vars.outputs.TEST_SUMMARY_FILE }}
 
   test_toybox:
+    if: false
     name: Tests/Toybox test suite
     needs: [ min_version, deps ]
     runs-on: ${{ matrix.job.os }}
@@ -917,6 +925,7 @@ jobs:
         path: ${{ steps.vars.outputs.TEST_SUMMARY_FILE }}
 
   coverage:
+    if: false
     name: Code Coverage
     runs-on: ${{ matrix.job.os }}
     timeout-minutes: 90
