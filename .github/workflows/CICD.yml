@@ -39,6 +39,7 @@ jobs:
     - uses: EmbarkStudios/cargo-deny-action@v1
 
   style_deps:
+    if: false
     ## ToDO: [2021-11-10; rivy] 'Style/deps' needs more informative output and better integration of results into the GHA dashboard
     name: Style/deps
     runs-on: ${{ matrix.job.os }}
@@ -88,6 +89,7 @@ jobs:
         if [ -n "${{ steps.vars.outputs.FAIL_ON_FAULT }}" ] && [ -n "$fault" ]; then exit 1 ; fi
 
   doc_warnings:
+    if: false
     name: Documentation/warnings
     runs-on: ${{ matrix.job.os }}
     env:
@@ -147,6 +149,7 @@ jobs:
           src/uu/*/*.md
 
   min_version:
+    if: false
     name: MinRustV # Minimum supported rust version (aka, MinSRV or MSRV)
     runs-on: ${{ matrix.job.os }}
     env:
@@ -236,6 +239,7 @@ jobs:
         cargo fetch --locked --quiet || { echo "::error file=Cargo.lock::'Cargo.lock' file requires update (use \`cargo +${{ env.RUST_MIN_SRV }} update\`)" ; exit 1 ; }
 
   build_makefile:
+    if: false
     name: Build/Makefile
     needs: [ min_version, deps ]
     runs-on: ${{ matrix.job.os }}
@@ -287,6 +291,7 @@ jobs:
         ! test -f /tmp/usr/local/share/fish/vendor_completions.d/cat.fish
 
   build_rust_stable:
+    if: false
     name: Build/stable
     needs: [ min_version, deps ]
     runs-on: ${{ matrix.job.os }}
@@ -314,6 +319,7 @@ jobs:
         RUST_BACKTRACE: "1"
 
   build_rust_nightly:
+    if: false
     name: Build/nightly
     needs: [ min_version, deps ]
     runs-on: ${{ matrix.job.os }}
@@ -455,7 +461,6 @@ jobs:
       contents: write # to create GitHub release (softprops/action-gh-release)
 
     name: Build
-    needs: [ min_version, deps ]
     runs-on: ${{ matrix.job.os }}
     timeout-minutes: 90
     env:
@@ -465,22 +470,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        iteration: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,24,25]
         job:
           # - { os , target , cargo-options , features , use-cross , toolchain, skip-tests }
-          - { os: ubuntu-latest  , target: arm-unknown-linux-gnueabihf, features: feat_os_unix_gnueabihf, use-cross: use-cross, skip-tests: true }
-          - { os: ubuntu-latest  , target: aarch64-unknown-linux-gnu   , features: feat_os_unix_gnueabihf , use-cross: use-cross , skip-tests: true }
-          - { os: ubuntu-latest  , target: aarch64-unknown-linux-musl  , features: feat_os_unix_musl      , use-cross: use-cross , skip-tests: true }
-          # - { os: ubuntu-latest  , target: x86_64-unknown-linux-gnu    , features: feat_selinux           , use-cross: use-cross }
-          - { os: ubuntu-latest  , target: i686-unknown-linux-gnu      , features: feat_os_unix           , use-cross: use-cross }
           - { os: ubuntu-latest  , target: i686-unknown-linux-musl     , features: feat_os_unix_musl      , use-cross: use-cross }
-          - { os: ubuntu-latest  , target: x86_64-unknown-linux-gnu    , features: feat_os_unix           , use-cross: use-cross }
           - { os: ubuntu-latest  , target: x86_64-unknown-linux-musl   , features: feat_os_unix_musl      , use-cross: use-cross }
-          - { os: ubuntu-latest  , target: x86_64-unknown-redox        , features: feat_os_unix_redox     , use-cross: redoxer , skip-tests: true }
-          - { os: macos-14       , target: aarch64-apple-darwin        , features: feat_os_macos } # M1 CPU
-          - { os: macos-latest   , target: x86_64-apple-darwin         , features: feat_os_macos }
-          - { os: windows-latest , target: i686-pc-windows-msvc        , features: feat_os_windows }
-          - { os: windows-latest , target: x86_64-pc-windows-gnu       , features: feat_os_windows }
-          - { os: windows-latest , target: x86_64-pc-windows-msvc      , features: feat_os_windows }
     steps:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@master
@@ -695,12 +689,14 @@ jobs:
       shell: bash
       run: |
         ## Test
+        for i in {0..500..1}; do \
         ${{ steps.vars.outputs.CARGO_CMD }} ${{ steps.vars.outputs.CARGO_CMD_OPTIONS }} test --target=${{ matrix.job.target }} \
-        ${{ steps.vars.outputs.CARGO_TEST_OPTIONS}} ${{ matrix.job.cargo-options }} ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }}
+        ${{ steps.vars.outputs.CARGO_TEST_OPTIONS}} ${{ matrix.job.cargo-options }} ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} || exit 1 ; \
+        done
       env:
         RUST_BACKTRACE: "1"
     - name: Test individual utilities
-      if: matrix.job.skip-tests != true
+      if: false
       shell: bash
       run: |
         ## Test individual utilities
@@ -709,11 +705,13 @@ jobs:
       env:
         RUST_BACKTRACE: "1"
     - name: Archive executable artifacts
+      if: false
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.PROJECT_NAME }}-${{ matrix.job.target }}
-        path: target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}${{ steps.vars.outputs.EXE_suffix }}
+        path: iter/${{ matrix.iteration }}/target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}${{ steps.vars.outputs.EXE_suffix }}
     - name: Package
+      if: false
       shell: bash
       run: |
         ## Package artifact(s)
@@ -758,6 +756,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   test_busybox:
+    if: false
     name: Tests/BusyBox test suite
     needs: [ min_version, deps ]
     runs-on: ${{ matrix.job.os }}
@@ -836,6 +835,7 @@ jobs:
         path: ${{ steps.vars.outputs.TEST_SUMMARY_FILE }}
 
   test_toybox:
+    if: false
     name: Tests/Toybox test suite
     needs: [ min_version, deps ]
     runs-on: ${{ matrix.job.os }}
@@ -924,6 +924,7 @@ jobs:
         path: ${{ steps.vars.outputs.TEST_SUMMARY_FILE }}
 
   coverage:
+    if: false
     name: Code Coverage
     runs-on: ${{ matrix.job.os }}
     timeout-minutes: 90
