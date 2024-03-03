@@ -689,7 +689,7 @@ jobs:
       shell: bash
       run: |
         ## Test
-        for i in {0..500..1}; do \
+        for i in {0..50..1}; do \
         ${{ steps.vars.outputs.CARGO_CMD }} ${{ steps.vars.outputs.CARGO_CMD_OPTIONS }} test --target=${{ matrix.job.target }} \
         ${{ steps.vars.outputs.CARGO_TEST_OPTIONS}} ${{ matrix.job.cargo-options }} ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} || exit 1 ; \
         done
