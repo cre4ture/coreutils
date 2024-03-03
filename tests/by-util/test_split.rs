@@ -1643,12 +1643,13 @@ fn test_round_robin() {
 fn test_round_robin_limited_file_descriptors() {
     let scene = TestScenario::new(util_name!());
 
-    let mut shell_cmd = String::from("sleep 0.5 && "); // to ensure that the limit is applied
+    let mut shell_cmd = String::from("");
     shell_cmd += &scene.bin_path.to_string_lossy();
     shell_cmd += " split -n r/40 onehundredlines.txt";
 
     scene
         .cmd("sh")
+        // to ensure that the limit is applied, we use pipe_in as this is done after applying the limits
         .pipe_in(shell_cmd)
         .limit(Resource::NOFILE, 9, 9)
         .succeeds();
