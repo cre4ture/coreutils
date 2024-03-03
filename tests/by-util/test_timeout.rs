@@ -157,15 +157,21 @@ fn test_kill_after_long() {
 
 #[test]
 fn test_kill_subprocess() {
-    new_ucmd!()
+    let result = new_ucmd!()
         .args(&[
             // Make sure the CI can spawn the subprocess.
             "10",
             "sh",
             "-c",
-            "sh -c \"trap 'echo xyz' TERM; sleep 30\"",
+            "sh -c \"trap 'echo xyz' TERM; echo 'trap installed'; sleep 30; echo 'sleep done'\"",
         ])
-        .fails()
+        .run();
+
+    eprintln!("stdout:\n{}", result.stdout_str());
+    eprintln!("stderr:\n{}", result.stderr_str());
+
+    result
+        .failure()
         .code_is(124)
         .stdout_contains("xyz")
         .stderr_contains("Terminated");
