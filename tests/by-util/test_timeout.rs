@@ -163,7 +163,7 @@ fn test_kill_subprocess() {
             "10",
             "sh",
             "-c",
-            "sh -c \"trap 'echo xyz' TERM; echo 'trap installed'; sleep 30; echo 'sleep done'\"",
+            "sh -c \"trap 'echo xyz; sleep 0.5' TERM; echo 'trap installed'; sleep 30; echo 'sleep done'\"",
         ])
         .run();
 
