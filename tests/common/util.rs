@@ -3,13 +3,13 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-//spell-checker: ignore (linux) rlimit prlimit coreutil ggroups uchild uncaptured scmd SHLVL canonicalized
+//spell-checker: ignore (linux) rlimit prlimit coreutil ggroups uchild uncaptured scmd SHLVL canonicalized setrlimit
 
 #![allow(dead_code)]
 
 use pretty_assertions::assert_eq;
 #[cfg(any(target_os = "linux", target_os = "android"))]
-use rlimit::prlimit;
+use rlimit::setrlimit;
 #[cfg(feature = "sleep")]
 use rstest::rstest;
 #[cfg(unix)]
@@ -22,6 +22,8 @@ use std::fs::{self, hard_link, remove_file, File, OpenOptions};
 use std::io::{self, BufWriter, Read, Result, Write};
 #[cfg(unix)]
 use std::os::unix::fs::{symlink as symlink_dir, symlink as symlink_file, PermissionsExt};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 #[cfg(windows)]
@@ -1529,6 +1531,27 @@ impl UCommand {
                 .stderr(stderr);
         };
 
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        if !self.limits.is_empty() {
+            // just to be save: move a copy of the limits list into the closure.
+            // this way the closure is fully self-contained.
+            let limits_copy = self.limits.clone();
+            let closure = move || -> Result<()> {
+                for &(resource, soft_limit, hard_limit) in &limits_copy {
+                    setrlimit(
+                        resource,
+                        soft_limit,
+                        hard_limit,
+                    )?;
+                }
+                Ok(())
+            };
+            // SAFETY: the closure is self-contained and doesn't do any memory
+            // writes that would need to be propagated back to the parent process.
+            // also, the closure doesn't access stdin, stdout and stderr.
+            unsafe { command.pre_exec(closure); }
+        }
+
         (command, captured_stdout, captured_stderr)
     }
 
@@ -1542,17 +1565,6 @@ impl UCommand {
         log_info("run", self.to_string());
 
         let child = command.spawn().unwrap();
-
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        for &(resource, soft_limit, hard_limit) in &self.limits {
-            prlimit(
-                child.id() as i32,
-                resource,
-                Some((soft_limit, hard_limit)),
-                None,
-            )
-            .unwrap();
-        }
 
         let mut child = UChild::from(self, child, captured_stdout, captured_stderr);
 
