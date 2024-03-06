@@ -199,7 +199,7 @@ jobs:
         echo "CI='${CI}'"
         # tooling info display
         echo "## tooling"
-        which gcc >/dev/null 2>&1 && (gcc --version | head -1) || true
+        which gcc && (gcc --version | head -1) || true
         rustup -V 2>/dev/null
         rustup show active-toolchain
         cargo -V
@@ -664,7 +664,7 @@ jobs:
         echo "CI='${CI}'"
         # tooling info display
         echo "## tooling"
-        which gcc >/dev/null 2>&1 && (gcc --version | head -1) || true
+        which gcc && (gcc --version | head -1) || true
         rustup -V 2>/dev/null
         rustup show active-toolchain
         cargo -V
@@ -699,7 +699,7 @@ jobs:
         echo "CI='${CI}'"
         # tooling info display
         echo "## tooling"
-        which gcc >/dev/null 2>&1 && (gcc --version | head -1) || true
+        which gcc && (gcc --version | head -1) || true
         rustup -V 2>/dev/null
         rustup show active-toolchain
         cargo -V
@@ -1042,7 +1042,7 @@ jobs:
         echo "CI='${CI}'"
         # tooling info display
         echo "## tooling"
-        which gcc >/dev/null 2>&1 && (gcc --version | head -1) || true
+        which gcc && (gcc --version | head -1) || true
         rustup -V 2>/dev/null
         rustup show active-toolchain
         cargo -V
