@@ -629,7 +629,8 @@ jobs:
             echo "downloading gcc 13.2.0-2"
             C:/msys64/usr/bin/wget.exe https://repo.msys2.org/msys/x86_64/gcc-13.2.0-2-x86_64.pkg.tar.zst
             echo "installing"
-            C:/msys64/usr/bin/pacman.exe -U gcc-13.2.0-2-x86_64.pkg.tar.zst --noconfirm ; echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH ;;
+            C:/msys64/usr/bin/pacman.exe -U gcc-13.2.0-2-x86_64.pkg.tar.zst --noconfirm
+            echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH
           ;;
         esac
         case '${{ matrix.job.os }}' in
@@ -654,6 +655,26 @@ jobs:
       if: steps.vars.outputs.CARGO_CMD == 'redoxer'
       with:
         tool: redoxer@0.2.37
+    - name: Info
+      shell: bash
+      run: |
+        ## Info
+        # environment
+        echo "## environment"
+        echo "CI='${CI}'"
+        # tooling info display
+        echo "## tooling"
+        which gcc >/dev/null 2>&1 && (gcc --version | head -1) || true
+        rustup -V 2>/dev/null
+        rustup show active-toolchain
+        cargo -V
+        rustc -V
+        cargo tree -V
+        # dependencies
+        echo "## dependency list"
+        ## * using the 'stable' toolchain is necessary to avoid "unexpected '--filter-platform'" errors
+        RUSTUP_TOOLCHAIN=stable cargo fetch --locked --quiet
+        RUSTUP_TOOLCHAIN=stable cargo tree --no-dedupe --locked -e=no-dev --prefix=none ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} | grep -vE "$PWD" | sort --unique
     - name: Initialize toolchain-dependent workflow variables
       id: dep_vars
       shell: bash
@@ -1008,8 +1029,30 @@ jobs:
             echo "downloading gcc 13.2.0-2"
             C:/msys64/usr/bin/wget.exe https://repo.msys2.org/msys/x86_64/gcc-13.2.0-2-x86_64.pkg.tar.zst
             echo "installing"
-            C:/msys64/usr/bin/pacman.exe -U gcc-13.2.0-2-x86_64.pkg.tar.zst --noconfirm ; echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH ;;
+            C:/msys64/usr/bin/pacman.exe -U gcc-13.2.0-2-x86_64.pkg.tar.zst --noconfirm
+            echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH
+          ;;
         esac
+    - name: Info
+      shell: bash
+      run: |
+        ## Info
+        # environment
+        echo "## environment"
+        echo "CI='${CI}'"
+        # tooling info display
+        echo "## tooling"
+        which gcc >/dev/null 2>&1 && (gcc --version | head -1) || true
+        rustup -V 2>/dev/null
+        rustup show active-toolchain
+        cargo -V
+        rustc -V
+        cargo tree -V
+        # dependencies
+        echo "## dependency list"
+        ## * using the 'stable' toolchain is necessary to avoid "unexpected '--filter-platform'" errors
+        RUSTUP_TOOLCHAIN=stable cargo fetch --locked --quiet
+        RUSTUP_TOOLCHAIN=stable cargo tree --no-dedupe --locked -e=no-dev --prefix=none ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} | grep -vE "$PWD" | sort --unique
     - name: Initialize toolchain-dependent workflow variables
       id: dep_vars
       shell: bash
