@@ -623,6 +623,8 @@ jobs:
             sudo apt-get -y install fuse3 libfuse-dev
           ;;
           x86_64-pc-windows-gnu)
+            set PATH=C:/msys64/usr/bin;%PATH%
+            pacman -Fy ; pacman -F /c/mingw64/bin/gcc ; true
             # Update binutils if MinGW due to https://github.com/rust-lang/rust/issues/112368
             echo "installing wget"
             C:/msys64/usr/bin/pacman.exe -Syu --needed wget --noconfirm
@@ -630,8 +632,8 @@ jobs:
             C:/msys64/usr/bin/wget.exe https://repo.msys2.org/msys/x86_64/gcc-13.2.0-2-x86_64.pkg.tar.zst
             echo "search gcc" && C:/msys64/usr/bin/pacman.exe -Ss gcc
             echo "remove old gcc" && C:/msys64/usr/bin/pacman.exe -R gcc --noconfirm || true
-            echo "installing"
-            C:/msys64/usr/bin/pacman.exe -U gcc-13.2.0-2-x86_64.pkg.tar.zst --noconfirm
+            echo "installing" && C:/msys64/usr/bin/pacman.exe -Syu --needed gcc --noconfirm
+            echo "list files of gcc:" && pacman -Ql gcc || true
             echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH
           ;;
         esac
@@ -1025,17 +1027,19 @@ jobs:
         esac
         case '${{ matrix.job.os }}' in
           windows-latest)
-            # Update binutils if MinGW due to https://github.com/rust-lang/rust/issues/112368
-            echo "installing wget"
-            C:/msys64/usr/bin/pacman.exe -Syu --needed wget --noconfirm
-            echo "downloading gcc 13.2.0-2"
-            C:/msys64/usr/bin/wget.exe https://repo.msys2.org/msys/x86_64/gcc-13.2.0-2-x86_64.pkg.tar.zst
-            echo "search gcc" && C:/msys64/usr/bin/pacman.exe -Ss gcc
-            echo "remove old gcc" && C:/msys64/usr/bin/pacman.exe -R gcc --noconfirm || true
-            echo "installing"
-            C:/msys64/usr/bin/pacman.exe -U gcc-13.2.0-2-x86_64.pkg.tar.zst --noconfirm
-            echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH
-          ;;
+          set PATH=C:/msys64/usr/bin;%PATH%
+          pacman -Fy ; pacman -F /c/mingw64/bin/gcc ; true
+          # Update binutils if MinGW due to https://github.com/rust-lang/rust/issues/112368
+          echo "installing wget"
+          C:/msys64/usr/bin/pacman.exe -Syu --needed wget --noconfirm
+          echo "downloading gcc 13.2.0-2"
+          C:/msys64/usr/bin/wget.exe https://repo.msys2.org/msys/x86_64/gcc-13.2.0-2-x86_64.pkg.tar.zst
+          echo "search gcc" && C:/msys64/usr/bin/pacman.exe -Ss gcc
+          echo "remove old gcc" && C:/msys64/usr/bin/pacman.exe -R gcc --noconfirm || true
+          echo "installing" && C:/msys64/usr/bin/pacman.exe -Syu --needed gcc --noconfirm
+          echo "list files of gcc:" && pacman -Ql gcc || true
+          echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH
+        ;;
         esac
     - name: Info
       shell: bash
