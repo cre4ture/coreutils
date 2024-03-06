@@ -629,7 +629,7 @@ jobs:
             echo "downloading gcc 13.2.0-2"
             C:/msys64/usr/bin/wget.exe https://repo.msys2.org/msys/x86_64/gcc-13.2.0-2-x86_64.pkg.tar.zst
             echo "installing"
-            C:/msys64/usr/bin/pacman.exe -yU gcc-13.2.0-2-x86_64.pkg.tar.zst --noconfirm ; echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH ;;
+            C:/msys64/usr/bin/pacman.exe -U gcc-13.2.0-2-x86_64.pkg.tar.zst --noconfirm ; echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH ;;
           ;;
         esac
         case '${{ matrix.job.os }}' in
@@ -1008,7 +1008,7 @@ jobs:
             echo "downloading gcc 13.2.0-2"
             C:/msys64/usr/bin/wget.exe https://repo.msys2.org/msys/x86_64/gcc-13.2.0-2-x86_64.pkg.tar.zst
             echo "installing"
-            C:/msys64/usr/bin/pacman.exe -yU gcc-13.2.0-2-x86_64.pkg.tar.zst --noconfirm ; echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH ;;
+            C:/msys64/usr/bin/pacman.exe -U gcc-13.2.0-2-x86_64.pkg.tar.zst --noconfirm ; echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH ;;
         esac
     - name: Initialize toolchain-dependent workflow variables
       id: dep_vars
