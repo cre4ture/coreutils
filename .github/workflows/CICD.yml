@@ -627,7 +627,7 @@ jobs:
             echo "installing wget"
             C:/msys64/usr/bin/pacman.exe -Syu --needed wget --noconfirm
             echo "downloading gcc 13.2.0-2"
-            wget https://repo.msys2.org/msys/x86_64/gcc-13.2.0-2-x86_64.pkg.tar.zst
+            C:/msys64/usr/bin/wget.exe https://repo.msys2.org/msys/x86_64/gcc-13.2.0-2-x86_64.pkg.tar.zst
             echo "installing"
             C:/msys64/usr/bin/pacman.exe -yU gcc-13.2.0-2-x86_64.pkg.tar.zst --noconfirm ; echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH ;;
           ;;
@@ -1006,7 +1006,7 @@ jobs:
             echo "installing wget"
             C:/msys64/usr/bin/pacman.exe -Syu --needed wget --noconfirm
             echo "downloading gcc 13.2.0-2"
-            wget https://repo.msys2.org/msys/x86_64/gcc-13.2.0-2-x86_64.pkg.tar.zst
+            C:/msys64/usr/bin/wget.exe https://repo.msys2.org/msys/x86_64/gcc-13.2.0-2-x86_64.pkg.tar.zst
             echo "installing"
             C:/msys64/usr/bin/pacman.exe -yU gcc-13.2.0-2-x86_64.pkg.tar.zst --noconfirm ; echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH ;;
         esac
