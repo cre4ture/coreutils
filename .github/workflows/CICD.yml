@@ -623,8 +623,7 @@ jobs:
             sudo apt-get -y install fuse3 libfuse-dev
           ;;
           x86_64-pc-windows-gnu)
-            set PATH="C:/msys64/usr/bin;$PATH"
-            pacman -Fy ; pacman -F /c/mingw64/bin/gcc ; true
+            C:/msys64/usr/bin/pacman.exe -Fy ; C:/msys64/usr/bin/pacman.exe -F /c/mingw64/bin/gcc ; true
             # Update binutils if MinGW due to https://github.com/rust-lang/rust/issues/112368
             echo "installing wget"
             C:/msys64/usr/bin/pacman.exe -Syu --needed wget --noconfirm
@@ -1027,8 +1026,7 @@ jobs:
         esac
         case '${{ matrix.job.os }}' in
           windows-latest)
-            set PATH="C:/msys64/usr/bin;$PATH"
-            pacman -Fy ; pacman -F /c/mingw64/bin/gcc ; true
+            C:/msys64/usr/bin/pacman.exe -Fy ; C:/msys64/usr/bin/pacman.exe -F /c/mingw64/bin/gcc ; true
             # Update binutils if MinGW due to https://github.com/rust-lang/rust/issues/112368
             echo "installing wget"
             C:/msys64/usr/bin/pacman.exe -Syu --needed wget --noconfirm
