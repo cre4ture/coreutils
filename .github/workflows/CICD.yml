@@ -632,7 +632,7 @@ jobs:
             echo "search gcc" && C:/msys64/usr/bin/pacman.exe -Ss gcc
             echo "remove old gcc" && C:/msys64/usr/bin/pacman.exe -R gcc --noconfirm || true
             echo "installing" && C:/msys64/usr/bin/pacman.exe -Syu --needed gcc --noconfirm
-            echo "list files of gcc:" && pacman -Ql gcc || true
+            echo "list files of gcc:" && C:/msys64/usr/bin/pacman.exe -Ql gcc || true
             echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH
           ;;
         esac
@@ -1036,7 +1036,7 @@ jobs:
             echo "search gcc" && C:/msys64/usr/bin/pacman.exe -Ss gcc
             echo "remove old gcc" && C:/msys64/usr/bin/pacman.exe -R gcc --noconfirm || true
             echo "installing" && C:/msys64/usr/bin/pacman.exe -Syu --needed gcc --noconfirm
-            echo "list files of gcc:" && pacman -Ql gcc || true
+            echo "list files of gcc:" && C:/msys64/usr/bin/pacman.exe -Ql gcc || true
             echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH
         ;;
         esac
