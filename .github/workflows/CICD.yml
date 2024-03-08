@@ -470,7 +470,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        iteration: ["00","01","02","03","04","05","06","07","08",09","10","11","12","13","14","15"]
+        iteration: ["00","01","02","03","04","05","06","07","08",09","10","11","12"]
         job:
           # - { os , target , cargo-options , features , use-cross , toolchain, skip-tests }
           - { os: ubuntu-latest  , target: i686-unknown-linux-musl     , features: feat_os_unix_musl      , use-cross: use-cross }
@@ -689,7 +689,7 @@ jobs:
       shell: bash
       run: |
         ## Test
-        for i in {0..50..1}; do \
+        end=$((SECONDS+82*60)); while [ $SECONDS -lt $end ]; do \
         ${{ steps.vars.outputs.CARGO_CMD }} ${{ steps.vars.outputs.CARGO_CMD_OPTIONS }} test --target=${{ matrix.job.target }} \
         ${{ steps.vars.outputs.CARGO_TEST_OPTIONS}} ${{ matrix.job.cargo-options }} ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} || exit 1 ; \
         done
