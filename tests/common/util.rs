@@ -349,6 +349,11 @@ impl CmdResult {
         std::str::from_utf8(&self.stderr).unwrap()
     }
 
+    /// Returns the program's standard error as a string slice, automatically handling invalid utf8
+    pub fn stderr_str_lossy(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(&self.stderr)
+    }
+
     /// Returns the program's standard error as a string
     /// consumes self
     pub fn stderr_move_str(self) -> String {
@@ -392,10 +397,8 @@ impl CmdResult {
     pub fn success(&self) -> &Self {
         assert!(
             self.succeeded(),
-            "Command was expected to succeed. Exit code: {}.\nstdout = {}\n stderr = {}",
-            self.exit_status()
-                .code()
-                .map_or("n/a".to_string(), |code| code.to_string()),
+            "Command was expected to succeed. code: {}\nstdout = {}\n stderr = {}",
+            self.code(),
             self.stdout_str(),
             self.stderr_str()
         );
@@ -2663,7 +2666,7 @@ pub fn expected_result(ts: &TestScenario, args: &[&str]) -> std::result::Result<
     let (stdout, stderr): (String, String) = if cfg!(target_os = "linux") {
         (
             result.stdout_str().to_string(),
-            result.stderr_str().to_string(),
+            result.stderr_str_lossy().to_string(),
         )
     } else {
         // `host_name_for` added prefix, strip 'g' prefix from results:
@@ -2671,7 +2674,7 @@ pub fn expected_result(ts: &TestScenario, args: &[&str]) -> std::result::Result<
         let to = &from[1..];
         (
             result.stdout_str().replace(&from, to),
-            result.stderr_str().replace(&from, to),
+            result.stderr_str_lossy().replace(&from, to),
         )
     };
 
