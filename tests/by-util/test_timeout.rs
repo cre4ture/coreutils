@@ -1,3 +1,5 @@
+use uucore::display::Quotable;
+
 // This file is part of the uutils coreutils package.
 //
 // For the full copyright and license information, please view the LICENSE
@@ -157,15 +159,24 @@ fn test_kill_after_long() {
 
 #[test]
 fn test_kill_subprocess() {
-    let result = new_ucmd!()
-        .args(&[
-            // Make sure the CI can spawn the subprocess.
-            "10",
-            "sh",
-            "-c",
-            "sh -xc \"trap 'echo start_trap; echo end_trap' TERM; echo 'trap installed, start sleep'; sleep 30; echo 'sleep done'\"",
-        ])
-        .run();
+    let ts = TestScenario::new(util_name!());
+    let command = ts.bin_path.as_path();
+
+    let subscript = "sh -xc \"trap 'echo start_trap; echo end_trap' TERM; echo 'trap installed, start sleep'; sleep 30; echo 'sleep done'\"";
+    let script = format!(
+        "echo -n \"start time: \" ; date +\"%T.%3N\"
+        {} timeout 10 sh -xc {}
+        exit_code=$?
+        echo -n \"after timeout time: \" ; date +\"%T.%3N\"
+        sleep 5
+        echo -n \"after outer sleep 5 time: \" ; date +\"%T.%3N\"
+        exit $exit_code
+        ",
+        command.maybe_quote(),
+        subscript.maybe_quote(),
+    );
+
+    let result = ts.cmd("sh").args(&["-x"]).pipe_in(script).run();
 
     eprintln!("stdout:\n{}", result.stdout_str());
     eprintln!("stderr:\n{}", result.stderr_str());
