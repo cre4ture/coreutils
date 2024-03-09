@@ -1,0 +1,18 @@
++ echo -n start time:
++ date +%T.%3N
++ ######BIN_PATH###### timeout 10 sh -xc sh -xc "trap 'echo start_trap; echo end_trap' TERM; echo 'trap installed, start sleep'; sleep 30; echo 'sleep done'"
++ sh -xc trap 'echo start_trap; echo end_trap' TERM; echo 'trap installed, start sleep'; sleep 30; echo 'sleep done'
++ trap echo start_trap; echo end_trap TERM
++ echo trap installed, start sleep
++ sleep 30
+Terminated
++ echo start_trap
++ echo end_trap
++ echo sleep done
++ exit_code=124
++ echo -n after timeout time:
++ date +%T.%3N
++ sleep 5
++ echo -n after outer sleep 5 time:
++ date +%T.%3N
++ exit 124

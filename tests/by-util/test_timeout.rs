@@ -1,3 +1,5 @@
+use std::fs;
+
 use uucore::display::Quotable;
 
 // This file is part of the uutils coreutils package.
@@ -164,12 +166,12 @@ fn test_kill_subprocess() {
 
     let subscript = "sh -xc \"trap 'echo start_trap; echo end_trap' TERM; echo 'trap installed, start sleep'; sleep 30; echo 'sleep done'\"";
     let script = format!(
-        "echo -n \"start time: \" ; date +\"%T.%3N\"
+        "echo -n \"start time:\"; date +\"%T.%3N\"
         {} timeout 10 sh -xc {}
         exit_code=$?
-        echo -n \"after timeout time: \" ; date +\"%T.%3N\"
+        echo -n \"after timeout time:\" ; date +\"%T.%3N\"
         sleep 5
-        echo -n \"after outer sleep 5 time: \" ; date +\"%T.%3N\"
+        echo -n \"after outer sleep 5 time:\" ; date +\"%T.%3N\"
         exit $exit_code
         ",
         command.maybe_quote(),
@@ -186,4 +188,12 @@ fn test_kill_subprocess() {
         .code_is(124)
         .stdout_contains("start_trap")
         .stderr_contains("Terminated");
+
+    let reference_path = ts.fixtures.plus_as_string("reference_kill_subprocess.txt");
+    let reference_template = fs::read_to_string(reference_path).unwrap();
+    let reference = reference_template.replace(
+        "######BIN_PATH######",
+        command.maybe_quote().to_string().as_str(),
+    );
+    result.stderr_is(reference);
 }
