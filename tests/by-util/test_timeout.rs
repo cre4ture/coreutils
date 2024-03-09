@@ -163,7 +163,7 @@ fn test_kill_subprocess() {
             "10",
             "sh",
             "-c",
-            "sh -c \"trap 'echo xyz; echo abc' TERM; echo 'trap installed'; sleep 30; echo 'sleep done'\"",
+            "sh -xc \"trap 'echo start_trap; echo end_trap' TERM; echo 'trap installed, start sleep'; sleep 30; echo 'sleep done'\"",
         ])
         .run();
 
@@ -173,6 +173,6 @@ fn test_kill_subprocess() {
     result
         .failure()
         .code_is(124)
-        .stdout_contains("xyz")
+        .stdout_contains("start_trap")
         .stderr_contains("Terminated");
 }
