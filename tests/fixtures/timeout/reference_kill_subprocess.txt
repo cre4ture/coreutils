@@ -1,6 +1,6 @@
 + echo -n start time:
 + date +%T.%3N
-+ ######BIN_PATH###### timeout 10 sh -xc sh -xc "trap 'echo start_trap; echo end_trap' TERM; echo 'trap installed, start sleep'; sleep 30; echo 'sleep done'"
++ ######BIN_PATH###### timeout 10 sh -xc trap 'echo start_trap; echo end_trap' TERM; echo 'trap installed, start sleep'; sleep 30; echo 'sleep done'
 + sh -xc trap 'echo start_trap; echo end_trap' TERM; echo 'trap installed, start sleep'; sleep 30; echo 'sleep done'
 + trap echo start_trap; echo end_trap TERM
 + echo trap installed, start sleep

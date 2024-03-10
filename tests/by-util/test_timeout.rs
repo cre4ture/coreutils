@@ -164,7 +164,7 @@ fn test_kill_subprocess() {
     let ts = TestScenario::new(util_name!());
     let command = ts.bin_path.as_path();
 
-    let subscript = "sh -xc \"trap 'echo start_trap; echo end_trap' TERM; echo 'trap installed, start sleep'; sleep 30; echo 'sleep done'\"";
+    let subscript = "trap 'echo start_trap; echo end_trap' TERM; echo 'trap installed, start sleep'; sleep 30; echo 'sleep done'";
     let script = format!(
         "echo -n \"start time:\"; date +\"%T.%3N\"
         {} timeout 10 sh -xc {}
