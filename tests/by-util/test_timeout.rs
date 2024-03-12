@@ -181,6 +181,7 @@ fn test_kill_subprocess() {
     let result = ts.cmd("sh").args(&["-x"]).pipe_in(script).run();
 
     eprintln!("stdout:\n{}", result.stdout_str());
+
     eprintln!("stderr:\n{}", result.stderr_str());
 
     result
