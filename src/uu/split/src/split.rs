@@ -1204,6 +1204,12 @@ impl ManageOutFiles for OutFiles {
         idx: usize,
         settings: &Settings,
     ) -> UResult<&mut BufWriter<Box<dyn Write>>> {
+        let mut count = 0;
+        // Use-case for doing multiple tries of closing fds:
+        // E.g. split running in parallel to other processes (e.g. another split) doing similar stuff,
+        // sharing the same limits. In this scenario, after closing one fd, the other process
+        // might "steel" the freed fd and open a file on its side. Then it would be beneficial
+        // if split would be able to close another fd before cancellation.
         'loop1: loop {
             let filename_to_open = self[idx].filename.as_str();
             let file_to_open_is_new = self[idx].is_new;
@@ -1226,6 +1232,7 @@ impl ManageOutFiles for OutFiles {
                     out_file.maybe_writer.as_mut().unwrap().flush()?;
                     out_file.maybe_writer = None;
                     out_file.is_new = false;
+                    count += 1;
 
                     // And then try to instantiate the writer again
                     continue 'loop1;
@@ -1233,7 +1240,7 @@ impl ManageOutFiles for OutFiles {
             }
 
             // If this fails - give up and propagate the error
-            uucore::show_error!("at file descriptor limit, but no file descriptor left to close");
+            uucore::show_error!("at file descriptor limit, but no file descriptor left to close. Closed {count} writers before.");
             return Err(maybe_writer.err().unwrap().into());
         }
     }

@@ -326,12 +326,12 @@ fn update_times(
 // If `follow` is `true`, the function will try to follow symlinks
 // If `follow` is `false` or the symlink is broken, the function will return metadata of the symlink itself
 fn stat(path: &Path, follow: bool) -> UResult<(FileTime, FileTime)> {
-    let metadata = match fs::metadata(path) {
-        Ok(metadata) => metadata,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound && !follow => fs::symlink_metadata(path)
-            .map_err_context(|| format!("failed to get attributes of {}", path.quote()))?,
-        Err(e) => return Err(e.into()),
-    };
+    let metadata = if follow {
+        fs::metadata(path).or_else(|_| fs::symlink_metadata(path))
+    } else {
+        fs::symlink_metadata(path)
+    }
+    .map_err_context(|| format!("failed to get attributes of {}", path.quote()))?;
 
     Ok((
         FileTime::from_last_access_time(&metadata),
@@ -433,7 +433,7 @@ fn parse_timestamp(s: &str) -> UResult<FileTime> {
     // only care about the timestamp anyway.
     // Tested in gnu/tests/touch/60-seconds
     if local.second() == 59 && ts.ends_with(".60") {
-        local += Duration::seconds(1);
+        local += Duration::try_seconds(1).unwrap();
     }
 
     // Due to daylight saving time switch, local time can jump from 1:59 AM to
@@ -441,7 +441,7 @@ fn parse_timestamp(s: &str) -> UResult<FileTime> {
     // valid. If we are within this jump, chrono takes the offset from before
     // the jump. If we then jump forward an hour, we get the new corrected
     // offset. Jumping back will then now correctly take the jump into account.
-    let local2 = local + Duration::hours(1) - Duration::hours(1);
+    let local2 = local + Duration::try_hours(1).unwrap() - Duration::try_hours(1).unwrap();
     if local.hour() != local2.hour() {
         return Err(USimpleError::new(
             1,
