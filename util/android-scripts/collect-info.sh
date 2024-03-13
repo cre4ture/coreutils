@@ -2,11 +2,11 @@
 
 # spell-checker:ignore nextest watchplus PIPESTATUS
 
-echo "system ressources - RAM:"
+echo "system resources - RAM:"
 free -hm
-echo "system ressources - CPU:"
+echo "system resources - CPU:"
 lscpu
-echo "system ressources - file systems:"
+echo "system resources - file systems:"
 mount
 
 echo "$HOME"

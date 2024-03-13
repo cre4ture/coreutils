@@ -73,13 +73,25 @@ fn test_ls_ordering() {
         .stdout_matches(&Regex::new("some-dir1:\\ntotal 0").unwrap());
 }
 
+#[cfg(not(target_os = "freebsd"))] // stat on freebsd doesn't support "-f"
 fn get_filesystem_type(path: &Path) -> String {
     let mut cmd = std::process::Command::new("stat");
-    cmd.arg("-f").arg(path);
+    cmd.args(["-f", "-c", "%T"]).arg(path);
     let output = cmd.output().unwrap();
     let stdout_str = String::from_utf8_lossy(&output.stdout);
-    let regex = Regex::new(r#"\sType: (?<fstype>[^\s]+)"#).unwrap();
     println!("output of stat call ({:?}):\n{}", cmd, stdout_str);
+    stdout_str.into_owned()
+}
+
+#[cfg(target_os = "freebsd")] // df -T is not supported by android
+fn get_filesystem_type(path: &Path) -> String {
+    let mut cmd = std::process::Command::new("df");
+    cmd.args(["-PT"]).arg(path);
+    let output = cmd.output().unwrap();
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    println!("output of stat call ({:?}):\n{}", cmd, stdout_str);
+    let regex_str = r#"Filesystem\s+Type\s+.+[\r\n]+([^\s]+)\s+(?<fstype>[^\s]+)\s+"#;
+    let regex = Regex::new(regex_str).unwrap();
     let m = regex.captures(&stdout_str).unwrap();
     let fstype = m["fstype"].to_owned();
     println!("detected fstype: {}", fstype);
