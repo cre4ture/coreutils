@@ -133,7 +133,6 @@ fn test_ls_allocation_size() {
         let (zero_file_size_4k, zero_file_size_1k, zero_file_size_8k, zero_file_size_4m) =
             match fstype.as_str() {
                 "f2fs" => (4100, 1025, 8200, "4.1M"),
-                "zfs" => (4096, 1025, 8200, "4.1M"),
                 _ => (4096, 1024, 8192, "4.0M"),
             };
 
