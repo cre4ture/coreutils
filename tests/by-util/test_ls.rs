@@ -107,7 +107,7 @@ fn test_ls_allocation_size() {
         // fill empty file with zeros
         scene
             .ccmd("dd")
-            .arg("if=/dev/zero")
+            .arg("if=/dev/random")
             .arg("of=some-dir1/zero-file")
             .arg("bs=1024")
             .arg("count=4096")
@@ -115,7 +115,7 @@ fn test_ls_allocation_size() {
 
         scene
             .ccmd("dd")
-            .arg("if=/dev/zero")
+            .arg("if=/dev/random")
             .arg("of=irregular-file")
             .arg("bs=1")
             .arg("count=777")
@@ -133,7 +133,7 @@ fn test_ls_allocation_size() {
         let (zero_file_size_4k, zero_file_size_1k, zero_file_size_8k, zero_file_size_4m) =
             match fstype.as_str() {
                 "f2fs" => (4100, 1025, 8200, "4.1M"),
-                "zfs" => (0, 1025, 8200, "4.1M"),
+                "zfs" => (4096, 1025, 8200, "4.1M"),
                 _ => (4096, 1024, 8192, "4.0M"),
             };
 
