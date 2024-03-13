@@ -131,10 +131,10 @@ fn test_ls_allocation_size() {
 
         let fstype = get_filesystem_type(&scene, &scene.fixtures.subdir);
         let (zero_file_size_4k, zero_file_size_1k, zero_file_size_8k, zero_file_size_4m) =
-            if fstype != "f2fs" {
-                (4096, 1024, 8192, "4.0M")
-            } else {
-                (4100, 1025, 8200, "4.1M")
+            match fstype.as_str() {
+                "f2fs" => (4100, 1025, 8200, "4.1M"),
+                "zfs" => (0, 1025, 8200, "4.1M"),
+                _ => (4096, 1024, 8192, "4.0M"),
             };
 
         scene
