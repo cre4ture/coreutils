@@ -371,7 +371,6 @@ run_command_via_ssh() {
 
 test_ssh_connection() {
     run_command_via_ssh echo ssh connection is working
-    run_command_via_ssh free -mh
 }
 
 # takes a local (on runner side) script file and runs it via ssh on the virtual android device. forwards return code.
