@@ -45,7 +45,7 @@ run_tests_in_subprocess() (
     }
 
     # observe (log) every 2 seconds the system resource usage to judge if we are at a limit
-    watchplus 2 df -h &
+    watchplus 2 df -Th &
     watchplus 2 free -hm &
 
     nextest_params=(--profile ci --hide-progress-bar --features feat_os_unix_android)
