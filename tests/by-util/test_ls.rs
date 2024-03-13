@@ -20,7 +20,6 @@ use std::os::unix::io::IntoRawFd;
 use std::path::Path;
 #[cfg(not(windows))]
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -77,13 +76,14 @@ fn test_ls_ordering() {
 fn get_filesystem_type(path: &Path) -> String {
     let mut cmd = std::process::Command::new("stat");
     cmd.arg("-f").arg(path);
-    cmd.stdout(Stdio::piped());
-    let child = cmd.spawn().unwrap();
-    let output = child.wait_with_output().unwrap();
+    let output = cmd.output().unwrap();
     let stdout_str = String::from_utf8_lossy(&output.stdout);
     let regex = Regex::new(r#"\sType: (?<fstype>[^\s]+)"#).unwrap();
+    println!("output of stat call ({:?}):\n{}", cmd, stdout_str);
     let m = regex.captures(&stdout_str).unwrap();
-    m["fstype"].to_owned()
+    let fstype = m["fstype"].to_owned();
+    println!("detected fstype: {}", fstype);
+    fstype
 }
 
 #[cfg(all(feature = "truncate", feature = "dd"))]
