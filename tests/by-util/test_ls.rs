@@ -73,22 +73,11 @@ fn test_ls_ordering() {
         .stdout_matches(&Regex::new("some-dir1:\\ntotal 0").unwrap());
 }
 
-#[cfg(not(target_os = "freebsd"))] // stat on freebsd doesn't support "-f"
-fn get_filesystem_type(path: &Path) -> String {
-    let mut cmd = std::process::Command::new("stat");
-    cmd.args(["-f", "-c", "%T"]).arg(path);
-    let output = cmd.output().unwrap();
-    let stdout_str = String::from_utf8_lossy(&output.stdout);
-    println!("output of stat call ({:?}):\n{}", cmd, stdout_str);
-    stdout_str.into_owned()
-}
-
-#[cfg(target_os = "freebsd")] // df -T is not supported by android
-fn get_filesystem_type(path: &Path) -> String {
-    let mut cmd = std::process::Command::new("df");
-    cmd.args(["-PT"]).arg(path);
-    let output = cmd.output().unwrap();
-    let stdout_str = String::from_utf8_lossy(&output.stdout);
+fn get_filesystem_type(scene: &TestScenario, path: &Path) -> String {
+    let mut cmd = scene.ccmd("df");
+    cmd.args(&["-PT"]).arg(path);
+    let output = cmd.succeeds();
+    let stdout_str = String::from_utf8_lossy(&output.stdout());
     println!("output of stat call ({:?}):\n{}", cmd, stdout_str);
     let regex_str = r#"Filesystem\s+Type\s+.+[\r\n]+([^\s]+)\s+(?<fstype>[^\s]+)\s+"#;
     let regex = Regex::new(regex_str).unwrap();
@@ -98,7 +87,7 @@ fn get_filesystem_type(path: &Path) -> String {
     fstype
 }
 
-#[cfg(all(feature = "truncate", feature = "dd"))]
+#[cfg(all(feature = "truncate", feature = "dd", feature = "df"))]
 #[test] // FIXME: fix this test for FreeBSD
 fn test_ls_allocation_size() {
     let scene = TestScenario::new(util_name!());
@@ -140,7 +129,7 @@ fn test_ls_allocation_size() {
             .succeeds()
             .stdout_matches(&Regex::new("[^ ] 2 [^ ]").unwrap());
 
-        let fstype = get_filesystem_type(&scene.fixtures.subdir);
+        let fstype = get_filesystem_type(&scene, &scene.fixtures.subdir);
         let (zero_file_size_4k, zero_file_size_1k, zero_file_size_8k, zero_file_size_4m) =
             if fstype != "f2fs" {
                 (4096, 1024, 8192, "4.0M")
