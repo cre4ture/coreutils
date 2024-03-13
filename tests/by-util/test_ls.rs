@@ -4071,7 +4071,7 @@ fn test_ls_block_size_override() {
 
     scene
         .ccmd("dd")
-        .arg("if=/dev/zero")
+        .arg("if=/dev/random")
         .arg("of=file")
         .arg("bs=1024")
         .arg("count=1")
