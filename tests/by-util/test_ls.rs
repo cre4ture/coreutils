@@ -77,7 +77,7 @@ fn get_filesystem_type(scene: &TestScenario, path: &Path) -> String {
     let mut cmd = scene.ccmd("df");
     cmd.args(&["-PT"]).arg(path);
     let output = cmd.succeeds();
-    let stdout_str = String::from_utf8_lossy(&output.stdout());
+    let stdout_str = String::from_utf8_lossy(output.stdout());
     println!("output of stat call ({:?}):\n{}", cmd, stdout_str);
     let regex_str = r#"Filesystem\s+Type\s+.+[\r\n]+([^\s]+)\s+(?<fstype>[^\s]+)\s+"#;
     let regex = Regex::new(regex_str).unwrap();
@@ -137,12 +137,15 @@ fn test_ls_allocation_size() {
                 _ => (4096, 1024, 8192, "4.0M"),
             };
 
+        let zero_file_size_4k_filler = " ".repeat(zero_file_size_4k.to_string().len() - 1);
+
         scene
             .ucmd()
             .arg("-s1")
             .arg("some-dir1")
             .succeeds()
-            .stdout_is(format!("total {zero_file_size_4k}\n   0 empty-file\n   0 file-with-holes\n{zero_file_size_4k} zero-file\n"));
+            .stdout_is(format!("total {zero_file_size_4k}\n{zero_file_size_4k_filler}0 \
+                empty-file\n{zero_file_size_4k_filler}0 file-with-holes\n{zero_file_size_4k} zero-file\n"));
 
         scene
             .ucmd()
