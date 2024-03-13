@@ -20,6 +20,7 @@ use std::os::unix::io::IntoRawFd;
 use std::path::Path;
 #[cfg(not(windows))]
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -73,6 +74,18 @@ fn test_ls_ordering() {
         .stdout_matches(&Regex::new("some-dir1:\\ntotal 0").unwrap());
 }
 
+fn get_filesystem_type(path: &Path) -> String {
+    let mut cmd = std::process::Command::new("stat");
+    cmd.arg("-f").arg(path);
+    cmd.stdout(Stdio::piped());
+    let child = cmd.spawn().unwrap();
+    let output = child.wait_with_output().unwrap();
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    let regex = Regex::new(r#"\sType: (?<fstype>[^\s]+)"#).unwrap();
+    let m = regex.captures(&stdout_str).unwrap();
+    m["fstype"].to_owned()
+}
+
 #[cfg(all(feature = "truncate", feature = "dd"))]
 #[test] // FIXME: fix this test for FreeBSD
 fn test_ls_allocation_size() {
@@ -115,18 +128,14 @@ fn test_ls_allocation_size() {
             .succeeds()
             .stdout_matches(&Regex::new("[^ ] 2 [^ ]").unwrap());
 
-        #[cfg(all(
-            not(target_os = "freebsd"),
-            not(all(target_os = "android", target_pointer_width = "64"))
-        ))]
+        let fstype = get_filesystem_type(&scene.fixtures.subdir);
         let (zero_file_size_4k, zero_file_size_1k, zero_file_size_8k, zero_file_size_4m) =
-            (4096, 1024, 8192, "4.0M");
+            if fstype != "f2fs" {
+                (4096, 1024, 8192, "4.0M")
+            } else {
+                (4100, 1025, 8200, "4.1M")
+            };
 
-        #[cfg(all(target_os = "android", target_pointer_width = "64"))]
-        let (zero_file_size_4k, zero_file_size_1k, zero_file_size_8k, zero_file_size_4m) =
-            (4100, 1025, 8200, "4.1M"); // FIXME: Investigate where this difference comes from. Is it OS or filesystem?
-
-        #[cfg(not(target_os = "freebsd"))]
         scene
             .ucmd()
             .arg("-s1")
@@ -142,7 +151,6 @@ fn test_ls_allocation_size() {
             // block size is 0 whereas size/len is 4194304
             .stdout_contains("4194304");
 
-        #[cfg(not(target_os = "freebsd"))]
         scene
             .ucmd()
             .arg("-s1")
@@ -176,7 +184,6 @@ fn test_ls_allocation_size() {
 
         assert_eq!(empty_file_len, file_with_holes_len);
 
-        #[cfg(not(target_os = "freebsd"))]
         scene
             .ucmd()
             .env("LS_BLOCK_SIZE", "8K")
@@ -189,7 +196,6 @@ fn test_ls_allocation_size() {
             .stdout_contains("0 file-with-holes")
             .stdout_contains("512 zero-file");
 
-        #[cfg(not(target_os = "freebsd"))]
         scene
             .ucmd()
             .env("BLOCK_SIZE", "4K")
@@ -201,7 +207,6 @@ fn test_ls_allocation_size() {
             .stdout_contains("0 file-with-holes")
             .stdout_contains(format!("{zero_file_size_1k} zero-file"));
 
-        #[cfg(not(target_os = "freebsd"))]
         scene
             .ucmd()
             .env("BLOCK_SIZE", "4K")
@@ -214,7 +219,6 @@ fn test_ls_allocation_size() {
             .stdout_contains("0 file-with-holes")
             .stdout_contains("4.2M zero-file");
 
-        #[cfg(not(target_os = "freebsd"))]
         scene
             .ucmd()
             .env("BLOCK_SIZE", "4096")
@@ -226,7 +230,6 @@ fn test_ls_allocation_size() {
             .stdout_contains("0 file-with-holes")
             .stdout_contains(format!("{zero_file_size_1k} zero-file"));
 
-        #[cfg(not(target_os = "freebsd"))]
         scene
             .ucmd()
             .env("POSIXLY_CORRECT", "true")
@@ -239,7 +242,6 @@ fn test_ls_allocation_size() {
             .stdout_contains(format!("{zero_file_size_8k} zero-file"));
 
         // -k should make 'ls' ignore the env var
-        #[cfg(not(target_os = "freebsd"))]
         scene
             .ucmd()
             .env("BLOCK_SIZE", "4K")
@@ -252,7 +254,6 @@ fn test_ls_allocation_size() {
             .stdout_contains(format!("{zero_file_size_4k} zero-file"));
 
         // but manually specified blocksize overrides -k
-        #[cfg(not(target_os = "freebsd"))]
         scene
             .ucmd()
             .arg("-s1k")
@@ -264,7 +265,6 @@ fn test_ls_allocation_size() {
             .stdout_contains("0 file-with-holes")
             .stdout_contains(format!("{zero_file_size_1k} zero-file"));
 
-        #[cfg(not(target_os = "freebsd"))]
         scene
             .ucmd()
             .arg("-s1")
@@ -277,7 +277,6 @@ fn test_ls_allocation_size() {
             .stdout_contains(format!("{zero_file_size_1k} zero-file"));
 
         // si option should always trump the human-readable option
-        #[cfg(not(target_os = "freebsd"))]
         scene
             .ucmd()
             .arg("-s1h")
@@ -289,7 +288,6 @@ fn test_ls_allocation_size() {
             .stdout_contains("0 file-with-holes")
             .stdout_contains("4.2M zero-file");
 
-        #[cfg(not(target_os = "freebsd"))]
         scene
             .ucmd()
             .arg("-s1")
@@ -301,7 +299,6 @@ fn test_ls_allocation_size() {
             .stdout_contains("0 file-with-holes")
             .stdout_contains(format!("{zero_file_size_4m} zero-file"));
 
-        #[cfg(not(target_os = "freebsd"))]
         scene
             .ucmd()
             .arg("-s1")
