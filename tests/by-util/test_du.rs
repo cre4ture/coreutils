@@ -1166,7 +1166,7 @@ fn test_du_reflink_copy_not_considered_as_extra_data() {
 
     create_binary_file(&at, 10 * 1024 * 1024, "large_file1.bin");
 
-    ts.cmd("cp")
+    ts.ccmd("cp")
         .arg("--reflink=always")
         .arg("large_file1.bin")
         .arg("large_file1_cp_reflink_always.bin")
@@ -1192,7 +1192,7 @@ fn test_du_reflink_copy_of_very_small_files_considered_as_extra_data_as_its_part
 
     create_binary_file(&at, 50, "small_file1.bin");
 
-    ts.cmd("cp")
+    ts.ccmd("cp")
         .arg("--reflink=always")
         .arg("small_file1.bin")
         .arg("small_file1_cp_reflink_always.bin")
@@ -1215,7 +1215,7 @@ fn test_du_reflink_partial_copy_not_considered_as_extra_data() {
 
     create_binary_file(&at, 10 * 1024 * 1024, "large_file1.bin");
 
-    ts.cmd("cp")
+    ts.ccmd("cp")
         .arg("--reflink=always")
         .arg("large_file1.bin")
         .arg("large_file1_cp_reflink_always_partial.bin")
@@ -1243,7 +1243,7 @@ fn test_du_symlink_to_reflink_copy_do_not_omit_symlink_printing() {
 
     create_binary_file(&at, 1024 * 1024, "large_file1.bin");
 
-    ts.cmd("cp")
+    ts.ccmd("cp")
         .arg("--reflink=always")
         .arg("large_file1.bin")
         .arg("large_file1_cp_reflink_always.bin")
