@@ -1157,7 +1157,7 @@ pub struct TestScenario {
     pub bin_path: PathBuf,
     pub util_name: String,
     pub fixtures: AtPath,
-    pub tmpd: Rc<TempDir>,
+    tmpd: Rc<TempDir>,
 }
 
 impl TestScenario {

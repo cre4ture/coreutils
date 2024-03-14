@@ -1146,80 +1146,7 @@ fn test_du_files0_from_combined() {
     assert!(stderr.contains("file operands cannot be combined with --files0-from"));
 }
 
-struct BtrfsFilesystemTmp {
-    ts: Rc<TestScenario>,
-    device_name: String,
-    root_dir: AtPath,
-}
-
-impl BtrfsFilesystemTmp {
-    fn new(ts: Rc<TestScenario>) -> Self {
-        // create temporary btrfs in an image file and mount it
-
-        ts.cmd("dd")
-            .args(&["bs=1M", "count=256", "if=/dev/zero", "of=small_btrfs.img"])
-            .succeeds();
-
-        ts.fixtures.mkdir_all("btrfs_template/home");
-        ts.cmd("/usr/sbin/mkfs.btrfs")
-            .args(&["--rootdir", "btrfs_template", "small_btrfs.img"])
-            .succeeds();
-
-        let result = ts
-            .cmd("udisksctl")
-            .args(&["loop-setup", "-f", "small_btrfs.img"])
-            .succeeds();
-        let re = Regex::new(r"(?m) as (?<device>\/dev\/\w+)\.$").unwrap();
-        let stdout_str = result.stdout_str();
-        let captures = re.captures(stdout_str);
-        let device_name = captures.unwrap()["device"].to_string();
-        println!("The name of the device is: {}", device_name);
-
-        let result = ts
-            .cmd("udisksctl")
-            .args(&["mount", "-b", device_name.as_str()])
-            .succeeds();
-        let re = Regex::new(r"(?m)Mounted (?<device>\/dev\/\w+) at (?<mount_path>/.*)$").unwrap();
-        let mount_path = re.captures(result.stdout_str()).unwrap()["mount_path"].to_string();
-
-        ts.fixtures
-            .symlink_dir((String::from(mount_path) + "/home").as_str(), "btrfs");
-
-        return Self {
-            ts: ts.clone(),
-            device_name,
-            root_dir: AtPath::new(ts.fixtures.plus("btrfs").as_path()),
-        };
-    }
-}
-
-impl Drop for BtrfsFilesystemTmp {
-    fn drop(&mut self) {
-        println!("BtrfsFilesystemTmp is being dropped");
-        self.ts
-            .cmd("udisksctl")
-            .args(&["unmount", "-b", self.device_name.as_str()])
-            .succeeds();
-    }
-}
-
-fn create_fixture_in_dir(path: String) -> TestScenario {
-    use tempfile::TempDir;
-
-    let path = alloc::rc::Rc::new(std::path::PathBuf::from(path));
-    std::fs::create_dir_all(path.as_path()).unwrap();
-    let tmpd = alloc::rc::Rc::new(TempDir::new_in(path.as_path()).unwrap());
-
-    let ts = TestScenario {
-        bin_path: std::path::PathBuf::from(TESTS_BINARY),
-        util_name: alloc::string::String::from(util_name!()),
-        fixtures: AtPath::new(tmpd.path()),
-        tmpd,
-    };
-
-    return ts;
-}
-
+#[cfg(target_os = "freebsd")] // freebsd has zfs filesystem which is copy-on-write
 fn create_binary_file(at: &AtPath, size_in_bytes: u64, filename: &str) {
     let mut file = at.make_file(filename);
     for _ in 0..size_in_bytes / 10 {
@@ -1231,30 +1158,10 @@ fn create_binary_file(at: &AtPath, size_in_bytes: u64, filename: &str) {
     file.flush().unwrap();
 }
 
-struct BtrfsFixture {
-    pub _orig_ts: Rc<TestScenario>,
-    pub _btrfs: BtrfsFilesystemTmp,
-    pub ts: TestScenario,
-}
-
-impl BtrfsFixture {
-    fn new() -> Self {
-        let orig_ts = Rc::new(TestScenario::new(util_name!()));
-        let btrfs = BtrfsFilesystemTmp::new(orig_ts.clone());
-        let ts = create_fixture_in_dir(btrfs.root_dir.as_string());
-        return Self {
-            _orig_ts: orig_ts,
-            _btrfs: btrfs,
-            ts,
-        };
-    }
-}
-
-#[cfg(not(windows))]
+#[cfg(target_os = "freebsd")] // freebsd has zfs filesystem which is copy-on-write
 #[test]
 fn test_du_reflink_copy_not_considered_as_extra_data() {
-    let bts = BtrfsFixture::new();
-    let ts = bts.ts;
+    let ts = TestScenario::new(util_name!());
     let at = &ts.fixtures;
 
     create_binary_file(&at, 10 * 1024 * 1024, "large_file1.bin");
@@ -1277,11 +1184,10 @@ fn test_du_reflink_copy_not_considered_as_extra_data() {
     result.stdout_contains("20480\t.\n");
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "freebsd")] // freebsd has zfs filesystem which is copy-on-write
 #[test]
 fn test_du_reflink_copy_of_very_small_files_considered_as_extra_data_as_its_part_of_metadata() {
-    let bts = BtrfsFixture::new();
-    let ts = bts.ts;
+    let ts = TestScenario::new(util_name!());
     let at = &ts.fixtures;
 
     create_binary_file(&at, 50, "small_file1.bin");
@@ -1301,11 +1207,10 @@ fn test_du_reflink_copy_of_very_small_files_considered_as_extra_data_as_its_part
     result.stdout_contains("100\t.\n");
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "freebsd")] // freebsd has zfs filesystem which is copy-on-write
 #[test]
 fn test_du_reflink_partial_copy_not_considered_as_extra_data() {
-    let bts = BtrfsFixture::new();
-    let ts = bts.ts;
+    let ts = TestScenario::new(util_name!());
     let at = &ts.fixtures;
 
     create_binary_file(&at, 10 * 1024 * 1024, "large_file1.bin");
@@ -1330,11 +1235,10 @@ fn test_du_reflink_partial_copy_not_considered_as_extra_data() {
     result.stdout_contains("11240\t.\n");
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "freebsd")] // freebsd has zfs filesystem which is copy-on-write
 #[test]
 fn test_du_symlink_to_reflink_copy_do_not_omit_symlink_printing() {
-    let bts = BtrfsFixture::new();
-    let ts = bts.ts;
+    let ts = TestScenario::new(util_name!());
     let at = &ts.fixtures;
 
     create_binary_file(&at, 1024 * 1024, "large_file1.bin");
