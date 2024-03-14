@@ -2098,7 +2098,7 @@ fn copy_helper(
             options.reflink_mode,
             options.sparse_mode,
             context,
-            #[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "freebsd"))]
             source_is_fifo,
         )?;
 
