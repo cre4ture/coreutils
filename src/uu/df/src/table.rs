@@ -25,6 +25,7 @@ type MaybeInodesT = Option<InodesIntT>;
 ///
 /// A row comprises several pieces of information, including the
 /// filesystem device, the mountpoint, the number of bytes used, etc.
+#[derive(Clone)]
 pub(crate) struct Row {
     /// The filename given on the command-line, if given.
     file: Option<String>,
@@ -872,5 +873,117 @@ mod tests {
         let row = Row::from(d);
 
         assert_eq!(row.inodes_used, Some(0));
+    }
+
+    #[test]
+    fn test_row_accumulation_u64_overflow() {
+        let total = u64::MAX as super::InodesIntT;
+        let used1 = 3000 as super::InodesIntT;
+        let used2 = 50000 as super::InodesIntT;
+
+        let mut row1 = Row {
+            inodes: Some(total),
+            inodes_used: Some(used1),
+            inodes_free: Some(total - used1),
+            ..Default::default()
+        };
+
+        let row2 = Row {
+            inodes: Some(total),
+            inodes_used: Some(used2),
+            inodes_free: Some(total - used2),
+            ..Default::default()
+        };
+
+        row1 += row2;
+
+        assert_eq!(row1.inodes, Some(total * 2));
+        assert_eq!(row1.inodes_used, Some(used1 + used2));
+        assert_eq!(row1.inodes_free, Some(total * 2 - used1 - used2));
+    }
+
+    #[test]
+    fn test_row_accumulation_close_to_u128_overflow() {
+        let total = u128::MAX as super::InodesIntT / 2 - 1;
+        let used1 = total - 50000;
+        let used2 = total - 100000;
+
+        let mut row1 = Row {
+            inodes: Some(total),
+            inodes_used: Some(used1),
+            inodes_free: Some(total - used1),
+            ..Default::default()
+        };
+
+        let row2 = Row {
+            inodes: Some(total),
+            inodes_used: Some(used2),
+            inodes_free: Some(total - used2),
+            ..Default::default()
+        };
+
+        row1 += row2;
+
+        assert_eq!(row1.inodes, Some(total * 2));
+        assert_eq!(row1.inodes_used, Some(used1 + used2));
+        assert_eq!(row1.inodes_free, Some(total * 2 - used1 - used2));
+    }
+
+    #[test]
+    fn test_row_accumulation_and_usage_close_over_u128_overflow() {
+        let total = u128::MAX as super::InodesIntT / 2 - 1;
+        let used1 = total / 2;
+        let free1 = total - used1;
+        let used2 = total / 2 - 10;
+        let free2 = total - used2;
+
+        let mut row1 = Row {
+            inodes: Some(total),
+            inodes_used: Some(used1),
+            inodes_free: Some(free1),
+            ..Default::default()
+        };
+
+        let row2 = Row {
+            inodes: Some(total),
+            inodes_used: Some(used2),
+            inodes_free: Some(free2),
+            ..Default::default()
+        };
+
+        row1 += row2.clone();
+
+        assert_eq!(row1.inodes, Some(total * 2));
+        assert_eq!(row1.inodes_used, Some(used1 + used2));
+        assert_eq!(row1.inodes_free, Some(free1 + free2));
+        assert_eq!(row1.inodes_usage, Some(0.5));
+
+        row1 += row2.clone();
+
+        assert_eq!(row1.inodes, None); // total * 3
+        assert_eq!(row1.inodes_used, Some(used1 + used2 * 2));
+        assert_eq!(row1.inodes_free, Some(free1 + free2 * 2));
+        assert_eq!(row1.inodes_usage, None);
+
+        row1 += row2.clone();
+
+        assert_eq!(row1.inodes, None); // total * 4
+        assert_eq!(row1.inodes_used, Some(used1 + used2 * 3)); // used * 4
+        assert_eq!(row1.inodes_free, None); // free * 4
+        assert_eq!(row1.inodes_usage, None);
+
+        row1 += row2.clone();
+
+        assert_eq!(row1.inodes, None); // total * 5
+        assert_eq!(row1.inodes_used, None); // used * 5
+        assert_eq!(row1.inodes_free, None); // free * 5
+        assert_eq!(row1.inodes_usage, None);
+
+        row1 += row2.clone();
+
+        assert_eq!(row1.inodes, None); // total * 6
+        assert_eq!(row1.inodes_used, None); // used * 6
+        assert_eq!(row1.inodes_free, None); // free * 6
+        assert_eq!(row1.inodes_usage, None);
     }
 }
