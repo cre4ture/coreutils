@@ -36,7 +36,7 @@ jobs:
         cores: [4] # , 6
         ram: [4096, 8192]
         api-level: [28]
-        target: [default]
+        target: [google_apis]
         arch: [x86, x86_64] # , arm64-v8a
         exclude:
           - ram: 8192
@@ -183,10 +183,6 @@ jobs:
       run: |
         free -mh
         df -Th
-    - name: Setup tmate session
-      if: always()
-      continue-on-error: true
-      uses: mxschmitt/action-tmate@v3
     - name: Save rust cache
       if: steps.rust-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@v4
