@@ -2,6 +2,8 @@
 
 # spell-checker:ignore nextest watchplus PIPESTATUS
 
+echo -n "uname -a: " && uname -a
+
 echo "$HOME"
 PATH=$HOME/.cargo/bin:$PATH
 export PATH
