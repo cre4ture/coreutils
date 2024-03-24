@@ -4,7 +4,12 @@
 // file that was distributed with this source code.
 use array_init::array_init;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use uu_factor::{table::*, Factors};
+use num_prime::ExactRoots;
+use std::{collections::BTreeMap, mem};
+use num_bigint::BigUint;
+use num_traits::FromPrimitive;
+
+use uu_factor::{factor, Factors};
 
 fn table(c: &mut Criterion) {
     #[cfg(target_os = "linux")]
@@ -24,17 +29,57 @@ fn table(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("table");
     group.throughput(Throughput::Elements(INPUT_SIZE as _));
-    for a in inputs.take(10) {
-        let a_str = format!("{:?}", a);
-        group.bench_with_input(BenchmarkId::new("factor", &a_str), &a, |b, &a| {
+    for (i, a) in inputs.take(10).enumerate() {
+        let a_str = format!("#{:?}", i);
+        group.bench_with_input(BenchmarkId::new("factor-uutils", &a_str), &a, |b, &a| {
             b.iter(|| {
-                let mut n_s = a;
-                let mut f_s: [_; INPUT_SIZE] = array_init(|_| Factors::one());
-                for (n, f) in n_s.iter_mut().zip(f_s.iter_mut()) {
-                    factor(n, f);
+                for n in a {
+                    let _r = factor(n);
                 }
             });
         });
+        group.bench_with_input(BenchmarkId::new("factor-num_prime", &a_str), &a, |b, &a| {
+            b.iter(|| {
+                for n in a {
+                    let _r = num_prime::nt_funcs::factors(BigUint::from_u64(n).unwrap(), None);
+                }
+            });
+        });
+        // group.bench_with_input(BenchmarkId::new("factor-slow_primes", &a_str), &a, |b, &a| {
+        //     b.iter(|| {
+        //         for n in a {
+        //             let _r = slow_primes::Primes::sieve((n as f64).sqrt() as usize).factor(n as usize);
+        //         }
+        //     });
+        // });
+        // group.bench_with_input(BenchmarkId::new("factor-factor-rs", &a_str), &a, |b, &a| {
+        //     b.iter(|| {
+        //         for n in a {
+        //             let _r: Vec<_> = factor_rs::Fraction::whole(n).factorize().collect();
+        //         }
+        //     });
+        // });
+        // group.bench_with_input(BenchmarkId::new("factor-primeshor", &a_str), &a, |b, &a| {
+        //     b.iter(|| {
+        //         for n in a {
+        //             let _r = primeshor::factorize(BigUint::from_u64(n).unwrap()).unwrap();
+        //         }
+        //     });
+        // });
+        // group.bench_with_input(BenchmarkId::new("factor-prime-factor", &a_str), &a, |b, &a| {
+        //     b.iter(|| {
+        //         for n in a {
+        //             let _r = primefactor::PrimeFactors::from(n as u128).to_factor_vec();
+        //         }
+        //     });
+        // });
+        // group.bench_with_input(BenchmarkId::new("factor-prime_factorization", &a_str), &a, |b, &a| {
+        //     b.iter(|| {
+        //         for n in a {
+        //             let _r = prime_factorization::Factorization::run(n);
+        //         }
+        //     });
+        // });
     }
     group.finish();
 }
