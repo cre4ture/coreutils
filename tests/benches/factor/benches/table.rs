@@ -5,6 +5,7 @@
 use array_init::array_init;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use num_prime::ExactRoots;
+use number_theory::NumberTheory;
 use std::{collections::BTreeMap, mem};
 use num_bigint::BigUint;
 use num_traits::FromPrimitive;
@@ -38,6 +39,13 @@ fn table(c: &mut Criterion) {
                 }
             });
         });
+        //group.bench_with_input(BenchmarkId::new("factor-number-theory", &a_str), &a, |b, &a| {
+        //    b.iter(|| {
+        //        for n in a {
+        //            let _r = number_theory::Mpz::factor(&number_theory::Mpz::from_u64(n));
+        //        }
+        //    });
+        //});
         //group.bench_with_input(BenchmarkId::new("factor-primal", &a_str), &a, |b, &a| {
         //    b.iter(|| {
         //        for n in a {
