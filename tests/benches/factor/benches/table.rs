@@ -38,6 +38,13 @@ fn table(c: &mut Criterion) {
                 }
             });
         });
+        //group.bench_with_input(BenchmarkId::new("factor-primal", &a_str), &a, |b, &a| {
+        //    b.iter(|| {
+        //        for n in a {
+        //            let _r = primal::Sieve::new((n as f64).sqrt() as usize).factor(n as usize);
+        //        }
+        //    });
+        //});
         group.bench_with_input(BenchmarkId::new("factor-num_prime", &a_str), &a, |b, &a| {
             b.iter(|| {
                 for n in a {

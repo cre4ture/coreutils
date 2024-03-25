@@ -25,6 +25,7 @@ prime-factor = "0.4.6"
 primeshor = "0.2.0"
 factor-rs = "1.2.1"
 slow_primes = "0.1.14"
+primal = "0.3.2"
 
 [[bench]]
 name = "table"
