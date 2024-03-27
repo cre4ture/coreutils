@@ -1642,8 +1642,8 @@ impl UCommand {
             command.stdout(Stdio::inherit());
             command.stderr(Stdio::inherit());
 
-            let mut dummy_cmd = std::process::Command::new("cmd.exe");
-            dummy_cmd.args(&["/C", "timeout /T -1 > nul"]);
+            let mut dummy_cmd = std::process::Command::new(PathBuf::from(TESTS_BINARY));
+            dummy_cmd.args(&["sleep", "100"]);
             let mut cmd_child = conpty::Process::spawn(dummy_cmd).unwrap();
 
             captured_stdout.spawn_reader_thread(Box::new(cmd_child.output().unwrap()), "win_conpty_reader".into()).unwrap();
@@ -2104,6 +2104,11 @@ fn find3<T: std::cmp::PartialEq>(haystack: &[T], needle: &[T]) -> Option<usize> 
         .filter(|&i| haystack[i..i+needle.len()] == needle[..]).next()
 }
 
+fn find3_rev<T: std::cmp::PartialEq>(haystack: &[T], needle: &[T]) -> Option<usize> {
+    (0..haystack.len()-needle.len()+1).rev()
+        .filter(|&i| haystack[i..i+needle.len()] == needle[..]).next()
+}
+
 /// Abstraction for a [`std::process::Child`] to handle the child process.
 pub struct UChild {
     raw: Child,
@@ -2341,11 +2346,16 @@ impl UChild {
 
         #[cfg(windows)]
         if had_console {
-            //let needle = "\u{7}\u{1b}[?25h".as_bytes();
-            //let maybe_pos = find3(&output.stdout, needle);
-            //if let Some(pos) = maybe_pos {
-            //    output.stdout = output.stdout[pos+needle.len()..].to_vec();
-            //}
+            let prefix = "\u{1b}[?25l\u{1b}[2J\u{1b}[m\u{1b}[H".as_bytes();
+            if let Some(pos) = find3(&output.stdout, prefix) {
+                output.stdout = output.stdout[pos+prefix.len()..].to_vec();
+            }
+
+            let postfix = "\u{1b}]0;".as_bytes();
+            let maybe_pos = find3_rev(&output.stdout, postfix);
+            if let Some(pos) = maybe_pos {
+                output.stdout = output.stdout[..pos].to_vec();
+            }
         }
 
         Ok(output)
