@@ -156,6 +156,7 @@ feat_os_unix = [
 # "feat_os_windows" == set of utilities which can be built/run on modern/usual windows platforms
 feat_os_windows = [
   "feat_Tier1", ## == "feat_os_windows_legacy" + "hostname"
+  "tty",
 ]
 ## (secondary platforms) feature sets
 # "feat_os_unix_gnueabihf" == set of utilities which can be built/run on the "arm-unknown-linux-gnueabihf" target (ARMv6 Linux [hardfloat])
@@ -501,6 +502,20 @@ nix = { workspace = true, features = ["process", "signal", "user", "term"] }
 rlimit = "0.10.1"
 rand_pcg = "0.3"
 xattr = { workspace = true }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows = { version = "0.54.0", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_System_Console",
+    "Win32_System_Pipes",
+    "Win32_System_SystemServices",
+    "Win32_System_WindowsProgramming",
+    "Win32_System_IO",
+    "Win32_Storage_FileSystem",
+]}
+conpty = "0.5.1"
 
 [build-dependencies]
 phf_codegen = { workspace = true }

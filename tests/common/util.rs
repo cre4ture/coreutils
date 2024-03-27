@@ -4,7 +4,7 @@
 // file that was distributed with this source code.
 
 //spell-checker: ignore (linux) rlimit prlimit coreutil ggroups uchild uncaptured scmd SHLVL canonicalized openpty
-//spell-checker: ignore (linux) winsize xpixel ypixel setrlimit FSIZE
+//spell-checker: ignore (linux) winsize xpixel ypixel setrlimit FSIZE HPCON conpty NOBREAK
 
 #![allow(dead_code)]
 
@@ -15,6 +15,9 @@ use pretty_assertions::assert_eq;
 use rlimit::setrlimit;
 #[cfg(feature = "sleep")]
 use rstest::rstest;
+use uucore::error::UResult;
+use uucore::io::OwnedFileDescriptorOrHandle;
+use uucore::windows_sys::Win32::System::Console::{AttachConsole, FreeConsole, GetConsoleProcessList, ATTACH_PARENT_PROCESS};
 use std::borrow::Cow;
 use std::collections::VecDeque;
 #[cfg(not(windows))]
@@ -1207,10 +1210,32 @@ impl TestScenario {
     }
 }
 
-#[cfg(unix)]
-#[derive(Debug, Default)]
+#[derive(Debug, Copy, Clone)]
+pub struct TerminalSize {
+    pub cols: u16,
+    pub rows: u16,
+    #[cfg(unix)]
+    pub pixels_x: u16,
+    #[cfg(unix)]
+    pub pixels_y: u16,
+}
+
+impl Default for TerminalSize {
+    fn default() -> Self {
+        Self { 
+            cols: 80,
+            rows: 24,
+            #[cfg(unix)]
+            pixels_x: 80 * 8,
+            #[cfg(unix)]
+            pixels_y: 24 * 10,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone)]
 pub struct TerminalSimulation {
-    size: Option<libc::winsize>,
+    size: Option<TerminalSize>,
     stdin: bool,
     stdout: bool,
     stderr: bool,
@@ -1250,8 +1275,9 @@ pub struct UCommand {
     limits: Vec<(rlimit::Resource, u64, u64)>,
     stderr_to_stdout: bool,
     timeout: Option<Duration>,
-    #[cfg(unix)]
     terminal_simulation: Option<TerminalSimulation>,
+    #[cfg(windows)]
+    child_console: Option<conpty::Process>,
     tmpd: Option<Rc<TempDir>>, // drop last
 }
 
@@ -1435,8 +1461,7 @@ impl UCommand {
     /// This is useful to test behavior that is only active if e.g. [`stdout.is_terminal()`] is [`true`].
     /// This function uses default terminal size and attaches stdin, stdout and stderr to that terminal.
     /// For more control over the terminal simulation, use `terminal_sim_stdio`
-    /// (unix: pty, windows: ConPTY[not yet supported])
-    #[cfg(unix)]
+    /// (unix: pty, windows: ConPTY)
     pub fn terminal_simulation(&mut self, enable: bool) -> &mut Self {
         if enable {
             self.terminal_simulation = Some(TerminalSimulation {
@@ -1455,51 +1480,9 @@ impl UCommand {
     ///
     /// This is useful to test behavior that is only active if e.g. [`stdout.is_terminal()`] is [`true`].
     /// This function allows to set a specific size and to attach the terminal to only parts of the in/out.
-    #[cfg(unix)]
     pub fn terminal_sim_stdio(&mut self, config: TerminalSimulation) -> &mut Self {
         self.terminal_simulation = Some(config);
         self
-    }
-
-    #[cfg(unix)]
-    fn read_from_pty(pty_fd: std::os::fd::OwnedFd, out: File) {
-        let read_file = std::fs::File::from(pty_fd);
-        let mut reader = std::io::BufReader::new(read_file);
-        let mut writer = std::io::BufWriter::new(out);
-        let result = std::io::copy(&mut reader, &mut writer);
-        match result {
-            Ok(_) => {}
-            // Input/output error (os error 5) is returned due to pipe closes. Buffer gets content anyway.
-            Err(e) if e.raw_os_error().unwrap_or_default() == 5 => {}
-            Err(e) => {
-                eprintln!("Unexpected error: {:?}", e);
-                panic!("error forwarding output of pty");
-            }
-        }
-    }
-
-    #[cfg(unix)]
-    fn spawn_reader_thread(
-        &self,
-        captured_output: Option<CapturedOutput>,
-        pty_fd_master: OwnedFd,
-        name: String,
-    ) -> Option<CapturedOutput> {
-        if let Some(mut captured_output_i) = captured_output {
-            let fd = captured_output_i.try_clone().unwrap();
-
-            let handle = std::thread::Builder::new()
-                .name(name)
-                .spawn(move || {
-                    Self::read_from_pty(pty_fd_master, fd);
-                })
-                .unwrap();
-
-            captured_output_i.reader_thread_handle = Some(handle);
-            Some(captured_output_i)
-        } else {
-            None
-        }
     }
 
     /// Build the `std::process::Command` and apply the defaults on fields which were not specified
@@ -1521,14 +1504,9 @@ impl UCommand {
     /// * `stderr_to_stdout`: `false`
     /// * `bytes_into_stdin`: `None`
     /// * `limits`: `None`.
-    fn build(
+    fn build_args_and_env(
         &mut self,
-    ) -> (
-        Command,
-        Option<CapturedOutput>,
-        Option<CapturedOutput>,
-        Option<File>,
-    ) {
+    ) -> Command {
         if self.bin_path.is_some() {
             if let Some(util_name) = &self.util_name {
                 self.args.push_front(util_name.into());
@@ -1605,36 +1583,42 @@ impl UCommand {
             self.timeout = Some(Duration::from_secs(30));
         }
 
-        let mut captured_stdout = None;
-        let mut captured_stderr = None;
-        #[cfg(unix)]
-        let mut stdin_pty: Option<File> = None;
-        #[cfg(not(unix))]
-        let stdin_pty: Option<File> = None;
+        command
+    }
+
+    fn setup_stdio(&mut self, mut command: Command) -> (
+        Command,
+        ForwardedOutput,
+        ForwardedOutput,
+        Option<Box<dyn Write + Send>>,
+    ) {
+        let mut captured_stdout = ForwardedOutput::new(OwnedFileDescriptorOrHandle::from(std::io::stdout()).unwrap());
+        let mut captured_stderr = ForwardedOutput::new(OwnedFileDescriptorOrHandle::from(std::io::stderr()).unwrap());
+        let mut stdin_pty: Option<Box<dyn Write+Send>> = None;
         if self.stderr_to_stdout {
-            let mut output = CapturedOutput::default();
+            let output = CapturedOutput::default();
 
             command
                 .stdin(self.stdin.take().unwrap_or_else(Stdio::null))
                 .stdout(Stdio::from(output.try_clone().unwrap()))
                 .stderr(Stdio::from(output.try_clone().unwrap()));
-            captured_stdout = Some(output);
+            captured_stdout.captured = Some(output);
         } else {
             let stdout = if self.stdout.is_some() {
                 self.stdout.take().unwrap()
             } else {
-                let mut stdout = CapturedOutput::default();
+                let stdout = CapturedOutput::default();
                 let stdio = Stdio::from(stdout.try_clone().unwrap());
-                captured_stdout = Some(stdout);
+                captured_stdout.captured = Some(stdout);
                 stdio
             };
 
             let stderr = if self.stderr.is_some() {
                 self.stderr.take().unwrap()
             } else {
-                let mut stderr = CapturedOutput::default();
+                let stderr = CapturedOutput::default();
                 let stdio = Stdio::from(stderr.try_clone().unwrap());
-                captured_stderr = Some(stderr);
+                captured_stderr.captured = Some(stderr);
                 stdio
             };
 
@@ -1644,20 +1628,76 @@ impl UCommand {
                 .stderr(stderr);
         };
 
+        #[cfg(windows)]
+        if let Some(simulated_terminal) = &self.terminal_simulation {
+
+            if !simulated_terminal.stdin || !simulated_terminal.stdout || !simulated_terminal.stderr {
+                panic!("windows doesn't support fine granular control of terminal attachment");
+            }
+
+            // 1. we attach our process to the new console.
+            // 2. we spawn the child inheriting the stdio of the console
+            // 3. we re-attach our process to the console of the parent
+            command.stdin(Stdio::inherit());
+            command.stdout(Stdio::inherit());
+            command.stderr(Stdio::inherit());
+
+            let mut dummy_cmd = std::process::Command::new("cmd.exe");
+            dummy_cmd.args(&["/C", "timeout /T -1 > nul"]);
+            let mut cmd_child = conpty::Process::spawn(dummy_cmd).unwrap();
+
+            captured_stdout.spawn_reader_thread(Box::new(cmd_child.output().unwrap()), "win_conpty_reader".into()).unwrap();
+
+            //let terminal_size = simulated_terminal.size.clone().unwrap_or_default();
+            //cmd_child.resize(terminal_size.cols as i16, terminal_size.rows as i16).unwrap();
+
+            let result = unsafe { FreeConsole() };
+            if result == 0 {
+                panic!("detaching from current console failed!");
+            }
+            let mut result = 0;
+            for _i in 0..500 {
+                result = unsafe { AttachConsole(cmd_child.pid()) };
+                if result != 0 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            if result == 0 {
+                panic!("attaching to new console failed!");
+            }
+            //cmd_child.exit(0);
+            //cmd_child.wait(Some(500)).unwrap();
+
+            //let mut buf = [0u32, 0u32];
+            //loop {
+            //    let cnt = unsafe{ GetConsoleProcessList(buf.as_mut_ptr(), buf.len() as u32) };
+            //    if cnt == 1 {
+            //        break;
+            //    }
+            //}
+
+            //std::thread::sleep(Duration::from_millis(25));
+            
+            stdin_pty = Some(Box::new(cmd_child.input().unwrap()));
+            self.child_console = Some(cmd_child);
+        }
+
         #[cfg(unix)]
         if let Some(simulated_terminal) = &self.terminal_simulation {
-            let terminal_size = simulated_terminal.size.unwrap_or(libc::winsize {
-                ws_col: 80,
-                ws_row: 30,
-                ws_xpixel: 80 * 8,
-                ws_ypixel: 30 * 10,
-            });
+            let terminal_size = simulated_terminal.size.unwrap_or_default();
+            let c_terminal_size = winsize {
+                ws_row: terminal_size.rows,
+                ws_col: terminal_size.cols,
+                ws_xpixel: terminal_size.pixels_x,
+                ws_ypixel: terminal_size.pixels_y,
+            };
 
             if simulated_terminal.stdin {
                 let OpenptyResult {
                     slave: pi_slave,
                     master: pi_master,
-                } = nix::pty::openpty(&terminal_size, None).unwrap();
+                } = nix::pty::openpty(&c_terminal_size, None).unwrap();
                 stdin_pty = Some(File::from(pi_master));
                 command.stdin(pi_slave);
             }
@@ -1666,7 +1706,7 @@ impl UCommand {
                 let OpenptyResult {
                     slave: po_slave,
                     master: po_master,
-                } = nix::pty::openpty(&terminal_size, None).unwrap();
+                } = nix::pty::openpty(&c_terminal_size, None).unwrap();
                 captured_stdout = self.spawn_reader_thread(
                     captured_stdout,
                     po_master,
@@ -1679,7 +1719,7 @@ impl UCommand {
                 let OpenptyResult {
                     slave: pe_slave,
                     master: pe_master,
-                } = nix::pty::openpty(&terminal_size, None).unwrap();
+                } = nix::pty::openpty(&c_terminal_size, None).unwrap();
                 captured_stderr = self.spawn_reader_thread(
                     captured_stderr,
                     pe_master,
@@ -1717,10 +1757,16 @@ impl UCommand {
         assert!(!self.has_run, "{}", ALREADY_RUN);
         self.has_run = true;
 
-        let (mut command, captured_stdout, captured_stderr, stdin_pty) = self.build();
-        log_info("run", self.to_string());
+        let command = self.build_args_and_env();
+         log_info("run", self.to_string());
 
+        let (mut command, captured_stdout, captured_stderr, stdin_pty) = self.setup_stdio(command);
         let child = command.spawn().unwrap();
+        #[cfg(windows)]
+        if let Some(_console) = &self.child_console {
+            unsafe { FreeConsole() };
+            unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+        }
 
         let mut child = UChild::from(self, child, captured_stdout, captured_stderr, stdin_pty);
 
@@ -1787,7 +1833,62 @@ impl std::fmt::Display for UCommand {
 struct CapturedOutput {
     current_file: File,
     output: tempfile::NamedTempFile, // drop last
+}
+
+struct ForwardedOutput {
+    direct_dest: OwnedFileDescriptorOrHandle,
+    captured: Option<CapturedOutput>,
     reader_thread_handle: Option<thread::JoinHandle<()>>,
+}
+
+impl ForwardedOutput {
+    fn new(direct_dest: OwnedFileDescriptorOrHandle) -> Self {
+        Self {
+            direct_dest,
+            captured: None,
+            reader_thread_handle: None,
+        }
+    }
+
+    fn read_from_pty(pty_fd: Box<dyn Read>, out: File) {
+        let mut reader = std::io::BufReader::new(pty_fd);
+        let mut writer = std::io::BufWriter::new(out);
+        let result = std::io::copy(&mut reader, &mut writer);
+        match result {
+            Ok(_) => {}
+            // unix:
+            // Input/output error (os error 5) is returned due to pipe closes. Buffer gets content anyway.
+            Err(e) if e.raw_os_error().unwrap_or_default() == 5 => {}
+            // windows:
+            // Os { code: -2147024787, kind: Uncategorized, message: "The pipe was closed." }
+            Err(e) if e.raw_os_error().unwrap_or_default() == -2147024787 => {}
+            Err(e) => {
+                eprintln!("Unexpected error: {:?}", e);
+                panic!("error forwarding output of pty");
+            }
+        }
+    }
+
+    fn spawn_reader_thread(
+        &mut self,
+        source: Box<dyn Read+Send>,
+        name: String,
+    ) -> UResult<()> {
+        let destination_fd =
+        if let Some(co) = &self.captured {
+            co.try_clone()?
+        } else {
+            self.direct_dest.try_clone()?.into_file()
+        };
+
+        self.reader_thread_handle = Some(std::thread::Builder::new()
+            .name(name)
+            .spawn(move || {
+                Self::read_from_pty(source, destination_fd);
+            })?);
+
+        Ok(())
+    }
 }
 
 impl CapturedOutput {
@@ -1796,12 +1897,11 @@ impl CapturedOutput {
         Self {
             current_file: output.reopen().unwrap(),
             output,
-            reader_thread_handle: None,
         }
     }
 
     /// Try to clone the file pointer.
-    fn try_clone(&mut self) -> io::Result<File> {
+    fn try_clone(&self) -> io::Result<File> {
         self.output.as_file().try_clone()
     }
 
@@ -1873,7 +1973,6 @@ impl Default for CapturedOutput {
         Self {
             current_file: file.reopen().unwrap(),
             output: file,
-            reader_thread_handle: None,
         }
     }
 }
@@ -2000,28 +2099,35 @@ impl<'a> UChildAssertion<'a> {
     }
 }
 
+fn find3<T: std::cmp::PartialEq>(haystack: &[T], needle: &[T]) -> Option<usize> {
+    (0..haystack.len()-needle.len()+1)
+        .filter(|&i| haystack[i..i+needle.len()] == needle[..]).next()
+}
+
 /// Abstraction for a [`std::process::Child`] to handle the child process.
 pub struct UChild {
     raw: Child,
     bin_path: PathBuf,
     util_name: Option<String>,
-    captured_stdout: Option<CapturedOutput>,
-    captured_stderr: Option<CapturedOutput>,
-    stdin_pty: Option<File>,
+    captured_stdout: ForwardedOutput,
+    captured_stderr: ForwardedOutput,
+    stdin_pty: Option<Box<dyn Write + Send>>,
     ignore_stdin_write_error: bool,
     stderr_to_stdout: bool,
     join_handle: Option<JoinHandle<io::Result<()>>>,
     timeout: Option<Duration>,
+    #[cfg(windows)]
+    child_console: Option<conpty::Process>,
     tmpd: Option<Rc<TempDir>>, // drop last
 }
 
 impl UChild {
     fn from(
-        ucommand: &UCommand,
+        ucommand: &mut UCommand,
         child: Child,
-        captured_stdout: Option<CapturedOutput>,
-        captured_stderr: Option<CapturedOutput>,
-        stdin_pty: Option<File>,
+        captured_stdout: ForwardedOutput,
+        captured_stderr: ForwardedOutput,
+        stdin_pty: Option<Box<dyn Write + Send>>,
     ) -> Self {
         Self {
             raw: child,
@@ -2034,6 +2140,7 @@ impl UChild {
             stderr_to_stdout: ucommand.stderr_to_stdout,
             join_handle: None,
             timeout: ucommand.timeout,
+            child_console: mem::take(&mut ucommand.child_console),
             tmpd: ucommand.tmpd.clone(),
         }
     }
@@ -2213,17 +2320,32 @@ impl UChild {
                 .unwrap();
         };
 
-        if let Some(stdout) = self.captured_stdout.as_mut() {
-            if let Some(handle) = stdout.reader_thread_handle.take() {
-                handle.join().unwrap();
-            }
+        let had_console = self.child_console.is_some();
+        if let Some(mut console) = self.child_console {
+            console.exit(0).unwrap();
+            console.wait(Some(500)).unwrap();
+        }
+
+        if let Some(handle) = self.captured_stdout.reader_thread_handle.take() {
+            handle.join().unwrap();
+        }
+        if let Some(stdout) = self.captured_stdout.captured.as_mut() {
             output.stdout = stdout.output_bytes();
         }
-        if let Some(stderr) = self.captured_stderr.as_mut() {
-            if let Some(handle) = stderr.reader_thread_handle.take() {
-                handle.join().unwrap();
-            }
+        if let Some(handle) = self.captured_stderr.reader_thread_handle.take() {
+            handle.join().unwrap();
+        }
+        if let Some(stderr) = self.captured_stderr.captured.as_mut() {
             output.stderr = stderr.output_bytes();
+        }
+
+        #[cfg(windows)]
+        if had_console {
+            //let needle = "\u{7}\u{1b}[?25h".as_bytes();
+            //let maybe_pos = find3(&output.stdout, needle);
+            //if let Some(pos) = maybe_pos {
+            //    output.stdout = output.stdout[pos+needle.len()..].to_vec();
+            //}
         }
 
         Ok(output)
@@ -2258,7 +2380,7 @@ impl UChild {
     /// * [`UChild::stdout_exact_bytes`]
     /// * and the call to itself [`UChild::stdout_bytes`]
     pub fn stdout_bytes(&mut self) -> Vec<u8> {
-        match self.captured_stdout.as_mut() {
+        match self.captured_stdout.captured.as_mut() {
             Some(output) => output.output_bytes(),
             None if self.raw.stdout.is_some() => {
                 let mut buffer: Vec<u8> = vec![];
@@ -2280,7 +2402,7 @@ impl UChild {
     /// * [`UChild::stdout_bytes`]
     /// * [`UChild::stdout_exact_bytes`]
     pub fn stdout_all_bytes(&mut self) -> Vec<u8> {
-        match self.captured_stdout.as_mut() {
+        match self.captured_stdout.captured.as_mut() {
             Some(output) => output.output_all_bytes(),
             None => {
                 panic!("Usage error: This method cannot be used if the output wasn't captured.")
@@ -2293,7 +2415,7 @@ impl UChild {
     /// This method may block indefinitely if the `size` amount of bytes exceeds the amount of bytes
     /// that can be read. See also [`UChild::stdout_bytes`] for side effects.
     pub fn stdout_exact_bytes(&mut self, size: usize) -> Vec<u8> {
-        match self.captured_stdout.as_mut() {
+        match self.captured_stdout.captured.as_mut() {
             Some(output) => output.output_exact_bytes(size),
             None if self.raw.stdout.is_some() => {
                 let mut buffer = vec![0; size];
@@ -2332,7 +2454,7 @@ impl UChild {
     /// If stderr is redirected to stdout with [`UCommand::stderr_to_stdout`] then always zero bytes
     /// are returned. See also [`UChild::stdout_bytes`] for side effects.
     pub fn stderr_bytes(&mut self) -> Vec<u8> {
-        match self.captured_stderr.as_mut() {
+        match self.captured_stderr.captured.as_mut() {
             Some(output) => output.output_bytes(),
             None if self.raw.stderr.is_some() => {
                 let mut buffer: Vec<u8> = vec![];
@@ -2355,7 +2477,7 @@ impl UChild {
     /// * [`UChild::stderr_bytes`]
     /// * [`UChild::stderr_exact_bytes`]
     pub fn stderr_all_bytes(&mut self) -> Vec<u8> {
-        match self.captured_stderr.as_mut() {
+        match self.captured_stderr.captured.as_mut() {
             Some(output) => output.output_all_bytes(),
             None if self.stderr_to_stdout => vec![],
             None => {
@@ -2372,7 +2494,7 @@ impl UChild {
     /// # Important
     /// This method blocks indefinitely if the `size` amount of bytes cannot be read.
     pub fn stderr_exact_bytes(&mut self, size: usize) -> Vec<u8> {
-        match self.captured_stderr.as_mut() {
+        match self.captured_stderr.captured.as_mut() {
             Some(output) => output.output_exact_bytes(size),
             None if self.raw.stderr.is_some() => {
                 let stderr = self.raw.stderr.as_mut().unwrap();
@@ -2385,8 +2507,8 @@ impl UChild {
     }
 
     fn access_stdin_as_writer<'a>(&'a mut self) -> Box<dyn Write + Send + 'a> {
-        if let Some(stdin_fd) = &self.stdin_pty {
-            Box::new(BufWriter::new(stdin_fd.try_clone().unwrap()))
+        if let Some(stdin_fd) = &mut self.stdin_pty {
+            Box::new(BufWriter::new(stdin_fd.as_mut()))
         } else {
             let stdin: &mut std::process::ChildStdin = self.raw.stdin.as_mut().unwrap();
             Box::new(BufWriter::new(stdin))
@@ -2821,6 +2943,7 @@ pub fn run_ucmd_as_root_with_stdin_stdout(
 mod tests {
     // spell-checker:ignore (tests) asdfsadfa
     use super::*;
+    use super::assert_eq;
 
     pub fn run_cmd<T: AsRef<OsStr>>(cmd: T) -> CmdResult {
         UCommand::new().arg(cmd).run()
@@ -3631,6 +3754,47 @@ mod tests {
 
         xattr::set(&file_path2, test_attr, test_value).unwrap();
         assert!(compare_xattrs(&file_path1, &file_path2));
+    }
+
+    #[cfg(feature = "tty")]
+    #[test]
+    fn test_simulation_of_terminal_false_tty() {
+        let scene = TestScenario::new("util");
+
+        let out = scene.ccmd("tty").args(&["-d", "in", "-d", "out", "-d", "err"]).fails();
+        assert_eq!(out.exit_status().code().unwrap(), 1);
+        assert_eq!(
+            String::from_utf8_lossy(out.stdout()),
+            "in: not a tty\nout: not a tty\nerr: not a tty\n"
+        );
+
+        scene.ccmd("tty").args(&["-s", "-d", "in"]).fails();
+        scene.ccmd("tty").args(&["-s", "-d", "out"]).fails();
+        scene.ccmd("tty").args(&["-s", "-d", "err"]).fails();
+    }
+
+    #[cfg(feature = "tty")]
+    #[test]
+    fn test_simulation_of_terminal_true_tty() {
+        let scene = TestScenario::new("util");
+
+        let out = scene.ccmd("tty")
+            .args(&["-d", "in", "-d", "out", "-d", "err"])
+            .terminal_simulation(true)
+            .run();
+
+        println!("stdout:\n{}", out.stdout_str());
+        println!("stderr:\n{}", out.stderr_str());
+
+        assert_eq!(out.exit_status().code().unwrap(), 0);
+        assert_eq!(
+            String::from_utf8_lossy(out.stdout()),
+            "in: windows-terminal\r\nout: windows-terminal\r\nerr: windows-terminal\r\n"
+        );
+
+        scene.ccmd("tty").args(&["-s", "-d", "in"]).terminal_simulation(true).succeeds();
+        scene.ccmd("tty").args(&["-s", "-d", "out"]).terminal_simulation(true).succeeds();
+        scene.ccmd("tty").args(&["-s", "-d", "err"]).terminal_simulation(true).succeeds();
     }
 
     #[cfg(unix)]
