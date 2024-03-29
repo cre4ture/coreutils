@@ -4,7 +4,7 @@
 // file that was distributed with this source code.
 // spell-checker:ignore parenb parmrk ixany iuclc onlcr ofdel icanon noflsh
 
-use crate::common::util::TestScenario;
+use crate::common::util::{TerminalSimulation, TerminalSize, TestScenario};
 
 #[test]
 fn test_invalid_arg() {
@@ -12,17 +12,31 @@ fn test_invalid_arg() {
 }
 
 #[test]
-#[ignore = "Fails because cargo test does not run in a tty"]
 fn runs() {
-    new_ucmd!().succeeds();
+    new_ucmd!()
+        .terminal_simulation(true)
+        .succeeds();
 }
 
 #[test]
-#[ignore = "Fails because cargo test does not run in a tty"]
 fn print_all() {
-    let res = new_ucmd!().succeeds();
+    let res = new_ucmd!()
+        .arg("-a")
+        .terminal_sim_stdio(TerminalSimulation{
+            size: Some(TerminalSize{
+                cols: 60,
+                rows: 30,
+            }),
+            stdin: true,
+            stdout: true,
+            stderr: true,
+        })
+        .succeeds();
+
+    res.stdout_contains("speed 38400 baud; rows 30; columns 60; line = 0;");
 
     // Random selection of flags to check for
+    #[cfg(unix)]
     for flag in [
         "parenb", "parmrk", "ixany", "iuclc", "onlcr", "ofdel", "icanon", "noflsh",
     ] {

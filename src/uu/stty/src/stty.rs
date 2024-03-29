@@ -114,7 +114,7 @@ impl<'a> Options<'a> {
                     let r = windows::open_file_of_options(f)?;
                     r
                 }
-                None => OwnedFileDescriptorOrHandle::from(stdin())?,
+                None => OwnedFileDescriptorOrHandle::from(stdout())?,
             },
             settings: matches
                 .get_many::<String>(options::SETTINGS)
