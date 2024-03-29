@@ -34,9 +34,6 @@ use uucore::{format_usage, help_about, help_usage};
 use flags::BAUD_RATES;
 use flags::{CONTROL_CHARS, CONTROL_FLAGS, INPUT_FLAGS, LOCAL_FLAGS, OUTPUT_FLAGS};
 
-const USAGE: &str = help_usage!("stty.md");
-const SUMMARY: &str = help_about!("stty.md");
-
 #[derive(Clone, Copy, Debug)]
 pub struct Flag<T> {
     name: &'static str,
@@ -83,25 +80,6 @@ trait TermiosFlag: Copy {
     fn apply(&self, termios: &mut Termios, val: bool);
 }
 
-mod options {
-    pub const ALL: &str = "all";
-    pub const SAVE: &str = "save";
-    pub const FILE: &str = "file";
-    pub const SETTINGS: &str = "settings";
-}
-
-struct Options<'a> {
-    all: bool,
-    save: bool,
-    file: Device,
-    settings: Option<Vec<&'a str>>,
-}
-
-enum Device {
-    File(File),
-    Stdout(Stdout),
-}
-
 impl AsFd for Device {
     fn as_fd(&self) -> BorrowedFd<'_> {
         match self {
@@ -117,36 +95,6 @@ impl AsRawFd for Device {
             Self::File(f) => f.as_raw_fd(),
             Self::Stdout(stdout) => stdout.as_raw_fd(),
         }
-    }
-}
-
-impl<'a> Options<'a> {
-    fn from(matches: &'a ArgMatches) -> io::Result<Self> {
-        Ok(Self {
-            all: matches.get_flag(options::ALL),
-            save: matches.get_flag(options::SAVE),
-            file: match matches.get_one::<String>(options::FILE) {
-                // Two notes here:
-                // 1. O_NONBLOCK is needed because according to GNU docs, a
-                //    POSIX tty can block waiting for carrier-detect if the
-                //    "clocal" flag is not set. If your TTY is not connected
-                //    to a modem, it is probably not relevant though.
-                // 2. We never close the FD that we open here, but the OS
-                //    will clean up the FD for us on exit, so it doesn't
-                //    matter. The alternative would be to have an enum of
-                //    BorrowedFd/OwnedFd to handle both cases.
-                Some(f) => Device::File(
-                    std::fs::OpenOptions::new()
-                        .read(true)
-                        .custom_flags(O_NONBLOCK)
-                        .open(f)?,
-                ),
-                None => Device::Stdout(stdout()),
-            },
-            settings: matches
-                .get_many::<String>(options::SETTINGS)
-                .map(|v| v.map(|s| s.as_ref()).collect()),
-        })
     }
 }
 
@@ -174,29 +122,7 @@ ioctl_write_ptr_bad!(
     TermSize
 );
 
-#[uucore::main]
-pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-    let matches = uu_app().try_get_matches_from(args)?;
-
-    let opts = Options::from(&matches)?;
-
-    stty(&opts)
-}
-
-fn stty(opts: &Options) -> UResult<()> {
-    if opts.save && opts.all {
-        return Err(USimpleError::new(
-            1,
-            "the options for verbose and stty-readable output styles are mutually exclusive",
-        ));
-    }
-
-    if opts.settings.is_some() && (opts.save || opts.all) {
-        return Err(USimpleError::new(
-            1,
-            "when specifying an output style, modes may not be set",
-        ));
-    }
+pub(crate) fn stty(opts: &Options) -> UResult<()> {
 
     // TODO: Figure out the right error message for when tcgetattr fails
     let mut termios = tcgetattr(opts.file.as_fd()).expect("Could not get terminal attributes");
@@ -459,41 +385,6 @@ fn apply_baud_rate_flag(termios: &mut Termios, input: &str) -> ControlFlow<bool>
         }
     }
     ControlFlow::Continue(())
-}
-
-pub fn uu_app() -> Command {
-    Command::new(uucore::util_name())
-        .version(crate_version!())
-        .override_usage(format_usage(USAGE))
-        .about(SUMMARY)
-        .infer_long_args(true)
-        .arg(
-            Arg::new(options::ALL)
-                .short('a')
-                .long(options::ALL)
-                .help("print all current settings in human-readable form")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new(options::SAVE)
-                .short('g')
-                .long(options::SAVE)
-                .help("print all current settings in a stty-readable form")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new(options::FILE)
-                .short('F')
-                .long(options::FILE)
-                .value_hint(clap::ValueHint::FilePath)
-                .value_name("DEVICE")
-                .help("open and use the specified DEVICE instead of stdin"),
-        )
-        .arg(
-            Arg::new(options::SETTINGS)
-                .action(ArgAction::Append)
-                .help("settings to change"),
-        )
 }
 
 impl TermiosFlag for ControlFlags {

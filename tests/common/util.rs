@@ -1211,7 +1211,7 @@ impl TestScenario {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct TerminalSize {
+pub struct  TerminalSize {
     pub cols: u16,
     pub rows: u16,
     #[cfg(unix)]
@@ -1222,7 +1222,7 @@ pub struct TerminalSize {
 
 impl Default for TerminalSize {
     fn default() -> Self {
-        Self { 
+        Self {
             cols: 80,
             rows: 24,
             #[cfg(unix)]
@@ -1235,10 +1235,10 @@ impl Default for TerminalSize {
 
 #[derive(Debug, Default, Clone)]
 pub struct TerminalSimulation {
-    size: Option<TerminalSize>,
-    stdin: bool,
-    stdout: bool,
-    stderr: bool,
+    pub size: Option<TerminalSize>,
+    pub stdin: bool,
+    pub stdout: bool,
+    pub stderr: bool,
 }
 
 /// A `UCommand` is a builder wrapping an individual Command that provides several additional features:
@@ -1631,24 +1631,41 @@ impl UCommand {
         #[cfg(windows)]
         if let Some(simulated_terminal) = &self.terminal_simulation {
 
-            if !simulated_terminal.stdin || !simulated_terminal.stdout || !simulated_terminal.stderr {
-                panic!("windows doesn't support fine granular control of terminal attachment");
-            }
-
             // 1. we attach our process to the new console.
             // 2. we spawn the child inheriting the stdio of the console
             // 3. we re-attach our process to the console of the parent
-            command.stdin(Stdio::inherit());
-            command.stdout(Stdio::inherit());
-            command.stderr(Stdio::inherit());
+            if simulated_terminal.stdin {
+                command.stdin(Stdio::inherit());
+            }
+            if simulated_terminal.stdout {
+                command.stdout(Stdio::inherit());
+            }
+            if simulated_terminal.stderr {
+                command.stderr(Stdio::inherit());
+            }
+
+            //let result = unsafe { FreeConsole() };
+            //if result == 0 {
+            //    panic!("detaching from current console failed!");
+            //}
 
             let mut dummy_cmd = std::process::Command::new(PathBuf::from(TESTS_BINARY));
-            dummy_cmd.args(&["sleep", "100"]);
-            let mut cmd_child = conpty::Process::spawn(dummy_cmd).unwrap();
+            dummy_cmd.args(&[
+                "env",
+                //TESTS_BINARY, "sleep", "2", ";",
+                TESTS_BINARY, "echo", "", ";",   // this is needed to trigger the windows console header generation now
+                //TESTS_BINARY, "sleep", "1", ";",
+                //TESTS_BINARY, "echo", "hello2", ";",
+                TESTS_BINARY, "sleep", "100",
+                ]);
+            let terminal_size = simulated_terminal.size.clone().unwrap_or_default();
+            let mut cmd_child = conpty::Process::spawn_with_size(dummy_cmd, Some((
+                terminal_size.cols as i16, terminal_size.rows as i16,
+            ))).unwrap();
 
+            read_till_show_cursor(&mut cmd_child); // read and ignore full windows console header
             captured_stdout.spawn_reader_thread(Box::new(cmd_child.output().unwrap()), "win_conpty_reader".into()).unwrap();
 
-            //let terminal_size = simulated_terminal.size.clone().unwrap_or_default();
             //cmd_child.resize(terminal_size.cols as i16, terminal_size.rows as i16).unwrap();
 
             let result = unsafe { FreeConsole() };
@@ -1666,8 +1683,11 @@ impl UCommand {
             if result == 0 {
                 panic!("attaching to new console failed!");
             }
-            //cmd_child.exit(0);
-            //cmd_child.wait(Some(500)).unwrap();
+
+            //std::thread::sleep(Duration::from_millis(4000));
+
+            cmd_child.exit(0);
+            cmd_child.wait(Some(500)).unwrap();
 
             //let mut buf = [0u32, 0u32];
             //loop {
@@ -1678,8 +1698,10 @@ impl UCommand {
             //}
 
             //std::thread::sleep(Duration::from_millis(25));
-            
+
             stdin_pty = Some(Box::new(cmd_child.input().unwrap()));
+            //read_till_show_cursor(&mut cmd_child);
+            //captured_stdout.spawn_reader_thread(Box::new(cmd_child.output().unwrap()), "win_conpty_reader".into()).unwrap();
             self.child_console = Some(cmd_child);
         }
 
@@ -1758,7 +1780,7 @@ impl UCommand {
         self.has_run = true;
 
         let command = self.build_args_and_env();
-         log_info("run", self.to_string());
+        log_info("run", self.to_string());
 
         let (mut command, captured_stdout, captured_stderr, stdin_pty) = self.setup_stdio(command);
         let child = command.spawn().unwrap();
@@ -1766,12 +1788,17 @@ impl UCommand {
         if let Some(_console) = &self.child_console {
             unsafe { FreeConsole() };
             unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+            log_info("detached child console", self.to_string());
         }
 
         let mut child = UChild::from(self, child, captured_stdout, captured_stderr, stdin_pty);
 
         if let Some(input) = self.bytes_into_stdin.take() {
             child.pipe_in(input);
+        }
+
+        if let Some(console) = &mut child.child_console {
+             //read_till_show_cursor(console);
         }
 
         child
@@ -1813,6 +1840,29 @@ impl UCommand {
     pub fn get_full_fixture_path(&self, file_rel_path: &str) -> String {
         let tmpdir_path = self.tmpd.as_ref().unwrap().path();
         format!("{}/{file_rel_path}", tmpdir_path.to_str().unwrap())
+    }
+}
+
+fn read_till_show_cursor(cmd_child: &mut conpty::Process) {
+    println!("read_till_show_cursor - enter");
+    let mut reader = cmd_child.output().unwrap();
+    let keyword = "\x1b[?25h".as_bytes();
+    let key_len = keyword.len();
+    let mut last = VecDeque::with_capacity(key_len);
+    loop {
+        let mut buf = [0u8];
+        reader.read_exact(&mut buf).unwrap();
+        while last.len() >= key_len {
+            last.pop_front();
+        }
+        last.push_back(buf[0]);
+        let b = last.clone().into_iter().collect::<Vec<_>>();
+        let c = &b[..];
+        println!("read: {}\nbuffer: {}\nkeywrd: {}", buf.escape_ascii(), c.escape_ascii(), keyword.escape_ascii());
+        if (last.len() == key_len) && last.iter().zip(keyword.iter()).all(|(a,b)| a == b) {
+            println!("done!");
+            break;
+        }
     }
 }
 
@@ -1874,6 +1924,7 @@ impl ForwardedOutput {
         source: Box<dyn Read+Send>,
         name: String,
     ) -> UResult<()> {
+        println!("spawn read thread: {}", name);
         let destination_fd =
         if let Some(co) = &self.captured {
             co.try_clone()?
@@ -2100,11 +2151,17 @@ impl<'a> UChildAssertion<'a> {
 }
 
 fn find3<T: std::cmp::PartialEq>(haystack: &[T], needle: &[T]) -> Option<usize> {
+    if haystack.len() < needle.len() {
+        return None;
+    }
     (0..haystack.len()-needle.len()+1)
         .filter(|&i| haystack[i..i+needle.len()] == needle[..]).next()
 }
 
 fn find3_rev<T: std::cmp::PartialEq>(haystack: &[T], needle: &[T]) -> Option<usize> {
+    if haystack.len() < needle.len() {
+        return None;
+    }
     (0..haystack.len()-needle.len()+1).rev()
         .filter(|&i| haystack[i..i+needle.len()] == needle[..]).next()
 }
@@ -2326,8 +2383,16 @@ impl UChild {
         };
 
         let had_console = self.child_console.is_some();
+        //if  had_console {
+        //    #[cfg(windows)]
+        //    if let Some(_console) = &self.child_console {
+        //        unsafe { FreeConsole() };
+        //        unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+        //    }
+        //}
+
         if let Some(mut console) = self.child_console {
-            console.exit(0).unwrap();
+            let _ = console.exit(0);
             console.wait(Some(500)).unwrap();
         }
 
@@ -2346,11 +2411,11 @@ impl UChild {
 
         #[cfg(windows)]
         if had_console {
+            println!("original_output:\n{}", output.stdout.escape_ascii());
             let prefix = "\u{1b}[?25l\u{1b}[2J\u{1b}[m\u{1b}[H".as_bytes();
             if let Some(pos) = find3(&output.stdout, prefix) {
                 output.stdout = output.stdout[pos+prefix.len()..].to_vec();
             }
-
             let postfix = "\u{1b}]0;".as_bytes();
             let maybe_pos = find3_rev(&output.stdout, postfix);
             if let Some(pos) = maybe_pos {
@@ -3943,6 +4008,38 @@ mod tests {
                     ws_row: 10,
                     ws_xpixel: 40 * 8,
                     ws_ypixel: 10 * 10,
+                }),
+                stdout: true,
+                stdin: true,
+                stderr: true,
+            })
+            .succeeds();
+        std::assert_eq!(
+            String::from_utf8_lossy(out.stdout()),
+            "stdin is atty\r\nterminal size: 10 40\r\nstdout is atty\r\nstderr is atty\r\n"
+        );
+        std::assert_eq!(
+            String::from_utf8_lossy(out.stderr()),
+            "This is an error message.\r\n"
+        );
+    }
+
+    #[cfg(feature = "env")]
+    #[test]
+    fn test_simulation_of_terminal_size_information() {
+        let scene = TestScenario::new("util");
+
+        let out = scene
+            .cmd(r"C:\Program Files\Git\usr\bin\stty.exe")
+            .arg("-a")
+            .terminal_sim_stdio(TerminalSimulation {
+                size: Some(TerminalSize {
+                    cols: 40,
+                    rows: 200,
+                    #[cfg(unix)]
+                    pixels_x: 40 * 8,
+                    #[cfg(unix)]
+                    pixels_y: 10 * 10,
                 }),
                 stdout: true,
                 stdin: true,

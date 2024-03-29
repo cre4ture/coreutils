@@ -292,12 +292,10 @@ impl EnvAppData {
         Ok(all_args)
     }
 
-    fn parse_arguments(
+    fn get_arg_matches(
         &mut self,
-        original_args: impl uucore::Args,
-    ) -> Result<(Vec<OsString>, clap::ArgMatches), Box<dyn UError>> {
-        let original_args: Vec<OsString> = original_args.collect();
-        let args = self.process_all_string_arguments(&original_args)?;
+        args: &[OsString],
+    ) -> Result<clap::ArgMatches, Box<dyn UError>> {
         let app = uu_app();
         let matches = app
             .try_get_matches_from(args)
@@ -317,16 +315,32 @@ impl EnvAppData {
                     }
                 }
             })?;
-        Ok((original_args, matches))
+        Ok(matches)
     }
 
-    fn run_env(&mut self, original_args: impl uucore::Args) -> UResult<()> {
-        let (original_args, matches) = self.parse_arguments(original_args)?;
+    fn run_env(&mut self, mut original_args: impl uucore::Args) -> UResult<()> {
+        let executable_name = original_args.next().ok_or(
+            USimpleError::new(2, "missing executable name parameter!"))?;
 
+        let original_args: Vec<OsString> = original_args.collect();
+        let args = self.process_all_string_arguments(&original_args)?;
+
+        for instance in args.split(|arg| arg == ";")
+        {
+            let param_chain = std::iter::once(&executable_name).chain(instance.iter());
+            self.run_env_single(param_chain.map(|x|x.clone()).collect())?;
+        }
+
+        Ok(())
+    }
+
+    fn run_env_single(&mut self, args: Vec<OsString>) -> UResult<()> {
+
+        let matches = self.get_arg_matches(&args)?;
         let did_debug_printing_before = self.do_debug_printing; // could have been done already as part of the "-vS" string parsing
         let do_debug_printing = self.do_debug_printing || matches.get_flag("debug");
         if do_debug_printing && !did_debug_printing_before {
-            debug_print_args(&original_args);
+            debug_print_args(&args);
         }
 
         let mut opts = make_options(&matches)?;

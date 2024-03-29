@@ -8,6 +8,7 @@
 // spell-checker:ignore (ToDO) ttyname filedesc
 
 use clap::{crate_version, Arg, ArgAction, Command};
+use uucore::io::OwnedFileDescriptorOrHandle;
 use std::io::{IsTerminal, Write};
 use std::os::windows::io::AsHandle;
 use uucore::error::{set_exit_code, UResult, USimpleError};
@@ -21,15 +22,9 @@ mod options {
     pub const STDIO: &str = "stdio";
 }
 
-fn inspect_one(silent: bool, with_name: bool, stdio_str: &str) -> UResult<bool> {
-    let selected_stdio = match stdio_str {
-        "in" => std::io::stdin().as_handle().try_clone_to_owned().unwrap(),
-        "out" => std::io::stdout().as_handle().try_clone_to_owned().unwrap(),
-        "err" => std::io::stderr().as_handle().try_clone_to_owned().unwrap(),
-        s => return Err(USimpleError::new(2, format!("unknown stdio name provided: {s}"))),
-    };
+fn inspect_one(silent: bool, name: Option<&str>, fx: OwnedFileDescriptorOrHandle) -> std::io::Result<bool> {
 
-    let is_terminal = selected_stdio.is_terminal();
+    let is_terminal = fx.as_raw().is_terminal();
 
     // If silent, we don't need the name, only whether or not stdin is a tty.
     if silent {
@@ -37,8 +32,8 @@ fn inspect_one(silent: bool, with_name: bool, stdio_str: &str) -> UResult<bool> 
     };
 
     let mut stdout = std::io::stdout();
-    if with_name {
-        write!(stdout, "{stdio_str}: ")?;
+    if let Some(name) = name {
+        write!(stdout, "{name}: ")?;
     }
     if is_terminal {
         #[cfg(unix)]
@@ -49,12 +44,11 @@ fn inspect_one(silent: bool, with_name: bool, stdio_str: &str) -> UResult<bool> 
         match name {
             Ok(name) => writeln!(stdout, "{}", name)?,
             Err(e) => {
-                writeln!(stdout, "failed to determine tty name: {:?}", e)?;
-                set_exit_code(3);
+                writeln!(stdout, "not a tty")?;
+                return Ok(false);
             }
         };
     } else {
-        set_exit_code(1);
         writeln!(stdout, "not a tty")?;
     }
 
@@ -67,11 +61,23 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
 
     let silent = matches.get_flag(options::SILENT);
     let stdio_str = matches.get_many::<String>(options::STDIO).unwrap();
-    let with_name = stdio_str.len() > 0;
+    let with_name = stdio_str.len() > 1;
 
     let mut are_all_terminal = true;
     for d in stdio_str {
-        let is_terminal = inspect_one(silent, with_name, d.as_str())?;
+
+        let selected_stdio = match d.as_str() {
+            "in" => OwnedFileDescriptorOrHandle::from(std::io::stdin()),
+            "out" => OwnedFileDescriptorOrHandle::from(std::io::stdout()),
+            "err" => OwnedFileDescriptorOrHandle::from(std::io::stderr()),
+            s => return Err(USimpleError::new(2, format!("unknown stdio name provided: {s}"))),
+        }?;
+
+        let is_terminal = inspect_one(silent, with_name.then(||d.as_str()), selected_stdio).map_err(|_| -> std::io::Error {
+                // Don't return to prevent a panic later when another flush is attempted
+                // because the `uucore_procs::main` macro inserts a flush after execution for every utility.
+                std::process::exit(3);
+            })?;
         are_all_terminal = are_all_terminal && is_terminal;
     }
 
@@ -101,7 +107,7 @@ pub fn uu_app() -> Command {
                 .long(options::STDIO)
                 .short('d')
                 .help("which stdio to query for. This is a uutils specific extension.")
-                .action(ArgAction::Append)
+                .value_delimiter(',')
                 .default_values(["in"])
                 .value_parser([
                     "in", "out", "err"

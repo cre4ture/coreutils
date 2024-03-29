@@ -3,24 +3,127 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-use crate::common::util::TestScenario;
+use std::fs::File;
+
+use crate::common::util::{TerminalSimulation, TestScenario};
+
+#[cfg(unix)]
+const DEV_NULL: &str = "/dev/null";
+#[cfg(windows)]
+const DEV_NULL: &str = "nul";
 
 #[test]
-#[cfg(not(windows))]
+fn test_terminal_simulation() {
+    let output = new_ucmd!()
+        .terminal_simulation(true)
+        .succeeds();
+    #[cfg(unix)]
+    output.stdout_is("not a tty\n"); // TODO: unix message?
+    #[cfg(windows)]
+    output.stdout_is("windows-terminal\r\n");
+}
+
+#[test]
+fn test_terminal_simulation_all_stdio() {
+    let output = new_ucmd!()
+        .args(&["-d", "in,out,err"])
+        .terminal_simulation(true)
+        .succeeds();
+    #[cfg(unix)]
+    output.stdout_is("not a tty\n"); // TODO: unix message?
+    #[cfg(windows)]
+    output.stdout_is("in: windows-terminal\r\nout: windows-terminal\r\nerr: windows-terminal\r\n");
+}
+
+#[test]
+fn test_terminal_simulation_only_outputs() {
+    let output = new_ucmd!()
+        .args(&["-d", "in,out,err"])
+        .terminal_sim_stdio(TerminalSimulation{
+            stdin: false,
+            stdout: true,
+            stderr: true,
+            ..Default::default()
+        })
+        .fails();
+
+    output.code_is(1);
+    #[cfg(unix)]
+    output.stdout_is("not a tty\n"); // TODO: unix message?
+    #[cfg(windows)]
+    output.stdout_is("in: not a tty\r\nout: windows-terminal\r\nerr: windows-terminal\r\n");
+}
+
+#[test]
+fn test_terminal_simulation_only_outputs_required() {
+    let output = new_ucmd!()
+        .args(&["-d", "out,err"])
+        .terminal_sim_stdio(TerminalSimulation{
+            stdin: false,
+            stdout: true,
+            stderr: true,
+            ..Default::default()
+        })
+        .succeeds();
+
+    #[cfg(unix)]
+    output.stdout_is("not a tty\n"); // TODO: unix message?
+    #[cfg(windows)]
+    output.stdout_is("out: windows-terminal\r\nerr: windows-terminal\r\n");
+}
+
+
+#[test]
+fn test_terminal_simulation_only_input() {
+    let output = new_ucmd!()
+        .args(&["-d", "in,out,err"])
+        .terminal_sim_stdio(TerminalSimulation{
+            stdin: true,
+            stdout: false,
+            stderr: false,
+            ..Default::default()
+        })
+        .fails();
+
+    output.code_is(1);
+    #[cfg(unix)]
+    output.stdout_is("not a tty\n"); // TODO: unix message?
+    #[cfg(windows)]
+    output.stdout_is("in: windows-terminal\nout: not a tty\nerr: not a tty\n");
+}
+
+#[test]
+fn test_terminal_simulation_only_input_required() {
+    let output = new_ucmd!()
+        .terminal_sim_stdio(TerminalSimulation{
+            stdin: true,
+            stdout: false,
+            stderr: false,
+            ..Default::default()
+        })
+        .succeeds();
+
+    #[cfg(unix)]
+    output.stdout_is("not a tty\n"); // TODO: unix message?
+    #[cfg(windows)]
+    output.stdout_is("windows-terminal\n");
+}
+
+
+#[test]
 fn test_dev_null() {
     new_ucmd!()
-        .set_stdin(File::open("/dev/null").unwrap())
+        .set_stdin(File::open(DEV_NULL).unwrap())
         .fails()
         .code_is(1)
         .stdout_is("not a tty\n");
 }
 
 #[test]
-#[cfg(not(windows))]
 fn test_dev_null_silent() {
     new_ucmd!()
         .args(&["-s"])
-        .set_stdin(File::open("/dev/null").unwrap())
+        .set_stdin(File::open(DEV_NULL).unwrap())
         .fails()
         .code_is(1)
         .stdout_is("");
@@ -66,19 +169,15 @@ fn test_help() {
 
 #[test]
 // FixME: freebsd panic
-#[cfg(all(unix, not(target_os = "freebsd")))]
+#[cfg(not(target_os = "freebsd"))]
 fn test_stdout_fail() {
     use std::process::{Command, Stdio};
     let ts = TestScenario::new(util_name!());
     // Sleep inside a shell to ensure the process doesn't finish before we've
     // closed its stdout
-    let mut proc = Command::new("sh")
-        .arg("-c")
-        .arg(format!(
-            "sleep 0.2; exec {} {}",
-            ts.bin_path.to_str().unwrap(),
-            ts.util_name
-        ))
+    let mut proc = Command::new(&ts.bin_path).arg("env") // use env as cross compatible very basic shell
+        .arg(&ts.bin_path).args(&["sleep", "0.2", ";"])
+        .arg(&ts.bin_path).arg(ts.util_name)
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
