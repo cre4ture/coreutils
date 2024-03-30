@@ -345,10 +345,15 @@ fn test_split_string_into_args_debug_output_whitespace_handling() {
 
     let out = scene
         .ucmd()
-        .args(&["-vS printf x%sx\\n A \t B \x0B\x0C\r\n"])
+        .args(&["-vvS printf x%sx\\n A \t B \x0B\x0C\r\n"])
         .succeeds();
     assert_eq!(out.stdout_str(), "xAx\nxBx\n");
-    assert_eq!(out.stderr_str(), "input args:\narg[0]: 'env'\narg[1]: $'-vS printf x%sx\\\\n A \\t B \\x0B\\x0C\\r\\n'\nexecutable: 'printf'\narg[0]: $'x%sx\\n'\narg[1]: 'A'\narg[2]: 'B'\n");
+    assert_eq!(
+        out.stderr_str(),
+        "input args:\narg[0]: 'env'\narg[1]: $\
+        '-vvS printf x%sx\\\\n A \\t B \\x0B\\x0C\\r\\n'\nexecuting: printf\
+        \n   arg[0]= 'printf'\n   arg[1]= $'x%sx\\n'\n   arg[2]= 'A'\n   arg[3]= 'B'\n"
+    );
 }
 
 // FixMe: This test fails on MACOS:
@@ -562,6 +567,30 @@ fn test_env_with_gnu_reference_empty_executable_double_quotes() {
         .code_is(127)
         .no_stdout()
         .stderr_is("env: '': No such file or directory\n");
+}
+
+#[test]
+#[cfg(unix)]
+fn test_env_overwrite_arg0() {
+    let ts = TestScenario::new(util_name!());
+
+    let bin = ts.bin_path.clone();
+
+    ts.ucmd()
+        .args(&["--argv0", "echo"])
+        .arg(&bin)
+        .args(&["-n", "hello", "world!"])
+        .succeeds()
+        .stdout_is("hello world!")
+        .stderr_is("");
+
+    ts.ucmd()
+        .args(&["-a", "dirname"])
+        .arg(bin)
+        .args(&["aa/bb/cc"])
+        .succeeds()
+        .stdout_is("aa/bb\n")
+        .stderr_is("");
 }
 
 #[cfg(test)]
