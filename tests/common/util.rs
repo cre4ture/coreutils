@@ -17,7 +17,7 @@ use rlimit::setrlimit;
 use rstest::rstest;
 use uucore::error::UResult;
 use uucore::io::OwnedFileDescriptorOrHandle;
-use uucore::windows_sys::Win32::System::Console::{AttachConsole, FreeConsole, GetConsoleProcessList, ATTACH_PARENT_PROCESS};
+use uucore::windows_sys::Win32::System::Console::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
 use std::borrow::Cow;
 use std::collections::VecDeque;
 #[cfg(not(windows))]
@@ -1644,29 +1644,19 @@ impl UCommand {
                 command.stderr(Stdio::inherit());
             }
 
-            //let result = unsafe { FreeConsole() };
-            //if result == 0 {
-            //    panic!("detaching from current console failed!");
-            //}
-
             let mut dummy_cmd = std::process::Command::new(PathBuf::from(TESTS_BINARY));
-            dummy_cmd.args(&[
+            dummy_cmd.args([
                 "env",
-                //TESTS_BINARY, "sleep", "2", ";",
-                TESTS_BINARY, "echo", "", ";",   // this is needed to trigger the windows console header generation now
-                //TESTS_BINARY, "sleep", "1", ";",
-                //TESTS_BINARY, "echo", "hello2", ";",
-                TESTS_BINARY, "sleep", "100",
+                TESTS_BINARY, "echo", "", ";",   // this newline is needed to trigger the windows console header generation now
+                TESTS_BINARY, "sleep", "100",    // this sleep will be killed shortly, but we need it to prevent the console to close
                 ]);
-            let terminal_size = simulated_terminal.size.clone().unwrap_or_default();
+            let terminal_size = simulated_terminal.size.unwrap_or_default();
             let mut cmd_child = conpty::Process::spawn_with_size(dummy_cmd, Some((
                 terminal_size.cols as i16, terminal_size.rows as i16,
             ))).unwrap();
 
             read_till_show_cursor(&mut cmd_child); // read and ignore full windows console header
             captured_stdout.spawn_reader_thread(Box::new(cmd_child.output().unwrap()), "win_conpty_reader".into()).unwrap();
-
-            //cmd_child.resize(terminal_size.cols as i16, terminal_size.rows as i16).unwrap();
 
             let result = unsafe { FreeConsole() };
             if result == 0 {
@@ -1684,24 +1674,10 @@ impl UCommand {
                 panic!("attaching to new console failed!");
             }
 
-            //std::thread::sleep(Duration::from_millis(4000));
-
-            cmd_child.exit(0);
+            cmd_child.exit(0).unwrap(); // kill the sleep 100
             cmd_child.wait(Some(500)).unwrap();
 
-            //let mut buf = [0u32, 0u32];
-            //loop {
-            //    let cnt = unsafe{ GetConsoleProcessList(buf.as_mut_ptr(), buf.len() as u32) };
-            //    if cnt == 1 {
-            //        break;
-            //    }
-            //}
-
-            //std::thread::sleep(Duration::from_millis(25));
-
             stdin_pty = Some(Box::new(cmd_child.input().unwrap()));
-            //read_till_show_cursor(&mut cmd_child);
-            //captured_stdout.spawn_reader_thread(Box::new(cmd_child.output().unwrap()), "win_conpty_reader".into()).unwrap();
             self.child_console = Some(cmd_child);
         }
 
@@ -1784,21 +1760,18 @@ impl UCommand {
 
         let (mut command, captured_stdout, captured_stderr, stdin_pty) = self.setup_stdio(command);
         let child = command.spawn().unwrap();
+
         #[cfg(windows)]
         if let Some(_console) = &self.child_console {
+            // after spawning of the child, we reset the console to the original one
             unsafe { FreeConsole() };
             unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
-            log_info("detached child console", self.to_string());
         }
 
         let mut child = UChild::from(self, child, captured_stdout, captured_stderr, stdin_pty);
 
         if let Some(input) = self.bytes_into_stdin.take() {
             child.pipe_in(input);
-        }
-
-        if let Some(console) = &mut child.child_console {
-             //read_till_show_cursor(console);
         }
 
         child
@@ -2155,7 +2128,7 @@ fn find3<T: std::cmp::PartialEq>(haystack: &[T], needle: &[T]) -> Option<usize> 
         return None;
     }
     (0..haystack.len()-needle.len()+1)
-        .filter(|&i| haystack[i..i+needle.len()] == needle[..]).next()
+        .find(|&i| haystack[i..i+needle.len()] == needle[..])
 }
 
 fn find3_rev<T: std::cmp::PartialEq>(haystack: &[T], needle: &[T]) -> Option<usize> {
@@ -2163,7 +2136,7 @@ fn find3_rev<T: std::cmp::PartialEq>(haystack: &[T], needle: &[T]) -> Option<usi
         return None;
     }
     (0..haystack.len()-needle.len()+1).rev()
-        .filter(|&i| haystack[i..i+needle.len()] == needle[..]).next()
+        .find(|&i| haystack[i..i+needle.len()] == needle[..])
 }
 
 /// Abstraction for a [`std::process::Child`] to handle the child process.

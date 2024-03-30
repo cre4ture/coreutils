@@ -1,16 +1,15 @@
-use std::{io::{self, IsTerminal}, os::windows::io::{AsHandle, AsRawHandle}};
+use std::{io::{self, IsTerminal}, os::windows::io::AsRawHandle};
 
-use uucore::{error::{UResult, USimpleError}, io::OwnedFileDescriptorOrHandle, windows_sys::Win32::System::Console::{GetConsoleScreenBufferInfo, CONSOLE_SCREEN_BUFFER_INFO, COORD, SMALL_RECT}};
+use uucore::{error::{UResult, USimpleError}, io::OwnedFileDescriptorOrHandle};
 
 use crate::Options;
 
 pub(crate) fn open_file_of_options(f: &str) -> io::Result<OwnedFileDescriptorOrHandle> {
-    Ok(OwnedFileDescriptorOrHandle::from(
+    OwnedFileDescriptorOrHandle::from(
         std::fs::OpenOptions::new()
             .read(true)
             // .custom_flags(O_NONBLOCK)
-            .open(f)?)?,
-    )
+            .open(f)?)
 }
 
 pub(crate) fn stty(opts: &Options) -> UResult<()> {

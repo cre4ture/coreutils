@@ -1,4 +1,4 @@
-use std::{fs::File, io::{self, stdin, stdout, Stdout}};
+use std::io::{self, stdout};
 
 use clap::{crate_version, Arg, ArgAction, ArgMatches, Command};
 use uucore::{error::{UResult, USimpleError}, format_usage, help_about, help_usage, io::OwnedFileDescriptorOrHandle};

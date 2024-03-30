@@ -176,7 +176,7 @@ fn test_stdout_fail() {
     // Sleep inside a shell to ensure the process doesn't finish before we've
     // closed its stdout
     let mut proc = Command::new(&ts.bin_path).arg("env") // use env as cross compatible very basic shell
-        .arg(&ts.bin_path).args(&["sleep", "0.2", ";"])
+        .arg(&ts.bin_path).args(["sleep", "0.2", ";"])
         .arg(&ts.bin_path).arg(ts.util_name)
         .stdout(Stdio::piped())
         .spawn()

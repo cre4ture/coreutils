@@ -10,7 +10,6 @@
 use clap::{crate_version, Arg, ArgAction, Command};
 use uucore::io::OwnedFileDescriptorOrHandle;
 use std::io::{IsTerminal, Write};
-use std::os::windows::io::AsHandle;
 use uucore::error::{set_exit_code, UResult, USimpleError};
 use uucore::{format_usage, help_about, help_usage};
 
@@ -43,7 +42,7 @@ fn inspect_one(silent: bool, name: Option<&str>, fx: OwnedFileDescriptorOrHandle
 
         match name {
             Ok(name) => writeln!(stdout, "{}", name)?,
-            Err(e) => {
+            Err(_e) => {
                 writeln!(stdout, "not a tty")?;
                 return Ok(false);
             }
@@ -73,7 +72,7 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
             s => return Err(USimpleError::new(2, format!("unknown stdio name provided: {s}"))),
         }?;
 
-        let is_terminal = inspect_one(silent, with_name.then(||d.as_str()), selected_stdio).map_err(|_| -> std::io::Error {
+        let is_terminal = inspect_one(silent, with_name.then_some(d.as_str()), selected_stdio).map_err(|_| -> std::io::Error {
                 // Don't return to prevent a panic later when another flush is attempted
                 // because the `uucore_procs::main` macro inserts a flush after execution for every utility.
                 std::process::exit(3);

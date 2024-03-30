@@ -248,6 +248,7 @@ fn check_and_handle_string_args(
 #[derive(Default)]
 struct EnvAppData {
     do_debug_printing: bool,
+    did_print_original_args: bool,
     had_string_argument: bool,
 }
 
@@ -280,6 +281,7 @@ impl EnvAppData {
                     Some(original_args),
                 )? =>
                 {
+                    self.did_print_original_args = true;
                     self.do_debug_printing = true;
                     self.had_string_argument = true;
                 }
@@ -318,29 +320,29 @@ impl EnvAppData {
         Ok(matches)
     }
 
-    fn run_env(&mut self, mut original_args: impl uucore::Args) -> UResult<()> {
-        let executable_name = original_args.next().ok_or(
+    fn run_env(&mut self, original_args: impl uucore::Args) -> UResult<()> {
+        let original_args: Vec<OsString> = original_args.collect();
+        let executable_name = original_args.first().ok_or(
             USimpleError::new(2, "missing executable name parameter!"))?;
 
-        let original_args: Vec<OsString> = original_args.collect();
         let args = self.process_all_string_arguments(&original_args)?;
 
         for instance in args.split(|arg| arg == ";")
         {
-            let param_chain = std::iter::once(&executable_name).chain(instance.iter());
-            self.run_env_single(param_chain.map(|x|x.clone()).collect())?;
+            let param_chain = std::iter::once(executable_name).chain(instance.iter());
+            self.run_env_single(param_chain.cloned().collect(), &original_args)?;
         }
 
         Ok(())
     }
 
-    fn run_env_single(&mut self, args: Vec<OsString>) -> UResult<()> {
+    fn run_env_single(&mut self, args: Vec<OsString>, original_args: &[OsString]) -> UResult<()> {
 
         let matches = self.get_arg_matches(&args)?;
-        let did_debug_printing_before = self.do_debug_printing; // could have been done already as part of the "-vS" string parsing
-        let do_debug_printing = self.do_debug_printing || matches.get_flag("debug");
-        if do_debug_printing && !did_debug_printing_before {
-            debug_print_args(&args);
+        self.do_debug_printing = self.do_debug_printing || matches.get_flag("debug");
+        if self.do_debug_printing && !self.did_print_original_args {
+            debug_print_args(original_args);
+            self.did_print_original_args = true;
         }
 
         let mut opts = make_options(&matches)?;
@@ -363,7 +365,7 @@ impl EnvAppData {
             // no program provided, so just dump all env vars to stdout
             print_env(opts.line_ending);
         } else {
-            return self.run_program(opts, do_debug_printing);
+            return self.run_program(opts, self.do_debug_printing);
         }
 
         Ok(())
