@@ -1,8 +1,13 @@
+use std::os::unix::fs::OpenOptionsExt;
+
+use nix::libc::O_NONBLOCK;
+use uucore::io::OwnedFileDescriptorOrHandle;
+
 mod flags;
 
 pub(crate) mod stty;
 
-pub(crate) fn open_file_of_options(f: &str) -> io::Result<OwnedFileDescriptorOrHandle> {
+pub(crate) fn open_file_of_options(f: &str) -> std::io::Result<OwnedFileDescriptorOrHandle> {
     // Two notes here:
     // 1. O_NONBLOCK is needed because according to GNU docs, a
     //    POSIX tty can block waiting for carrier-detect if the
@@ -12,10 +17,10 @@ pub(crate) fn open_file_of_options(f: &str) -> io::Result<OwnedFileDescriptorOrH
     //    will clean up the FD for us on exit, so it doesn't
     //    matter. The alternative would be to have an enum of
     //    BorrowedFd/OwnedFd to handle both cases.
-    Ok(OwnedFileDescriptorOrHandle::from(
+    OwnedFileDescriptorOrHandle::from(
         std::fs::OpenOptions::new()
             .read(true)
             .custom_flags(O_NONBLOCK)
             .open(f)?,
-    )?)
+    )
 }

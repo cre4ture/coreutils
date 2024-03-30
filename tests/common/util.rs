@@ -23,8 +23,6 @@ use std::ffi::{OsStr, OsString};
 use std::fs::{self, hard_link, remove_file, File, OpenOptions};
 use std::io::{self, BufWriter, Read, Result, Write};
 #[cfg(unix)]
-use std::os::fd::OwnedFd;
-#[cfg(unix)]
 use std::os::unix::fs::{symlink as symlink_dir, symlink as symlink_file, PermissionsExt};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
@@ -44,6 +42,7 @@ use std::{env, hint, mem, thread};
 use tempfile::{Builder, TempDir};
 use uucore::error::UResult;
 use uucore::io::OwnedFileDescriptorOrHandle;
+#[cfg(windows)]
 use uucore::windows_sys::Win32::System::Console::{
     AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS,
 };
@@ -1700,7 +1699,7 @@ impl UCommand {
         #[cfg(unix)]
         if let Some(simulated_terminal) = &self.terminal_simulation {
             let terminal_size = simulated_terminal.size.unwrap_or_default();
-            let c_terminal_size = winsize {
+            let c_terminal_size = libc::winsize {
                 ws_row: terminal_size.rows,
                 ws_col: terminal_size.cols,
                 ws_xpixel: terminal_size.pixels_x,
@@ -1712,7 +1711,7 @@ impl UCommand {
                     slave: pi_slave,
                     master: pi_master,
                 } = nix::pty::openpty(&c_terminal_size, None).unwrap();
-                stdin_pty = Some(File::from(pi_master));
+                stdin_pty = Some(Box::new(File::from(pi_master)));
                 command.stdin(pi_slave);
             }
 
@@ -1721,11 +1720,12 @@ impl UCommand {
                     slave: po_slave,
                     master: po_master,
                 } = nix::pty::openpty(&c_terminal_size, None).unwrap();
-                captured_stdout = self.spawn_reader_thread(
-                    captured_stdout,
-                    po_master,
-                    "stdout_reader".to_string(),
-                );
+                captured_stdout
+                    .spawn_reader_thread(
+                        Box::new(File::from(po_master)),
+                        "stdout_reader".to_string(),
+                    )
+                    .unwrap();
                 command.stdout(po_slave);
             }
 
@@ -1734,11 +1734,12 @@ impl UCommand {
                     slave: pe_slave,
                     master: pe_master,
                 } = nix::pty::openpty(&c_terminal_size, None).unwrap();
-                captured_stderr = self.spawn_reader_thread(
-                    captured_stderr,
-                    pe_master,
-                    "stderr_reader".to_string(),
-                );
+                captured_stderr
+                    .spawn_reader_thread(
+                        Box::new(File::from(pe_master)),
+                        "stderr_reader".to_string(),
+                    )
+                    .unwrap();
                 command.stderr(pe_slave);
             }
         }
@@ -1832,8 +1833,8 @@ impl UCommand {
     }
 }
 
+#[cfg(windows)]
 fn read_till_show_cursor(cmd_child: &mut conpty::Process) {
-    println!("read_till_show_cursor - enter");
     let mut reader = cmd_child.output().unwrap();
     let keyword = "\x1b[?25h".as_bytes();
     let key_len = keyword.len();
@@ -1847,12 +1848,6 @@ fn read_till_show_cursor(cmd_child: &mut conpty::Process) {
         last.push_back(buf[0]);
         let b = last.clone().into_iter().collect::<Vec<_>>();
         let c = &b[..];
-        println!(
-            "read: {}\nbuffer: {}\nkeywrd: {}",
-            buf.escape_ascii(),
-            c.escape_ascii(),
-            keyword.escape_ascii()
-        );
         if (last.len() == key_len) && last.iter().zip(keyword.iter()).all(|(a, b)| a == b) {
             println!("done!");
             break;
@@ -2190,6 +2185,7 @@ impl UChild {
             stderr_to_stdout: ucommand.stderr_to_stdout,
             join_handle: None,
             timeout: ucommand.timeout,
+            #[cfg(windows)]
             child_console: mem::take(&mut ucommand.child_console),
             tmpd: ucommand.tmpd.clone(),
         }
@@ -2370,15 +2366,7 @@ impl UChild {
                 .unwrap();
         };
 
-        let had_console = self.child_console.is_some();
-        //if  had_console {
-        //    #[cfg(windows)]
-        //    if let Some(_console) = &self.child_console {
-        //        unsafe { FreeConsole() };
-        //        unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
-        //    }
-        //}
-
+        #[cfg(windows)]
         if let Some(mut console) = self.child_console {
             let _ = console.exit(0);
             console.wait(Some(500)).unwrap();
@@ -2395,20 +2383,6 @@ impl UChild {
         }
         if let Some(stderr) = self.captured_stderr.captured.as_mut() {
             output.stderr = stderr.output_bytes();
-        }
-
-        #[cfg(windows)]
-        if had_console {
-            println!("original_output:\n{}", output.stdout.escape_ascii());
-            let prefix = "\u{1b}[?25l\u{1b}[2J\u{1b}[m\u{1b}[H".as_bytes();
-            if let Some(pos) = find3(&output.stdout, prefix) {
-                output.stdout = output.stdout[pos + prefix.len()..].to_vec();
-            }
-            let postfix = "\u{1b}]0;".as_bytes();
-            let maybe_pos = find3_rev(&output.stdout, postfix);
-            if let Some(pos) = maybe_pos {
-                output.stdout = output.stdout[..pos].to_vec();
-            }
         }
 
         Ok(output)
@@ -3996,45 +3970,13 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
-    #[cfg(feature = "env")]
+    #[cfg(feature = "stty")]
     #[test]
     fn test_simulation_of_terminal_size_information() {
         let scene = TestScenario::new("util");
 
         let out = scene
-            .ccmd("env")
-            .arg("sh")
-            .arg("is_atty.sh")
-            .terminal_sim_stdio(TerminalSimulation {
-                size: Some(libc::winsize {
-                    ws_col: 40,
-                    ws_row: 10,
-                    ws_xpixel: 40 * 8,
-                    ws_ypixel: 10 * 10,
-                }),
-                stdout: true,
-                stdin: true,
-                stderr: true,
-            })
-            .succeeds();
-        std::assert_eq!(
-            String::from_utf8_lossy(out.stdout()),
-            "stdin is atty\r\nterminal size: 10 40\r\nstdout is atty\r\nstderr is atty\r\n"
-        );
-        std::assert_eq!(
-            String::from_utf8_lossy(out.stderr()),
-            "This is an error message.\r\n"
-        );
-    }
-
-    #[cfg(feature = "env")]
-    #[test]
-    fn test_simulation_of_terminal_size_information() {
-        let scene = TestScenario::new("util");
-
-        let out = scene
-            .cmd(r"C:\Program Files\Git\usr\bin\stty.exe")
+            .ccmd("stty")
             .arg("-a")
             .terminal_sim_stdio(TerminalSimulation {
                 size: Some(TerminalSize {

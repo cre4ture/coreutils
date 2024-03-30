@@ -39,7 +39,7 @@ fn inspect_one(
     }
     if is_terminal {
         #[cfg(unix)]
-        let name = nix::unistd::ttyname(selected_stdio).display();
+        let name = nix::unistd::ttyname(fx.as_raw()).map(|x| x.display().to_string());
         #[cfg(windows)]
         let name: Result<&str, ()> = Ok("windows-terminal");
 

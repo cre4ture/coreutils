@@ -15,14 +15,11 @@
 /// Access to this common functionality is provided in `OwnedFileDescriptorOrHandle`.
 
 #[cfg(not(windows))]
-use std::os::fd::{AsFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd, OwnedFd, BorrowedFd, RawFd};
 #[cfg(windows)]
 use std::os::windows::io::{AsHandle, OwnedHandle};
 use std::{
-    fs::{File, OpenOptions},
-    io,
-    path::Path,
-    process::Stdio,
+    fs::{File, OpenOptions}, io, path::Path, process::Stdio
 };
 
 #[cfg(windows)]
@@ -94,5 +91,19 @@ impl OwnedFileDescriptorOrHandle {
 impl From<OwnedFileDescriptorOrHandle> for Stdio {
     fn from(value: OwnedFileDescriptorOrHandle) -> Self {
         value.into_stdio()
+    }
+}
+
+#[cfg(unix)]
+impl AsFd for OwnedFileDescriptorOrHandle {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.as_raw().as_fd()
+    }
+}
+
+#[cfg(unix)]
+impl AsRawFd for OwnedFileDescriptorOrHandle {
+    fn as_raw_fd(&self) -> RawFd {
+        self.as_raw().as_raw_fd()
     }
 }

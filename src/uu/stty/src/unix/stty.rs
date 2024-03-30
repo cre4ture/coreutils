@@ -5,23 +5,17 @@
 
 // spell-checker:ignore clocal erange tcgetattr tcsetattr tcsanow tiocgwinsz tiocswinsz cfgetospeed cfsetospeed ushort vmin vtime
 
-mod flags;
-
-use clap::{crate_version, Arg, ArgAction, ArgMatches, Command};
-use nix::libc::{c_ushort, O_NONBLOCK, TIOCGWINSZ, TIOCSWINSZ};
+use nix::libc::{c_ushort, TIOCGWINSZ, TIOCSWINSZ};
 use nix::sys::termios::{
     cfgetospeed, cfsetospeed, tcgetattr, tcsetattr, ControlFlags, InputFlags, LocalFlags,
     OutputFlags, SpecialCharacterIndices, Termios,
 };
 use nix::{ioctl_read_bad, ioctl_write_ptr_bad};
-use std::fs::File;
-use std::io::{self, stdout, Stdout};
 use std::ops::ControlFlow;
-use std::os::fd::{AsFd, BorrowedFd};
-use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::AsRawFd;
 use uucore::error::{UResult, USimpleError};
-use uucore::{format_usage, help_about, help_usage};
+
+use crate::Options;
 
 #[cfg(not(any(
     target_os = "freebsd",
@@ -31,8 +25,8 @@ use uucore::{format_usage, help_about, help_usage};
     target_os = "netbsd",
     target_os = "openbsd"
 )))]
-use flags::BAUD_RATES;
-use flags::{CONTROL_CHARS, CONTROL_FLAGS, INPUT_FLAGS, LOCAL_FLAGS, OUTPUT_FLAGS};
+use super::flags::BAUD_RATES;
+use super::flags::{CONTROL_CHARS, CONTROL_FLAGS, INPUT_FLAGS, LOCAL_FLAGS, OUTPUT_FLAGS};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Flag<T> {
@@ -80,24 +74,6 @@ trait TermiosFlag: Copy {
     fn apply(&self, termios: &mut Termios, val: bool);
 }
 
-impl AsFd for Device {
-    fn as_fd(&self) -> BorrowedFd<'_> {
-        match self {
-            Self::File(f) => f.as_fd(),
-            Self::Stdout(stdout) => stdout.as_fd(),
-        }
-    }
-}
-
-impl AsRawFd for Device {
-    fn as_raw_fd(&self) -> RawFd {
-        match self {
-            Self::File(f) => f.as_raw_fd(),
-            Self::Stdout(stdout) => stdout.as_raw_fd(),
-        }
-    }
-}
-
 // Needs to be repr(C) because we pass it to the ioctl calls.
 #[repr(C)]
 #[derive(Default, Debug)]
@@ -124,7 +100,7 @@ ioctl_write_ptr_bad!(
 
 pub(crate) fn stty(opts: &Options) -> UResult<()> {
     // TODO: Figure out the right error message for when tcgetattr fails
-    let mut termios = tcgetattr(opts.file.as_fd()).expect("Could not get terminal attributes");
+    let mut termios = tcgetattr(opts.file.as_raw()).expect("Could not get terminal attributes");
 
     if let Some(settings) = &opts.settings {
         for setting in settings {
@@ -181,7 +157,7 @@ fn print_terminal_size(termios: &Termios, opts: &Options) -> nix::Result<()> {
 
     if opts.all {
         let mut size = TermSize::default();
-        unsafe { tiocgwinsz(opts.file.as_raw_fd(), &mut size as *mut _)? };
+        unsafe { tiocgwinsz(opts.file.as_raw().as_raw_fd(), &mut size as *mut _)? };
         print!("rows {}; columns {}; ", size.rows, size.columns);
     }
 
