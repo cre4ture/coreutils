@@ -1,4 +1,3 @@
-
 mod flags;
 
 pub(crate) mod stty;
@@ -17,6 +16,6 @@ pub(crate) fn open_file_of_options(f: &str) -> io::Result<OwnedFileDescriptorOrH
         std::fs::OpenOptions::new()
             .read(true)
             .custom_flags(O_NONBLOCK)
-            .open(f)?)?,
-    )
+            .open(f)?,
+    )?)
 }

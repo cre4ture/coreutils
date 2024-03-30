@@ -13,20 +13,15 @@ fn test_invalid_arg() {
 
 #[test]
 fn runs() {
-    new_ucmd!()
-        .terminal_simulation(true)
-        .succeeds();
+    new_ucmd!().terminal_simulation(true).succeeds();
 }
 
 #[test]
 fn print_all() {
     let res = new_ucmd!()
         .arg("-a")
-        .terminal_sim_stdio(TerminalSimulation{
-            size: Some(TerminalSize{
-                cols: 60,
-                rows: 30,
-            }),
+        .terminal_sim_stdio(TerminalSimulation {
+            size: Some(TerminalSize { cols: 60, rows: 30 }),
             stdin: true,
             stdout: true,
             stderr: true,

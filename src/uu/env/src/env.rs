@@ -294,10 +294,7 @@ impl EnvAppData {
         Ok(all_args)
     }
 
-    fn get_arg_matches(
-        &mut self,
-        args: &[OsString],
-    ) -> Result<clap::ArgMatches, Box<dyn UError>> {
+    fn get_arg_matches(&mut self, args: &[OsString]) -> Result<clap::ArgMatches, Box<dyn UError>> {
         let app = uu_app();
         let matches = app
             .try_get_matches_from(args)
@@ -322,13 +319,13 @@ impl EnvAppData {
 
     fn run_env(&mut self, original_args: impl uucore::Args) -> UResult<()> {
         let original_args: Vec<OsString> = original_args.collect();
-        let executable_name = original_args.first().ok_or(
-            USimpleError::new(2, "missing executable name parameter!"))?;
+        let executable_name = original_args
+            .first()
+            .ok_or(USimpleError::new(2, "missing executable name parameter!"))?;
 
         let args = self.process_all_string_arguments(&original_args)?;
 
-        for instance in args.split(|arg| arg == ";")
-        {
+        for instance in args.split(|arg| arg == ";") {
             let param_chain = std::iter::once(executable_name).chain(instance.iter());
             self.run_env_single(param_chain.cloned().collect(), &original_args)?;
         }
@@ -337,7 +334,6 @@ impl EnvAppData {
     }
 
     fn run_env_single(&mut self, args: Vec<OsString>, original_args: &[OsString]) -> UResult<()> {
-
         let matches = self.get_arg_matches(&args)?;
         self.do_debug_printing = self.do_debug_printing || matches.get_flag("debug");
         if self.do_debug_printing && !self.did_print_original_args {

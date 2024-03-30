@@ -14,9 +14,7 @@ const DEV_NULL: &str = "nul";
 
 #[test]
 fn test_terminal_simulation() {
-    let output = new_ucmd!()
-        .terminal_simulation(true)
-        .succeeds();
+    let output = new_ucmd!().terminal_simulation(true).succeeds();
     #[cfg(unix)]
     output.stdout_is("not a tty\n"); // TODO: unix message?
     #[cfg(windows)]
@@ -39,7 +37,7 @@ fn test_terminal_simulation_all_stdio() {
 fn test_terminal_simulation_only_outputs() {
     let output = new_ucmd!()
         .args(&["-d", "in,out,err"])
-        .terminal_sim_stdio(TerminalSimulation{
+        .terminal_sim_stdio(TerminalSimulation {
             stdin: false,
             stdout: true,
             stderr: true,
@@ -58,7 +56,7 @@ fn test_terminal_simulation_only_outputs() {
 fn test_terminal_simulation_only_outputs_required() {
     let output = new_ucmd!()
         .args(&["-d", "out,err"])
-        .terminal_sim_stdio(TerminalSimulation{
+        .terminal_sim_stdio(TerminalSimulation {
             stdin: false,
             stdout: true,
             stderr: true,
@@ -72,12 +70,11 @@ fn test_terminal_simulation_only_outputs_required() {
     output.stdout_is("out: windows-terminal\r\nerr: windows-terminal\r\n");
 }
 
-
 #[test]
 fn test_terminal_simulation_only_input() {
     let output = new_ucmd!()
         .args(&["-d", "in,out,err"])
-        .terminal_sim_stdio(TerminalSimulation{
+        .terminal_sim_stdio(TerminalSimulation {
             stdin: true,
             stdout: false,
             stderr: false,
@@ -95,7 +92,7 @@ fn test_terminal_simulation_only_input() {
 #[test]
 fn test_terminal_simulation_only_input_required() {
     let output = new_ucmd!()
-        .terminal_sim_stdio(TerminalSimulation{
+        .terminal_sim_stdio(TerminalSimulation {
             stdin: true,
             stdout: false,
             stderr: false,
@@ -108,7 +105,6 @@ fn test_terminal_simulation_only_input_required() {
     #[cfg(windows)]
     output.stdout_is("windows-terminal\n");
 }
-
 
 #[test]
 fn test_dev_null() {
@@ -175,9 +171,12 @@ fn test_stdout_fail() {
     let ts = TestScenario::new(util_name!());
     // Sleep inside a shell to ensure the process doesn't finish before we've
     // closed its stdout
-    let mut proc = Command::new(&ts.bin_path).arg("env") // use env as cross compatible very basic shell
-        .arg(&ts.bin_path).args(["sleep", "0.2", ";"])
-        .arg(&ts.bin_path).arg(ts.util_name)
+    let mut proc = Command::new(&ts.bin_path)
+        .arg("env") // use env as cross compatible very basic shell
+        .arg(&ts.bin_path)
+        .args(["sleep", "0.2", ";"])
+        .arg(&ts.bin_path)
+        .arg(ts.util_name)
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();

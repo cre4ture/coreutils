@@ -1,15 +1,17 @@
 use std::io::{self, stdout};
 
 use clap::{crate_version, Arg, ArgAction, ArgMatches, Command};
-use uucore::{error::{UResult, USimpleError}, format_usage, help_about, help_usage, io::OwnedFileDescriptorOrHandle};
-
+use uucore::{
+    error::{UResult, USimpleError},
+    format_usage, help_about, help_usage,
+    io::OwnedFileDescriptorOrHandle,
+};
 
 #[cfg(windows)]
 mod windows;
 
 #[cfg(unix)]
 mod unix;
-
 
 mod options {
     pub const ALL: &str = "all";
@@ -63,7 +65,6 @@ pub fn uu_app() -> Command {
         )
 }
 
-
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
     let matches = uu_app().try_get_matches_from(args)?;
@@ -90,7 +91,6 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
     let r = windows::stty(&opts);
     r
 }
-
 
 impl<'a> Options<'a> {
     fn from(matches: &'a ArgMatches) -> io::Result<Self> {

@@ -8,9 +8,9 @@
 // spell-checker:ignore (ToDO) ttyname filedesc
 
 use clap::{crate_version, Arg, ArgAction, Command};
-use uucore::io::OwnedFileDescriptorOrHandle;
 use std::io::{IsTerminal, Write};
 use uucore::error::{set_exit_code, UResult, USimpleError};
+use uucore::io::OwnedFileDescriptorOrHandle;
 use uucore::{format_usage, help_about, help_usage};
 
 const ABOUT: &str = help_about!("tty.md");
@@ -21,8 +21,11 @@ mod options {
     pub const STDIO: &str = "stdio";
 }
 
-fn inspect_one(silent: bool, name: Option<&str>, fx: OwnedFileDescriptorOrHandle) -> std::io::Result<bool> {
-
+fn inspect_one(
+    silent: bool,
+    name: Option<&str>,
+    fx: OwnedFileDescriptorOrHandle,
+) -> std::io::Result<bool> {
     let is_terminal = fx.as_raw().is_terminal();
 
     // If silent, we don't need the name, only whether or not stdin is a tty.
@@ -64,15 +67,20 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
 
     let mut are_all_terminal = true;
     for d in stdio_str {
-
         let selected_stdio = match d.as_str() {
             "in" => OwnedFileDescriptorOrHandle::from(std::io::stdin()),
             "out" => OwnedFileDescriptorOrHandle::from(std::io::stdout()),
             "err" => OwnedFileDescriptorOrHandle::from(std::io::stderr()),
-            s => return Err(USimpleError::new(2, format!("unknown stdio name provided: {s}"))),
+            s => {
+                return Err(USimpleError::new(
+                    2,
+                    format!("unknown stdio name provided: {s}"),
+                ))
+            }
         }?;
 
-        let is_terminal = inspect_one(silent, with_name.then_some(d.as_str()), selected_stdio).map_err(|_| -> std::io::Error {
+        let is_terminal = inspect_one(silent, with_name.then_some(d.as_str()), selected_stdio)
+            .map_err(|_| -> std::io::Error {
                 // Don't return to prevent a panic later when another flush is attempted
                 // because the `uucore_procs::main` macro inserts a flush after execution for every utility.
                 std::process::exit(3);
@@ -108,8 +116,6 @@ pub fn uu_app() -> Command {
                 .help("which stdio to query for. This is a uutils specific extension.")
                 .value_delimiter(',')
                 .default_values(["in"])
-                .value_parser([
-                    "in", "out", "err"
-                ]),
+                .value_parser(["in", "out", "err"]),
         )
 }
