@@ -121,7 +121,11 @@ impl CmdResult {
     /// Print process output information for debugging purposes.
     pub fn print_outputs(&self) {
         println!("command exit status: {:?}", self.exit_status);
-        println!("stdout:\n{}\nstderr:\n{}", self.stdout.escape_ascii(), self.stderr().escape_ascii());
+        println!(
+            "stdout:\n{}\nstderr:\n{}",
+            self.stdout.escape_ascii(),
+            self.stderr().escape_ascii()
+        );
     }
 
     /// Apply a function to `stdout` as bytes and return a new [`CmdResult`]
@@ -1914,7 +1918,6 @@ impl ForwardedOutput {
     }
 
     fn spawn_reader_thread(&mut self, source: Box<dyn Read + Send>, name: String) -> UResult<()> {
-        println!("spawn read thread: {}", name);
         let destination_fd = if let Some(co) = &self.captured {
             co.try_clone()?
         } else {
@@ -3800,13 +3803,10 @@ mod tests {
 
     #[cfg(feature = "tty")]
     #[test]
-    fn test_simulation_of_terminal_false_tty() {
+    fn test_simulation_of_terminal_false_with_tty() {
         let scene = TestScenario::new("util");
 
-        let out = scene
-            .ccmd("tty")
-            .args(&["-d", "in", "-d", "out", "-d", "err"])
-            .fails();
+        let out = scene.ccmd("tty").args(&["-d", "in,out,err"]).fails();
 
         out.print_outputs();
 
@@ -3823,23 +3823,27 @@ mod tests {
 
     #[cfg(feature = "tty")]
     #[test]
-    fn test_simulation_of_terminal_true_tty() {
+    fn test_simulation_of_terminal_true_with_tty() {
+        use regex::Regex;
+
         let scene = TestScenario::new("util");
 
         let out = scene
             .ccmd("tty")
-            .args(&["-d", "in", "-d", "out", "-d", "err"])
+            .args(&["-d", "in,out,err"])
             .terminal_simulation(true)
             .run();
 
-        println!("stdout:\n{}", out.stdout_str());
-        println!("stderr:\n{}", out.stderr_str());
+        out.print_outputs();
 
-        assert_eq!(out.exit_status().code().unwrap(), 0);
-        assert_eq!(
-            String::from_utf8_lossy(out.stdout()),
-            "in: windows-terminal\r\nout: windows-terminal\r\nerr: windows-terminal\r\n"
+        out.code_is(0);
+        #[cfg(unix)]
+        out.stdout_matches(
+            &Regex::new(r"in: /dev/pts/[0-9]+\r\nout: /dev/pts/[0-9]+\r\nerr: /dev/pts/[0-9]+\r\n")
+                .unwrap(),
         );
+        #[cfg(windows)]
+        out.stdout_is("in: windows-terminal\r\nout: windows-terminal\r\nerr: windows-terminal\r\n");
 
         scene
             .ccmd("tty")
@@ -3889,7 +3893,7 @@ mod tests {
             .succeeds();
         std::assert_eq!(
             String::from_utf8_lossy(out.stdout()),
-            "stdin is atty\r\nterminal size: 30 80\r\nstdout is atty\r\nstderr is atty\r\n"
+            "stdin is atty\r\nterminal size: 24 80\r\nstdout is atty\r\nstderr is atty\r\n"
         );
         std::assert_eq!(
             String::from_utf8_lossy(out.stderr()),
@@ -3916,12 +3920,38 @@ mod tests {
             .succeeds();
         std::assert_eq!(
             String::from_utf8_lossy(out.stdout()),
-            "stdin is atty\nterminal size: 30 80\nstdout is not atty\nstderr is not atty\n"
+            "stdin is atty\nterminal size: 24 80\nstdout is not atty\nstderr is not atty\n"
         );
         std::assert_eq!(
             String::from_utf8_lossy(out.stderr()),
             "This is an error message.\n"
         );
+    }
+
+    #[cfg(feature = "tty")]
+    #[test]
+    fn test_simulation_of_terminal_for_stdin_only_with_tty() {
+        let scene = TestScenario::new("util");
+        let config = TerminalSimulation {
+            stdin: true,
+            ..Default::default()
+        };
+
+        scene
+            .ccmd("tty")
+            .args(&["-s", "-d", "in"])
+            .terminal_sim_stdio(config.clone())
+            .succeeds();
+        scene
+            .ccmd("tty")
+            .args(&["-s", "-d", "out"])
+            .terminal_sim_stdio(config.clone())
+            .fails();
+        scene
+            .ccmd("tty")
+            .args(&["-s", "-d", "err"])
+            .terminal_sim_stdio(config)
+            .fails();
     }
 
     #[cfg(unix)]
@@ -3951,6 +3981,32 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "tty")]
+    #[test]
+    fn test_simulation_of_terminal_for_stdout_only_with_tty() {
+        let scene = TestScenario::new("util");
+        let config = TerminalSimulation {
+            stdout: true,
+            ..Default::default()
+        };
+
+        scene
+            .ccmd("tty")
+            .args(&["-s", "-d", "in"])
+            .terminal_sim_stdio(config.clone())
+            .fails();
+        scene
+            .ccmd("tty")
+            .args(&["-s", "-d", "out"])
+            .terminal_sim_stdio(config.clone())
+            .succeeds();
+        scene
+            .ccmd("tty")
+            .args(&["-s", "-d", "err"])
+            .terminal_sim_stdio(config)
+            .fails();
+    }
+
     #[cfg(unix)]
     #[cfg(feature = "env")]
     #[test]
@@ -3978,9 +4034,37 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "tty")]
+    #[test]
+    fn test_simulation_of_terminal_for_stderr_only_with_tty() {
+        let scene = TestScenario::new("util");
+        let config = TerminalSimulation {
+            stderr: true,
+            ..Default::default()
+        };
+
+        scene
+            .ccmd("tty")
+            .args(&["-s", "-d", "in"])
+            .terminal_sim_stdio(config.clone())
+            .fails();
+        scene
+            .ccmd("tty")
+            .args(&["-s", "-d", "out"])
+            .terminal_sim_stdio(config.clone())
+            .fails();
+        scene
+            .ccmd("tty")
+            .args(&["-s", "-d", "err"])
+            .terminal_sim_stdio(config)
+            .succeeds();
+    }
+
     #[cfg(feature = "stty")]
     #[test]
     fn test_simulation_of_terminal_size_information() {
+        use regex::Regex;
+
         let scene = TestScenario::new("util");
 
         let out = scene
@@ -3999,26 +4083,24 @@ mod tests {
                 stdin: true,
                 stderr: true,
             })
-            .succeeds();
-        std::assert_eq!(
-            String::from_utf8_lossy(out.stdout()),
-            "stdin is atty\r\nterminal size: 10 40\r\nstdout is atty\r\nstderr is atty\r\n"
-        );
-        std::assert_eq!(
-            String::from_utf8_lossy(out.stderr()),
-            "This is an error message.\r\n"
+            .run();
+
+        out.print_outputs();
+
+        out.succeeded();
+        out.stdout_matches(
+            &Regex::new(r"speed [0-9]+ baud; rows 200; columns 40; line = [0-9]+;\r\n").unwrap(),
         );
     }
 
-    #[cfg(unix)]
-    #[cfg(feature = "env")]
+    #[cfg(feature = "cat")]
     #[test]
     fn test_simulation_of_terminal_pty_sends_eot_automatically() {
         let scene = TestScenario::new("util");
 
-        let mut cmd = scene.ccmd("env");
+        let mut cmd = scene.ccmd("cat");
+        cmd.arg("-");
         cmd.timeout(std::time::Duration::from_secs(10));
-        cmd.args(&["cat", "-"]);
         cmd.terminal_simulation(true);
         let child = cmd.run_no_wait();
         let out = child.wait().unwrap(); // cat would block if there is no eot
@@ -4027,16 +4109,15 @@ mod tests {
         std::assert_eq!(String::from_utf8_lossy(out.stdout()), "\r\n");
     }
 
-    #[cfg(unix)]
-    #[cfg(feature = "env")]
+    #[cfg(feature = "cat")]
     #[test]
     fn test_simulation_of_terminal_pty_pipes_into_data_and_sends_eot_automatically() {
         let scene = TestScenario::new("util");
 
         let message = "Hello stdin forwarding!";
 
-        let mut cmd = scene.ccmd("env");
-        cmd.args(&["cat", "-"]);
+        let mut cmd = scene.ccmd("cat");
+        cmd.arg("-");
         cmd.terminal_simulation(true);
         cmd.pipe_in(message);
         let child = cmd.run_no_wait();
@@ -4049,14 +4130,13 @@ mod tests {
         std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
     }
 
-    #[cfg(unix)]
-    #[cfg(feature = "env")]
+    #[cfg(feature = "cat")]
     #[test]
     fn test_simulation_of_terminal_pty_write_in_data_and_sends_eot_automatically() {
         let scene = TestScenario::new("util");
 
-        let mut cmd = scene.ccmd("env");
-        cmd.args(&["cat", "-"]);
+        let mut cmd = scene.ccmd("cat");
+        cmd.arg("-");
         cmd.terminal_simulation(true);
         let mut child = cmd.run_no_wait();
         child.write_in("Hello stdin forwarding via write_in!");

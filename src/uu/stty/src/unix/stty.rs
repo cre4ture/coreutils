@@ -12,6 +12,7 @@ use nix::sys::termios::{
 };
 use nix::{ioctl_read_bad, ioctl_write_ptr_bad};
 use std::ops::ControlFlow;
+use std::os::fd::AsFd;
 use std::os::unix::io::AsRawFd;
 use uucore::error::{UResult, USimpleError};
 
