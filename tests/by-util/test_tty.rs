@@ -5,6 +5,8 @@
 
 use std::fs::File;
 
+use regex::Regex;
+
 use crate::common::util::{TerminalSimulation, TestScenario};
 
 #[cfg(unix)]
@@ -15,8 +17,9 @@ const DEV_NULL: &str = "nul";
 #[test]
 fn test_terminal_simulation() {
     let output = new_ucmd!().terminal_simulation(true).succeeds();
+
     #[cfg(unix)]
-    output.stdout_is("not a tty\n"); // TODO: unix message?
+    output.stdout_matches(&Regex::new(r"/dev/pts/\d+\r\n").unwrap());
     #[cfg(windows)]
     output.stdout_is("windows-terminal\r\n");
 }
@@ -27,8 +30,9 @@ fn test_terminal_simulation_all_stdio() {
         .args(&["-d", "in,out,err"])
         .terminal_simulation(true)
         .succeeds();
+
     #[cfg(unix)]
-    output.stdout_is("not a tty\n"); // TODO: unix message?
+    output.stdout_matches(&Regex::new(r"in: /dev/pts/\d+\r\nout: /dev/pts/\d+\r\nerr: /dev/pts/\d+\r\n").unwrap());
     #[cfg(windows)]
     output.stdout_is("in: windows-terminal\r\nout: windows-terminal\r\nerr: windows-terminal\r\n");
 }
@@ -45,9 +49,11 @@ fn test_terminal_simulation_only_outputs() {
         })
         .fails();
 
+    output.print_outputs();
+
     output.code_is(1);
     #[cfg(unix)]
-    output.stdout_is("not a tty\n"); // TODO: unix message?
+    output.stdout_matches(&Regex::new(r"in: not a tty\r\nout: /dev/pts/\d+\r\nerr: /dev/pts/\d+\r\n").unwrap());
     #[cfg(windows)]
     output.stdout_is("in: not a tty\r\nout: windows-terminal\r\nerr: windows-terminal\r\n");
 }
@@ -64,8 +70,10 @@ fn test_terminal_simulation_only_outputs_required() {
         })
         .succeeds();
 
+    output.print_outputs();
+
     #[cfg(unix)]
-    output.stdout_is("not a tty\n"); // TODO: unix message?
+    output.stdout_matches(&Regex::new(r"/dev/pts/\d+\r\nerr: /dev/pts/\d+\r\n").unwrap());
     #[cfg(windows)]
     output.stdout_is("out: windows-terminal\r\nerr: windows-terminal\r\n");
 }
@@ -84,7 +92,7 @@ fn test_terminal_simulation_only_input() {
 
     output.code_is(1);
     #[cfg(unix)]
-    output.stdout_is("not a tty\n"); // TODO: unix message?
+    output.stdout_matches(&Regex::new(r"in: /dev/pts/\d+\nout: not a tty\nerr: not a tty\n").unwrap());
     #[cfg(windows)]
     output.stdout_is("in: windows-terminal\nout: not a tty\nerr: not a tty\n");
 }
@@ -100,8 +108,10 @@ fn test_terminal_simulation_only_input_required() {
         })
         .succeeds();
 
+    output.print_outputs();
+
     #[cfg(unix)]
-    output.stdout_is("not a tty\n"); // TODO: unix message?
+    output.stdout_matches(&Regex::new(r"/dev/pts/\d+\n").unwrap());
     #[cfg(windows)]
     output.stdout_is("windows-terminal\n");
 }
