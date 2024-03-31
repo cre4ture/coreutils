@@ -118,6 +118,12 @@ impl CmdResult {
         }
     }
 
+    /// Print process output information for debugging purposes.
+    pub fn print_outputs(&self) {
+        println!("command exit status: {:?}", self.exit_status);
+        println!("stdout:\n{}\nstderr:\n{}", self.stdout.escape_ascii(), self.stderr().escape_ascii());
+    }
+
     /// Apply a function to `stdout` as bytes and return a new [`CmdResult`]
     pub fn stdout_apply<'a, F, R>(&'a self, function: F) -> Self
     where
@@ -1849,7 +1855,6 @@ fn read_till_show_cursor(cmd_child: &mut conpty::Process) {
         let b = last.clone().into_iter().collect::<Vec<_>>();
         let c = &b[..];
         if (last.len() == key_len) && last.iter().zip(keyword.iter()).all(|(a, b)| a == b) {
-            println!("done!");
             break;
         }
     }
@@ -3802,6 +3807,9 @@ mod tests {
             .ccmd("tty")
             .args(&["-d", "in", "-d", "out", "-d", "err"])
             .fails();
+
+        out.print_outputs();
+
         assert_eq!(out.exit_status().code().unwrap(), 1);
         assert_eq!(
             String::from_utf8_lossy(out.stdout()),
