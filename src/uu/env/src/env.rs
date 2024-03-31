@@ -187,6 +187,7 @@ pub fn uu_app() -> Command {
                 .help("process and split S into separate arguments; used to pass multiple arguments on shebang lines")
         ).arg(
             Arg::new("argv0")
+                .overrides_with("argv0")
                 .short('a')
                 .long("argv0")
                 .value_name("a")
