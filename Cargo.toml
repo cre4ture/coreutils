@@ -504,8 +504,9 @@ rlimit = "0.10.1"
 rand_pcg = "0.3"
 xattr = { workspace = true }
 
-[target.'cfg(windows)'.dependencies]
-conpty = { path = "../conpty"}
+[target.'cfg(windows)'.dependencies.conpty]
+git = "https://github.com/cre4ture/conpty.git"
+branch = "feature/spawn_with_initial_terminal_size_param"
 
 [build-dependencies]
 phf_codegen = { workspace = true }
