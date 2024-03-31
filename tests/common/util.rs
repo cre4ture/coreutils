@@ -1659,10 +1659,10 @@ impl UCommand {
                 "100", // this sleep will be killed shortly, but we need it to prevent the console to close
             ]);
             let terminal_size = simulated_terminal.size.unwrap_or_default();
-            let mut cmd_child = conpty::Process::spawn_with_size(
-                dummy_cmd,
-                Some((terminal_size.cols as i16, terminal_size.rows as i16)),
-            )
+            let mut cmd_child = conpty::ProcessOptions {
+                console_size: Some((terminal_size.cols as i16, terminal_size.rows as i16)),
+            }
+            .spawn(dummy_cmd)
             .unwrap();
 
             read_till_show_cursor(&mut cmd_child); // read and ignore full windows console header
