@@ -1,3 +1,8 @@
+// This file is part of the uutils coreutils package.
+//
+// For the full copyright and license information, please view the LICENSE
+// file that was distributed with this source code.
+
 use std::{
     io::{self, IsTerminal},
     os::windows::io::AsRawHandle,
@@ -11,12 +16,7 @@ use uucore::{
 use crate::Options;
 
 pub(crate) fn open_file_of_options(f: &str) -> io::Result<OwnedFileDescriptorOrHandle> {
-    OwnedFileDescriptorOrHandle::from(
-        std::fs::OpenOptions::new()
-            .read(true)
-            // .custom_flags(O_NONBLOCK)
-            .open(f)?,
-    )
+    OwnedFileDescriptorOrHandle::from(std::fs::OpenOptions::new().read(true).open(f)?)
 }
 
 pub(crate) fn stty(opts: &Options) -> UResult<()> {
@@ -30,23 +30,6 @@ pub(crate) fn stty(opts: &Options) -> UResult<()> {
     if !opts.file.as_raw().is_terminal() {
         return Err(USimpleError::new(1, "is not a tty"));
     }
-
-    //let zc = COORD { X: 0, Y: 0 };
-    //let mut csbi = CONSOLE_SCREEN_BUFFER_INFO {
-    //    dwSize: zc,
-    //    dwCursorPosition: zc,
-    //    wAttributes: 0,
-    //    srWindow: SMALL_RECT {
-    //        Left: 0,
-    //        Top: 0,
-    //        Right: 0,
-    //        Bottom: 0,
-    //    },
-    //    dwMaximumWindowSize: zc,
-    //};
-    //if unsafe { GetConsoleScreenBufferInfo(opts.file.as_raw().as_raw_handle() as isize, &mut csbi) } == 0 {
-    //    return Err(USimpleError::new(1, "GetConsoleScreenBufferInfo failed!"));
-    //}
 
     let baud = 38400; // just a fake default value
     let (terminal_width, terminal_height) =

@@ -18,7 +18,6 @@ path = "src/tty.rs"
 clap = { workspace = true }
 nix = { workspace = true, features = ["term"] }
 uucore = { workspace = true, features = ["fs"] }
-ipipe = "0.11.7"
 
 [[bin]]
 name = "tty"

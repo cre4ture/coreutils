@@ -32,7 +32,9 @@ fn test_terminal_simulation_all_stdio() {
         .succeeds();
 
     #[cfg(unix)]
-    output.stdout_matches(&Regex::new(r"in: /dev/pts/\d+\r\nout: /dev/pts/\d+\r\nerr: /dev/pts/\d+\r\n").unwrap());
+    output.stdout_matches(
+        &Regex::new(r"in: /dev/pts/\d+\r\nout: /dev/pts/\d+\r\nerr: /dev/pts/\d+\r\n").unwrap(),
+    );
     #[cfg(windows)]
     output.stdout_is("in: windows-terminal\r\nout: windows-terminal\r\nerr: windows-terminal\r\n");
 }
@@ -53,7 +55,9 @@ fn test_terminal_simulation_only_outputs() {
 
     output.code_is(1);
     #[cfg(unix)]
-    output.stdout_matches(&Regex::new(r"in: not a tty\r\nout: /dev/pts/\d+\r\nerr: /dev/pts/\d+\r\n").unwrap());
+    output.stdout_matches(
+        &Regex::new(r"in: not a tty\r\nout: /dev/pts/\d+\r\nerr: /dev/pts/\d+\r\n").unwrap(),
+    );
     #[cfg(windows)]
     output.stdout_is("in: not a tty\r\nout: windows-terminal\r\nerr: windows-terminal\r\n");
 }
@@ -92,7 +96,9 @@ fn test_terminal_simulation_only_input() {
 
     output.code_is(1);
     #[cfg(unix)]
-    output.stdout_matches(&Regex::new(r"in: /dev/pts/\d+\nout: not a tty\nerr: not a tty\n").unwrap());
+    output.stdout_matches(
+        &Regex::new(r"in: /dev/pts/\d+\nout: not a tty\nerr: not a tty\n").unwrap(),
+    );
     #[cfg(windows)]
     output.stdout_is("in: windows-terminal\nout: not a tty\nerr: not a tty\n");
 }

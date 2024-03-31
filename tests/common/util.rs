@@ -4,7 +4,7 @@
 // file that was distributed with this source code.
 
 //spell-checker: ignore (linux) rlimit prlimit coreutil ggroups uchild uncaptured scmd SHLVL canonicalized openpty
-//spell-checker: ignore (linux) winsize xpixel ypixel setrlimit FSIZE HPCON conpty NOBREAK
+//spell-checker: ignore (linux) winsize xpixel ypixel setrlimit FSIZE HPCON conpty NOBREAK Uncategorized
 
 #![allow(dead_code)]
 
