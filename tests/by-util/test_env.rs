@@ -348,7 +348,7 @@ fn test_split_string_into_args_debug_output_whitespace_handling() {
         .args(&["-vS printf x%sx\\n A \t B \x0B\x0C\r\n"])
         .succeeds();
     assert_eq!(out.stdout_str(), "xAx\nxBx\n");
-    assert_eq!(out.stderr_str(), "input args:\narg[0]: 'env'\narg[1]: $'-vS printf x%sx\\\\n A \\t B \\x0B\\x0C\\r\\n'\nexecutable: 'printf'\narg[0]: $'x%sx\\n'\narg[1]: 'A'\narg[2]: 'B'\n");
+    assert_eq!(out.stderr_str(), "input args:\narg[0]: $'-vS printf x%sx\\\\n A \\t B \\x0B\\x0C\\r\\n'\nexecutable: 'printf'\narg[0]: $'x%sx\\n'\narg[1]: 'A'\narg[2]: 'B'\n");
 }
 
 // FixMe: This test fails on MACOS:

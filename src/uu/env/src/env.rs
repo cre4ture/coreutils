@@ -224,7 +224,7 @@ fn check_and_handle_string_args(
     arg: &OsString,
     prefix_to_test: &str,
     all_args: &mut Vec<std::ffi::OsString>,
-    do_debug_print_args: Option<&Vec<OsString>>,
+    do_debug_print_args: Option<&[OsString]>,
 ) -> UResult<bool> {
     let native_arg = NCvt::convert(arg);
     if let Some(remaining_arg) = native_arg.strip_prefix(&*NCvt::convert(prefix_to_test)) {
@@ -263,7 +263,7 @@ impl EnvAppData {
 
     fn process_all_string_arguments(
         &mut self,
-        original_args: &Vec<OsString>,
+        original_args: &[OsString],
     ) -> UResult<Vec<std::ffi::OsString>> {
         let mut all_args: Vec<std::ffi::OsString> = Vec::new();
         for arg in original_args {
@@ -323,7 +323,7 @@ impl EnvAppData {
             .first()
             .ok_or(USimpleError::new(2, "missing executable name parameter!"))?;
 
-        let args = self.process_all_string_arguments(&original_args)?;
+        let args = self.process_all_string_arguments(&original_args[1..])?;
 
         for instance in args.split(|arg| arg == ";") {
             let param_chain = std::iter::once(executable_name).chain(instance.iter());
