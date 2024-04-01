@@ -162,7 +162,7 @@ fn print_terminal_size(termios: &Termios, opts: &Options) -> nix::Result<()> {
         print!("rows {}; columns {}; ", size.rows, size.columns);
     }
 
-    #[cfg(any(unix, target_os = "linux", target_os = "redox"))]
+    #[cfg(all(not(target_os = "freebsd"), any(unix, target_os = "linux", target_os = "redox")))]
     {
         // For some reason the normal nix Termios struct does not expose the line,
         // so we get the underlying libc::termios struct to get that information.

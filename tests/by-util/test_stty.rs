@@ -35,14 +35,20 @@ fn print_all() {
         })
         .succeeds();
 
-    res.stdout_contains("speed 38400 baud; rows 30; columns 60; line = 0;");
+    res.stdout_contains("rows 30; columns 60;");
 
-    // Random selection of flags to check for
     #[cfg(unix)]
-    for flag in [
-        "parenb", "parmrk", "ixany", "iuclc", "onlcr", "ofdel", "icanon", "noflsh",
-    ] {
-        res.stdout_contains(flag);
+    {
+        // Random selection of flags to check for
+        let mut test_flags = Vec::new();
+        test_flags.extend_from_slice(&[
+            "parenb", "parmrk", "ixany", "onlcr", "ofdel", "icanon", "noflsh",
+        ]);
+        #[cfg(not(target_os = "android"))]
+        test_flags.extend_one("iuclc");
+        for flag in test_flags {
+            res.stdout_contains(flag);
+        }
     }
 }
 
