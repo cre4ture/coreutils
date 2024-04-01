@@ -231,39 +231,50 @@ fn debug_print_args(args: &[OsString]) {
     }
 }
 
-fn check_and_handle_string_args(
-    arg: &OsString,
-    prefix_to_test: &str,
-    all_args: &mut Vec<std::ffi::OsString>,
-    do_debug_print_args: Option<&[OsString]>,
-) -> UResult<bool> {
-    let native_arg = NCvt::convert(arg);
-    if let Some(remaining_arg) = native_arg.strip_prefix(&*NCvt::convert(prefix_to_test)) {
-        if let Some(input_args) = do_debug_print_args {
-            debug_print_args(input_args); // do it here, such that its also printed when we get an error/panic during parsing
-        }
-
-        let arg_strings = parse_args_from_str(remaining_arg)?;
-        all_args.extend(
-            arg_strings
-                .into_iter()
-                .map(from_native_int_representation_owned),
-        );
-
-        Ok(true)
-    } else {
-        Ok(false)
-    }
-}
-
-#[derive(Default)]
-struct EnvAppData {
+struct EnvAppData<'a> {
+    original_args: &'a [OsString],
     do_debug_printing: bool,
     do_input_debug_printing: Option<bool>,
     had_string_argument: bool,
 }
 
-impl EnvAppData {
+impl<'a> EnvAppData<'a> {
+    fn new(original_args: &'a [OsString]) -> Self {
+        Self {
+            original_args,
+            do_debug_printing: false,
+            do_input_debug_printing: None,
+            had_string_argument: false,
+        }
+    }
+
+    fn check_and_handle_string_args(
+        &self,
+        arg: &OsString,
+        prefix_to_test: &str,
+        all_args: &mut Vec<OsString>,
+        do_debug_print_args: bool,
+    ) -> UResult<bool> {
+        let native_arg = NCvt::convert(arg);
+        if let Some(remaining_arg) = native_arg.strip_prefix(&*NCvt::convert(prefix_to_test)) {
+            if do_debug_print_args {
+                // do it here, such that its also printed when we get an error/panic during parsing
+                debug_print_args(self.original_args);
+            }
+
+            let arg_strings = parse_args_from_str(remaining_arg)?;
+            all_args.extend(
+                arg_strings
+                    .into_iter()
+                    .map(from_native_int_representation_owned),
+            );
+
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     fn make_error_no_such_file_or_dir(&self, prog: &OsStr) -> Box<dyn UError> {
         uucore::show_error!("{}: No such file or directory", prog.quote());
         if !self.had_string_argument {
@@ -274,28 +285,28 @@ impl EnvAppData {
 
     fn process_all_string_arguments(
         &mut self,
-        original_args: &[OsString],
-    ) -> UResult<Vec<std::ffi::OsString>> {
-        let mut all_args: Vec<std::ffi::OsString> = Vec::new();
-        for arg in original_args {
+        parameter_args: &[OsString],
+    ) -> UResult<Vec<OsString>> {
+        let mut all_args: Vec<OsString> = Vec::new();
+        for arg in parameter_args {
             match arg {
-                b if check_and_handle_string_args(b, "--split-string", &mut all_args, None)? => {
+                b if self.check_and_handle_string_args(
+                    b,
+                    "--split-string",
+                    &mut all_args,
+                    false,
+                )? =>
+                {
                     self.had_string_argument = true;
                 }
-                b if check_and_handle_string_args(b, "-S", &mut all_args, None)? => {
+                b if self.check_and_handle_string_args(b, "-S", &mut all_args, false)? => {
                     self.had_string_argument = true;
                 }
-                b if check_and_handle_string_args(b, "-vS", &mut all_args, None)? => {
+                b if self.check_and_handle_string_args(b, "-vS", &mut all_args, false)? => {
                     self.do_debug_printing = true;
                     self.had_string_argument = true;
                 }
-                b if check_and_handle_string_args(
-                    b,
-                    "-vvS",
-                    &mut all_args,
-                    Some(original_args),
-                )? =>
-                {
+                b if self.check_and_handle_string_args(b, "-vvS", &mut all_args, true)? => {
                     self.do_debug_printing = true;
                     self.do_input_debug_printing = Some(false); // already done
                     self.had_string_argument = true;
@@ -332,23 +343,23 @@ impl EnvAppData {
         Ok(matches)
     }
 
-    fn run_env(&mut self, original_args: impl uucore::Args) -> UResult<()> {
-        let original_args: Vec<OsString> = original_args.collect();
-        let executable_name = original_args
+    fn run_env(mut self) -> UResult<()> {
+        let executable_name = self
+            .original_args
             .first()
             .ok_or(USimpleError::new(2, "missing executable name parameter!"))?;
 
-        let args = self.process_all_string_arguments(&original_args[1..])?;
+        let args = self.process_all_string_arguments(&self.original_args[1..])?;
 
         for instance in args.split(|arg| arg == ";") {
             let param_chain = std::iter::once(executable_name).chain(instance.iter());
-            self.run_env_single(param_chain.cloned().collect(), &original_args)?;
+            self.run_env_single(param_chain.cloned().collect())?;
         }
 
         Ok(())
     }
 
-    fn run_env_single(&mut self, args: Vec<OsString>, original_args: &[OsString]) -> UResult<()> {
+    fn run_env_single(&mut self, args: Vec<OsString>) -> UResult<()> {
         let matches = self.get_arg_matches(&args)?;
         self.do_debug_printing = self.do_debug_printing || (0 != matches.get_count("debug"));
         self.do_input_debug_printing = self
@@ -356,7 +367,7 @@ impl EnvAppData {
             .or(Some(matches.get_count("debug") >= 2));
         if let Some(value) = self.do_input_debug_printing {
             if value {
-                debug_print_args(&original_args);
+                debug_print_args(self.original_args);
                 self.do_input_debug_printing = Some(false);
             }
         }
@@ -614,5 +625,5 @@ fn apply_specified_env_vars(opts: &Options<'_>) {
 
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-    EnvAppData::default().run_env(args)
+    EnvAppData::new(&args.collect::<Vec<_>>()).run_env()
 }
