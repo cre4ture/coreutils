@@ -351,7 +351,7 @@ impl<'a> EnvAppData<'a> {
 
         let args = self.process_all_string_arguments(&self.original_args[1..])?;
 
-        for instance in args.split(|arg| arg == ";") {
+        for instance in args.split(|arg| arg == "&&") {
             let param_chain = std::iter::once(executable_name).chain(instance.iter());
             self.run_env_single(param_chain.cloned().collect())?;
         }

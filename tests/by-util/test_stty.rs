@@ -42,10 +42,8 @@ fn print_all() {
         // Random selection of flags to check for
         let mut test_flags = Vec::new();
         test_flags.extend_from_slice(&[
-            "parenb", "parmrk", "ixany", "onlcr", "ofdel", "icanon", "noflsh",
+            "parenb", "parmrk", "ixany", "onlcr", "ofdel", "icanon", "noflsh", "echo",
         ]);
-        #[cfg(not(target_os = "android"))]
-        test_flags.extend_one("iuclc");
         for flag in test_flags {
             res.stdout_contains(flag);
         }

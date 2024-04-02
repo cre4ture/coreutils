@@ -1658,15 +1658,13 @@ impl UCommand {
             }
 
             let mut dummy_cmd = std::process::Command::new(PathBuf::from(TESTS_BINARY));
+            #[rustfmt::skip]
             dummy_cmd.args([
                 "env",
-                TESTS_BINARY,
-                "echo",
-                "",
-                ";", // this newline is needed to trigger the windows console header generation now
-                TESTS_BINARY,
-                "sleep",
-                "100", // this sleep will be killed shortly, but we need it to prevent the console to close
+                // this newline is needed to trigger the windows console header generation now
+                TESTS_BINARY, "echo", "", "&&",
+                // this sleep will be killed shortly, but we need it to prevent the console to close
+                TESTS_BINARY, "sleep", "100",
             ]);
             let terminal_size = simulated_terminal.size.unwrap_or_default();
             let mut cmd_child = conpty::ProcessOptions {
