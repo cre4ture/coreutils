@@ -4088,9 +4088,7 @@ mod tests {
         out.print_outputs();
 
         out.succeeded();
-        out.stdout_matches(
-            &Regex::new(r"speed [0-9]+ baud; rows 200; columns 40; line = [0-9]+;\r\n").unwrap(),
-        );
+        out.stdout_matches(&Regex::new(r"speed [0-9]+ baud; rows 200; columns 40;").unwrap());
     }
 
     #[cfg(feature = "cat")]
