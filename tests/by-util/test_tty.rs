@@ -5,6 +5,7 @@
 
 use std::fs::File;
 
+#[cfg(unix)]
 use regex::Regex;
 
 use crate::common::util::{TerminalSimulation, TestScenario};
@@ -96,9 +97,8 @@ fn test_terminal_simulation_only_input() {
 
     output.code_is(1);
     #[cfg(unix)]
-    output.stdout_matches(
-        &Regex::new(r"in: /dev/.*\d+\nout: not a tty\nerr: not a tty\n").unwrap(),
-    );
+    output
+        .stdout_matches(&Regex::new(r"in: /dev/.*\d+\nout: not a tty\nerr: not a tty\n").unwrap());
     #[cfg(windows)]
     output.stdout_is("in: windows-terminal\nout: not a tty\nerr: not a tty\n");
 }

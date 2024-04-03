@@ -11,6 +11,7 @@
 #[cfg(unix)]
 use nix::pty::OpenptyResult;
 use pretty_assertions::assert_eq;
+use regex::Regex;
 #[cfg(unix)]
 use rlimit::setrlimit;
 #[cfg(feature = "sleep")]
@@ -3625,8 +3626,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_uchild_when_no_capture_reading_from_infinite_source() {
-        use regex::Regex;
-
         let ts = TestScenario::new("cat");
 
         let expected_stdout = b"\0".repeat(12345);
@@ -3822,8 +3821,6 @@ mod tests {
     #[cfg(feature = "tty")]
     #[test]
     fn test_simulation_of_terminal_true_with_tty() {
-        use regex::Regex;
-
         let scene = TestScenario::new("util");
 
         let out = scene
@@ -4061,8 +4058,6 @@ mod tests {
     #[cfg(feature = "stty")]
     #[test]
     fn test_simulation_of_terminal_size_information() {
-        use regex::Regex;
-
         let scene = TestScenario::new("util");
 
         let out = scene
