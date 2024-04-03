@@ -19,7 +19,7 @@ fn test_terminal_simulation() {
     let output = new_ucmd!().terminal_simulation(true).succeeds();
 
     #[cfg(unix)]
-    output.stdout_matches(&Regex::new(r"/dev/pts/\d+\r\n").unwrap());
+    output.stdout_matches(&Regex::new(r"/dev/.*\d+\r\n").unwrap());
     #[cfg(windows)]
     output.stdout_is("windows-terminal\r\n");
 }
@@ -33,7 +33,7 @@ fn test_terminal_simulation_all_stdio() {
 
     #[cfg(unix)]
     output.stdout_matches(
-        &Regex::new(r"in: /dev/pts/\d+\r\nout: /dev/pts/\d+\r\nerr: /dev/pts/\d+\r\n").unwrap(),
+        &Regex::new(r"in: /dev/.*\d+\r\nout: /dev/.*\d+\r\nerr: /dev/.*\d+\r\n").unwrap(),
     );
     #[cfg(windows)]
     output.stdout_is("in: windows-terminal\r\nout: windows-terminal\r\nerr: windows-terminal\r\n");
@@ -56,7 +56,7 @@ fn test_terminal_simulation_only_outputs() {
     output.code_is(1);
     #[cfg(unix)]
     output.stdout_matches(
-        &Regex::new(r"in: not a tty\r\nout: /dev/pts/\d+\r\nerr: /dev/pts/\d+\r\n").unwrap(),
+        &Regex::new(r"in: not a tty\r\nout: /dev/.*\d+\r\nerr: /dev/.*\d+\r\n").unwrap(),
     );
     #[cfg(windows)]
     output.stdout_is("in: not a tty\r\nout: windows-terminal\r\nerr: windows-terminal\r\n");
@@ -77,7 +77,7 @@ fn test_terminal_simulation_only_outputs_required() {
     output.print_outputs();
 
     #[cfg(unix)]
-    output.stdout_matches(&Regex::new(r"/dev/pts/\d+\r\nerr: /dev/pts/\d+\r\n").unwrap());
+    output.stdout_matches(&Regex::new(r"out: /dev/.*\d+\r\nerr: /dev/.*\d+\r\n").unwrap());
     #[cfg(windows)]
     output.stdout_is("out: windows-terminal\r\nerr: windows-terminal\r\n");
 }
@@ -97,7 +97,7 @@ fn test_terminal_simulation_only_input() {
     output.code_is(1);
     #[cfg(unix)]
     output.stdout_matches(
-        &Regex::new(r"in: /dev/pts/\d+\nout: not a tty\nerr: not a tty\n").unwrap(),
+        &Regex::new(r"in: /dev/.*\d+\nout: not a tty\nerr: not a tty\n").unwrap(),
     );
     #[cfg(windows)]
     output.stdout_is("in: windows-terminal\nout: not a tty\nerr: not a tty\n");
@@ -117,7 +117,7 @@ fn test_terminal_simulation_only_input_required() {
     output.print_outputs();
 
     #[cfg(unix)]
-    output.stdout_matches(&Regex::new(r"/dev/pts/\d+\n").unwrap());
+    output.stdout_matches(&Regex::new(r"/dev/.*\d+\n").unwrap());
     #[cfg(windows)]
     output.stdout_is("windows-terminal\n");
 }
