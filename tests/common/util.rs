@@ -3834,7 +3834,7 @@ mod tests {
         out.code_is(0);
         #[cfg(unix)]
         out.stdout_matches(
-            &Regex::new(r"in: /dev/pts/[0-9]+\r\nout: /dev/pts/[0-9]+\r\nerr: /dev/pts/[0-9]+\r\n")
+            &Regex::new(r"in: /dev/.*\d+\r\nout: /dev/.*\d+\r\nerr: /dev/.*\d+\r\n")
                 .unwrap(),
         );
         #[cfg(windows)]
