@@ -1855,8 +1855,6 @@ fn read_till_show_cursor(cmd_child: &mut conpty::Process) {
             last.pop_front();
         }
         last.push_back(buf[0]);
-        let b = last.clone().into_iter().collect::<Vec<_>>();
-        let c = &b[..];
         if (last.len() == key_len) && last.iter().zip(keyword.iter()).all(|(a, b)| a == b) {
             break;
         }
