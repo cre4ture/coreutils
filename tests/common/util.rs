@@ -3832,8 +3832,7 @@ mod tests {
         out.code_is(0);
         #[cfg(unix)]
         out.stdout_matches(
-            &Regex::new(r"in: /dev/.*\d+\r\nout: /dev/.*\d+\r\nerr: /dev/.*\d+\r\n")
-                .unwrap(),
+            &Regex::new(r"in: /dev/.*\d+\r\nout: /dev/.*\d+\r\nerr: /dev/.*\d+\r\n").unwrap(),
         );
         #[cfg(windows)]
         out.stdout_is("in: windows-terminal\r\nout: windows-terminal\r\nerr: windows-terminal\r\n");
