@@ -2564,14 +2564,10 @@ impl UChild {
     /// Note, this does not have any effect if using the [`UChild::pipe_in`] method.
     pub fn close_stdin(&mut self) -> &mut Self {
         self.raw.stdin.take();
-        println!("dropped stdin");
         if self.stdin_pty.is_some() {
             // a pty can not be closed. We need to send a EOT:
-            println!("sending EOT");
             let _ = self.try_write_in(END_OF_TRANSMISSION_SEQUENCE);
-            println!("dropping stdin_pty ...");
             self.stdin_pty.take();
-            println!("dropping stdin_pty ... done");
         }
         self
     }
