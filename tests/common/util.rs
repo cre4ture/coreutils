@@ -2030,22 +2030,6 @@ impl<'a> UChildAssertion<'a> {
     }
 }
 
-fn find3<T: std::cmp::PartialEq>(haystack: &[T], needle: &[T]) -> Option<usize> {
-    if haystack.len() < needle.len() {
-        return None;
-    }
-    (0..haystack.len() - needle.len() + 1).find(|&i| haystack[i..i + needle.len()] == needle[..])
-}
-
-fn find3_rev<T: std::cmp::PartialEq>(haystack: &[T], needle: &[T]) -> Option<usize> {
-    if haystack.len() < needle.len() {
-        return None;
-    }
-    (0..haystack.len() - needle.len() + 1)
-        .rev()
-        .find(|&i| haystack[i..i + needle.len()] == needle[..])
-}
-
 /// Abstraction for a [`std::process::Child`] to handle the child process.
 pub struct UChild {
     raw: Child,
