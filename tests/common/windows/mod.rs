@@ -128,6 +128,8 @@ impl ConsoleSpawnWrap {
                 panic!("attaching to new console failed!");
             }
 
+            // Disable the echo mode that is on by default on windows.
+            // Otherwise, one would get every input line automatically back as an output.
             Self::disable_echo_mode();
 
             cmd_child.exit(0).unwrap(); // kill the sleep 100

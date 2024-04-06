@@ -2261,6 +2261,7 @@ impl UChild {
                 .unwrap();
         };
 
+        // this drops the console, which is important on windows do un-block the reader tasks.
         self.console_spawn_wrap = None;
 
         if let Some(handle) = self.captured_stdout.reader_thread_handle.take() {
