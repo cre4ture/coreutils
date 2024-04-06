@@ -13,10 +13,11 @@ use nix::pty::OpenptyResult;
 use pretty_assertions::assert_eq;
 use regex::Regex;
 #[cfg(unix)]
-use rlimit::setrlimit;
+use super::unix::{END_OF_TRANSMISSION_SEQUENCE, ConsoleSpawnWrap};
+#[cfg(windows)]
+use super::windows::{END_OF_TRANSMISSION_SEQUENCE, ConsoleSpawnWrap};
 #[cfg(feature = "sleep")]
 use rstest::rstest;
-use uucore::windows_sys::Win32::System::Console::{GetConsoleMode, SetConsoleMode, CONSOLE_MODE, ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT};
 use std::borrow::Cow;
 use std::collections::VecDeque;
 #[cfg(not(windows))]
@@ -32,7 +33,6 @@ use std::os::unix::process::CommandExt;
 use std::os::unix::process::ExitStatusExt;
 #[cfg(windows)]
 use std::os::windows::fs::{symlink_dir, symlink_file};
-use std::os::windows::io::AsRawHandle;
 #[cfg(windows)]
 use std::path::MAIN_SEPARATOR_STR;
 use std::path::{Path, PathBuf};
@@ -45,10 +45,6 @@ use std::{env, hint, mem, thread};
 use tempfile::{Builder, TempDir};
 use uucore::error::UResult;
 use uucore::io::OwnedFileDescriptorOrHandle;
-#[cfg(windows)]
-use uucore::windows_sys::Win32::System::Console::{
-    AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS,
-};
 
 static TESTS_DIR: &str = "tests";
 static FIXTURES_DIR: &str = "fixtures";
@@ -59,10 +55,6 @@ static ALREADY_RUN: &str = " you have already run this UCommand, if you want to 
 static MULTIPLE_STDIN_MEANINGLESS: &str = "Ucommand is designed around a typical use case of: provide args and input stream -> spawn process -> block until completion -> return output streams. For verifying that a particular section of the input stream is what causes a particular behavior, use the Command type directly.";
 
 static NO_STDIN_MEANINGLESS: &str = "Setting this flag has no effect if there is no stdin";
-#[cfg(unix)]
-static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\n', 0x04];
-#[cfg(windows)]
-static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\r', b'\n', 0x1A]; // send ^Z
 
 pub const TESTS_BINARY: &str = env!("CARGO_BIN_EXE_coreutils");
 pub const PATH: &str = env!("PATH");
@@ -1258,9 +1250,6 @@ pub struct TerminalSimulation {
     pub stderr: bool,
 }
 
-#[cfg(windows)]
-static CONSOLE_SPAWNING_MUTEX: std::sync::Mutex<u32> = std::sync::Mutex::new(0);
-
 /// A `UCommand` is a builder wrapping an individual Command that provides several additional features:
 /// 1. it has convenience functions that are more ergonomic to use for piping in stdin, spawning the command
 ///       and asserting on the results.
@@ -1296,8 +1285,6 @@ pub struct UCommand {
     stderr_to_stdout: bool,
     timeout: Option<Duration>,
     terminal_simulation: Option<TerminalSimulation>,
-    #[cfg(windows)]
-    child_console: Option<conpty::Process>,
     tmpd: Option<Rc<TempDir>>, // drop last
 }
 
@@ -1606,7 +1593,8 @@ impl UCommand {
 
     fn setup_stdio(
         &mut self,
-        mut command: Command,
+        csw: &mut ConsoleSpawnWrap,
+        mut command: Command
     ) -> (
         Command,
         ForwardedOutput,
@@ -1651,135 +1639,7 @@ impl UCommand {
                 .stderr(stderr);
         };
 
-        #[cfg(windows)]
-        if let Some(simulated_terminal) = &self.terminal_simulation {
-            // 1. we attach our process to the new console.
-            // 2. we spawn the child inheriting the stdio of the console
-            // 3. we re-attach our process to the console of the parent
-            if simulated_terminal.stdin {
-                command.stdin(Stdio::inherit());
-            }
-            if simulated_terminal.stdout {
-                command.stdout(Stdio::inherit());
-            }
-            if simulated_terminal.stderr {
-                command.stderr(Stdio::inherit());
-            }
-
-            let mut dummy_cmd = std::process::Command::new(PathBuf::from(TESTS_BINARY));
-            #[rustfmt::skip]
-            dummy_cmd.args([
-                "env",
-                // this newline is needed to trigger the windows console header generation now
-                TESTS_BINARY, "echo", "", "&&",
-                // this sleep will be killed shortly, but we need it to prevent the console to close
-                TESTS_BINARY, "sleep", "100",
-            ]);
-            let terminal_size = simulated_terminal.size.unwrap_or_default();
-            let mut cmd_child = conpty::ProcessOptions {
-                console_size: Some((terminal_size.cols as i16, terminal_size.rows as i16)),
-            }
-            .spawn(dummy_cmd)
-            .unwrap();
-
-            read_till_show_cursor(&mut cmd_child); // read and ignore full windows console header
-            captured_stdout
-                .spawn_reader_thread(
-                    Box::new(cmd_child.output().unwrap()),
-                    "win_conpty_reader".into(),
-                )
-                .unwrap();
-
-            let result = unsafe { FreeConsole() };
-            if result == 0 {
-                panic!("detaching from current console failed!");
-            }
-            let mut result = 0;
-            for _i in 0..500 {
-                result = unsafe { AttachConsole(cmd_child.pid()) };
-                if result != 0 {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(1));
-            }
-            if result == 0 {
-                panic!("attaching to new console failed!");
-            }
-
-            let stdin_h = std::io::stdin().as_raw_handle() as isize;
-
-            let mut mode = CONSOLE_MODE::default();
-            let failed = unsafe { GetConsoleMode(stdin_h, &mut mode) == 0 };
-            if failed {
-                panic!("GetConsoleMode failed!");
-            }
-
-            match false {
-                true => mode |= ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT,
-                false => mode &= !ENABLE_ECHO_INPUT,
-            };
-
-            let failed = unsafe {
-                SetConsoleMode(stdin_h, mode) == 0
-            };
-            if failed {
-                panic!("SetConsoleMode failed!");
-            }
-
-            cmd_child.exit(0).unwrap(); // kill the sleep 100
-            cmd_child.wait(Some(500)).unwrap();
-
-            stdin_pty = Some(Box::new(cmd_child.input().unwrap()));
-            self.child_console = Some(cmd_child);
-        }
-
-        #[cfg(unix)]
-        if let Some(simulated_terminal) = &self.terminal_simulation {
-            let terminal_size = simulated_terminal.size.unwrap_or_default();
-            let c_terminal_size = libc::winsize {
-                ws_row: terminal_size.rows,
-                ws_col: terminal_size.cols,
-                ws_xpixel: terminal_size.pixels_x,
-                ws_ypixel: terminal_size.pixels_y,
-            };
-
-            if simulated_terminal.stdin {
-                let OpenptyResult {
-                    slave: pi_slave,
-                    master: pi_master,
-                } = nix::pty::openpty(&c_terminal_size, None).unwrap();
-                stdin_pty = Some(Box::new(File::from(pi_master)));
-                command.stdin(pi_slave);
-            }
-
-            if simulated_terminal.stdout {
-                let OpenptyResult {
-                    slave: po_slave,
-                    master: po_master,
-                } = nix::pty::openpty(&c_terminal_size, None).unwrap();
-                captured_stdout
-                    .spawn_reader_thread(
-                        Box::new(File::from(po_master)),
-                        "stdout_reader".to_string(),
-                    )
-                    .unwrap();
-                command.stdout(po_slave);
-            }
-
-            if simulated_terminal.stderr {
-                let OpenptyResult {
-                    slave: pe_slave,
-                    master: pe_master,
-                } = nix::pty::openpty(&c_terminal_size, None).unwrap();
-                captured_stderr
-                    .spawn_reader_thread(
-                        Box::new(File::from(pe_master)),
-                        "stderr_reader".to_string(),
-                    )
-                    .unwrap();
-                command.stderr(pe_slave);
-            }
-        }
+        csw.setup_stdio_hook(&mut command, &mut captured_stdout, &mut captured_stderr, &mut stdin_pty);
 
         #[cfg(unix)]
         if !self.limits.is_empty() {
@@ -1812,41 +1672,31 @@ impl UCommand {
         let command_with_args_and_env = self.build_args_and_env();
         log_info("run", self.to_string());
 
-        let child_std;
-        let (mut command, captured_stdout, captured_stderr, stdin_pty);
-        {
-            #[cfg(windows)]
-            let _guards = if self.terminal_simulation.is_some() {
-                Some((
-                    CONSOLE_SPAWNING_MUTEX.lock().unwrap(),
-                    std::io::stdout().lock(),
-                    std::io::stderr().lock(),
-                ))
-            } else {
-                None
-            };
+        let mut console_spawn_wrap = ConsoleSpawnWrap::new(self.terminal_simulation.clone());
 
-            (command, captured_stdout, captured_stderr, stdin_pty) =
-                self.setup_stdio(command_with_args_and_env);
-            child_std = command.spawn().unwrap();
+        let mut maybe_uchild: Option<_> = None;
+        let ref_maybe_child = &mut maybe_uchild;
 
-            #[cfg(windows)]
-            {
-                if let Some(_console) = &self.child_console {
-                    // after spawning of the child, we reset the console to the original one
-                    unsafe { FreeConsole() };
-                    unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
-                }
-            }
+        console_spawn_wrap.spawn(|csw: &mut ConsoleSpawnWrap|{
+            let (mut command, captured_stdout, captured_stderr, stdin_pty) =
+            self.setup_stdio(csw, command_with_args_and_env);
+            let child_std = command.spawn().unwrap();
+            *ref_maybe_child = Some(UChild::from(self, child_std, captured_stdout, captured_stderr, stdin_pty));
+        });
+
+        if maybe_uchild.is_none() {
+            panic!("failed to create child process!");
         }
 
-        let mut child = UChild::from(self, child_std, captured_stdout, captured_stderr, stdin_pty);
+        let mut uchild = maybe_uchild.unwrap();
 
         if let Some(input) = self.bytes_into_stdin.take() {
-            child.pipe_in(input);
+            uchild.pipe_in(input);
         }
 
-        child
+        uchild.console_spawn_wrap = Some(console_spawn_wrap);
+
+        uchild
     }
 
     /// Spawns the command, feeds the stdin if any, waits for the result
@@ -1888,25 +1738,6 @@ impl UCommand {
     }
 }
 
-#[cfg(windows)]
-fn read_till_show_cursor(cmd_child: &mut conpty::Process) {
-    let mut reader = cmd_child.output().unwrap();
-    let keyword = "\x1b[?25h".as_bytes();
-    let key_len = keyword.len();
-    let mut last = VecDeque::with_capacity(key_len);
-    loop {
-        let mut buf = [0u8];
-        reader.read_exact(&mut buf).unwrap();
-        while last.len() >= key_len {
-            last.pop_front();
-        }
-        last.push_back(buf[0]);
-        if (last.len() == key_len) && last.iter().zip(keyword.iter()).all(|(a, b)| a == b) {
-            break;
-        }
-    }
-}
-
 impl std::fmt::Display for UCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut comm_string: Vec<String> = vec![self
@@ -1921,12 +1752,12 @@ impl std::fmt::Display for UCommand {
 /// Stored the captured output in a temporary file. The file is deleted as soon as
 /// [`CapturedOutput`] is dropped.
 #[derive(Debug)]
-struct CapturedOutput {
+pub(crate) struct CapturedOutput {
     current_file: File,
     output: tempfile::NamedTempFile, // drop last
 }
 
-struct ForwardedOutput {
+pub(crate) struct ForwardedOutput {
     direct_dest: OwnedFileDescriptorOrHandle,
     captured: Option<CapturedOutput>,
     reader_thread_handle: Option<thread::JoinHandle<()>>,
@@ -1960,7 +1791,7 @@ impl ForwardedOutput {
         }
     }
 
-    fn spawn_reader_thread(&mut self, source: Box<dyn Read + Send>, name: String) -> UResult<()> {
+    pub(crate) fn spawn_reader_thread(&mut self, source: Box<dyn Read + Send>, name: String) -> UResult<()> {
         let destination_fd = if let Some(co) = &self.captured {
             co.try_clone()?
         } else {
@@ -2212,8 +2043,7 @@ pub struct UChild {
     stderr_to_stdout: bool,
     join_handle: Option<JoinHandle<io::Result<()>>>,
     timeout: Option<Duration>,
-    #[cfg(windows)]
-    child_console: Option<conpty::Process>,
+    console_spawn_wrap: Option<ConsoleSpawnWrap>,
     tmpd: Option<Rc<TempDir>>, // drop last
 }
 
@@ -2236,8 +2066,7 @@ impl UChild {
             stderr_to_stdout: ucommand.stderr_to_stdout,
             join_handle: None,
             timeout: ucommand.timeout,
-            #[cfg(windows)]
-            child_console: mem::take(&mut ucommand.child_console),
+            console_spawn_wrap: None,
             tmpd: ucommand.tmpd.clone(),
         }
     }
@@ -2411,6 +2240,8 @@ impl UChild {
             self.raw.wait_with_output()
         };
 
+        println!("wait for child process end ... done");
+
         let mut output = output?;
 
         if let Some(join_handle) = self.join_handle.take() {
@@ -2420,21 +2251,30 @@ impl UChild {
                 .unwrap();
         };
 
-        #[cfg(windows)]
-        if let Some(mut console) = self.child_console {
-            let _ = console.exit(0);
-            console.wait(Some(500)).unwrap();
+        println!("joined stdin (again!?)");
+
+        if let Some(csw) = self.console_spawn_wrap {
+            mem::drop(csw);
+            println!("dropped csw ... done");
         }
+
+        println!("dropped csw");
 
         if let Some(handle) = self.captured_stdout.reader_thread_handle.take() {
             handle.join().unwrap();
         }
+
+        println!("joined stdout");
+
         if let Some(stdout) = self.captured_stdout.captured.as_mut() {
             output.stdout = stdout.output_bytes();
         }
         if let Some(handle) = self.captured_stderr.reader_thread_handle.take() {
             handle.join().unwrap();
         }
+
+        println!("joined stderr");
+
         if let Some(stderr) = self.captured_stderr.captured.as_mut() {
             output.stderr = stderr.output_bytes();
         }
@@ -2742,17 +2582,14 @@ impl UChild {
     /// Note, this does not have any effect if using the [`UChild::pipe_in`] method.
     pub fn close_stdin(&mut self) -> &mut Self {
         self.raw.stdin.take();
+        println!("dropped stdin");
         if self.stdin_pty.is_some() {
             // a pty can not be closed. We need to send a EOT:
             println!("sending EOT");
             let _ = self.try_write_in(END_OF_TRANSMISSION_SEQUENCE);
-            println!("dropping stdin_pty");
+            println!("dropping stdin_pty ...");
             self.stdin_pty.take();
-        }
-        #[cfg(windows)]
-        if let Some(conpty_child) = &mut self.child_console {
-            // println!("closing conpty input");
-            // conpty_child.close_input();
+            println!("dropping stdin_pty ... done");
         }
         self
     }

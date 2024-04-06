@@ -5,4 +5,8 @@
 #[macro_use]
 pub mod macros;
 pub mod random;
+#[cfg(windows)]
+pub mod windows;
+#[cfg(unix)]
+pub mod unix;
 pub mod util;
