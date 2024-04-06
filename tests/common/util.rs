@@ -9,13 +9,13 @@
 #![allow(dead_code)]
 
 #[cfg(unix)]
+use super::unix::{ConsoleSpawnWrap, END_OF_TRANSMISSION_SEQUENCE};
+#[cfg(windows)]
+use super::windows::{ConsoleSpawnWrap, END_OF_TRANSMISSION_SEQUENCE};
+#[cfg(unix)]
 use nix::pty::OpenptyResult;
 use pretty_assertions::assert_eq;
 use regex::Regex;
-#[cfg(unix)]
-use super::unix::{END_OF_TRANSMISSION_SEQUENCE, ConsoleSpawnWrap};
-#[cfg(windows)]
-use super::windows::{END_OF_TRANSMISSION_SEQUENCE, ConsoleSpawnWrap};
 #[cfg(feature = "sleep")]
 use rstest::rstest;
 use std::borrow::Cow;
@@ -1594,7 +1594,7 @@ impl UCommand {
     fn setup_stdio(
         &mut self,
         csw: &mut ConsoleSpawnWrap,
-        mut command: Command
+        mut command: Command,
     ) -> (
         Command,
         ForwardedOutput,
@@ -1639,7 +1639,12 @@ impl UCommand {
                 .stderr(stderr);
         };
 
-        csw.setup_stdio_hook(&mut command, &mut captured_stdout, &mut captured_stderr, &mut stdin_pty);
+        csw.setup_stdio_hook(
+            &mut command,
+            &mut captured_stdout,
+            &mut captured_stderr,
+            &mut stdin_pty,
+        );
 
         #[cfg(unix)]
         if !self.limits.is_empty() {
@@ -1677,11 +1682,17 @@ impl UCommand {
         let mut maybe_uchild: Option<_> = None;
         let ref_maybe_child = &mut maybe_uchild;
 
-        console_spawn_wrap.spawn(|csw: &mut ConsoleSpawnWrap|{
+        console_spawn_wrap.spawn(|csw: &mut ConsoleSpawnWrap| {
             let (mut command, captured_stdout, captured_stderr, stdin_pty) =
-            self.setup_stdio(csw, command_with_args_and_env);
+                self.setup_stdio(csw, command_with_args_and_env);
             let child_std = command.spawn().unwrap();
-            *ref_maybe_child = Some(UChild::from(self, child_std, captured_stdout, captured_stderr, stdin_pty));
+            *ref_maybe_child = Some(UChild::from(
+                self,
+                child_std,
+                captured_stdout,
+                captured_stderr,
+                stdin_pty,
+            ));
         });
 
         if maybe_uchild.is_none() {
@@ -1791,7 +1802,11 @@ impl ForwardedOutput {
         }
     }
 
-    pub(crate) fn spawn_reader_thread(&mut self, source: Box<dyn Read + Send>, name: String) -> UResult<()> {
+    pub(crate) fn spawn_reader_thread(
+        &mut self,
+        source: Box<dyn Read + Send>,
+        name: String,
+    ) -> UResult<()> {
         let destination_fd = if let Some(co) = &self.captured {
             co.try_clone()?
         } else {

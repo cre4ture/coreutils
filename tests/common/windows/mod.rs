@@ -1,3 +1,8 @@
+// This file is part of the uutils coreutils package.
+//
+// For the full copyright and license information, please view the LICENSE
+// file that was distributed with this source code.
+
 //spell-checker: ignore conpty
 
 use std::collections::VecDeque;
@@ -7,12 +12,14 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
-use uucore::windows_sys::Win32::System::Console::{GetConsoleMode, SetConsoleMode, CONSOLE_MODE, ENABLE_ECHO_INPUT};
 use uucore::windows_sys::Win32::System::Console::{
     AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS,
 };
+use uucore::windows_sys::Win32::System::Console::{
+    GetConsoleMode, SetConsoleMode, CONSOLE_MODE, ENABLE_ECHO_INPUT,
+};
 
-use super::util::{TerminalSimulation, TESTS_BINARY, ForwardedOutput};
+use super::util::{ForwardedOutput, TerminalSimulation, TESTS_BINARY};
 
 pub(crate) static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\r', b'\n', 0x1A]; // send ^Z
 
@@ -26,12 +33,13 @@ static CONSOLE_SPAWNING_MUTEX: std::sync::Mutex<u32> = std::sync::Mutex::new(0);
 
 impl ConsoleSpawnWrap {
     pub fn new(terminal_simulation: Option<TerminalSimulation>) -> Self {
-        Self { terminal_simulation,
-              child_console: None,
+        Self {
+            terminal_simulation,
+            child_console: None,
         }
     }
 
-    pub(crate) fn spawn<T: FnOnce(&mut ConsoleSpawnWrap) -> ()>(&mut self, spawn_function: T) {
+    pub(crate) fn spawn<T: FnOnce(&mut ConsoleSpawnWrap)>(&mut self, spawn_function: T) {
         let _guards = if self.terminal_simulation.is_some() {
             Some((
                 CONSOLE_SPAWNING_MUTEX.lock().unwrap(),
@@ -47,11 +55,13 @@ impl ConsoleSpawnWrap {
         self.post_spawn();
     }
 
-    pub(crate) fn setup_stdio_hook(&mut self,
+    pub(crate) fn setup_stdio_hook(
+        &mut self,
         command: &mut std::process::Command,
         captured_stdout: &mut ForwardedOutput,
         _captured_stderr: &mut ForwardedOutput,
-        stdin_pty: &mut Option<Box<dyn Write + Send>>) {
+        stdin_pty: &mut Option<Box<dyn Write + Send>>,
+    ) {
         if let Some(simulated_terminal) = &self.terminal_simulation {
             // 1. we attach our process to the new console.
             // 2. we spawn the child inheriting the stdio of the console
@@ -127,9 +137,7 @@ impl ConsoleSpawnWrap {
 
         mode &= !ENABLE_ECHO_INPUT;
 
-        let failed = unsafe {
-            SetConsoleMode(stdin_h, mode) == 0
-        };
+        let failed = unsafe { SetConsoleMode(stdin_h, mode) == 0 };
         if failed {
             panic!("SetConsoleMode failed!");
         }
