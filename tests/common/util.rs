@@ -1253,6 +1253,9 @@ pub struct TerminalSimulation {
     pub stderr: bool,
 }
 
+#[cfg(windows)]
+static CONSOLE_SPAWNING_MUTEX: std::sync::Mutex<u32> = std::sync::Mutex::new(0);
+
 /// A `UCommand` is a builder wrapping an individual Command that provides several additional features:
 /// 1. it has convenience functions that are more ergonomic to use for piping in stdin, spawning the command
 ///       and asserting on the results.
@@ -1781,20 +1784,38 @@ impl UCommand {
         assert!(!self.has_run, "{}", ALREADY_RUN);
         self.has_run = true;
 
-        let command = self.build_args_and_env();
+        let command_with_args_and_env = self.build_args_and_env();
         log_info("run", self.to_string());
 
-        let (mut command, captured_stdout, captured_stderr, stdin_pty) = self.setup_stdio(command);
-        let child = command.spawn().unwrap();
+        let child_std;
+        let (mut command, captured_stdout, captured_stderr, stdin_pty);
+        {
+            #[cfg(windows)]
+            let _guards = if self.terminal_simulation.is_some() {
+                Some((
+                    CONSOLE_SPAWNING_MUTEX.lock().unwrap(),
+                    std::io::stdout().lock(),
+                    std::io::stderr().lock(),
+                ))
+            } else {
+                None
+            };
 
-        #[cfg(windows)]
-        if let Some(_console) = &self.child_console {
-            // after spawning of the child, we reset the console to the original one
-            unsafe { FreeConsole() };
-            unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+            (command, captured_stdout, captured_stderr, stdin_pty) =
+                self.setup_stdio(command_with_args_and_env);
+            child_std = command.spawn().unwrap();
+
+            #[cfg(windows)]
+            {
+                if let Some(_console) = &self.child_console {
+                    // after spawning of the child, we reset the console to the original one
+                    unsafe { FreeConsole() };
+                    unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+                }
+            }
         }
 
-        let mut child = UChild::from(self, child, captured_stdout, captured_stderr, stdin_pty);
+        let mut child = UChild::from(self, child_std, captured_stdout, captured_stderr, stdin_pty);
 
         if let Some(input) = self.bytes_into_stdin.take() {
             child.pipe_in(input);

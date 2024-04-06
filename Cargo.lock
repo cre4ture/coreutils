@@ -327,7 +327,7 @@ checksum = "120133d4db2ec47efe2e26502ee984747630c67f51974fca0b6c1340cf2368d3"
 [[package]]
 name = "conpty"
 version = "0.5.1"
-source = "git+https://github.com/cre4ture/conpty.git?branch=feature/spawn_with_initial_terminal_size_param#e1792a2f5d34f637b367b1f9ea88127d719b6287"
+source = "git+https://github.com/cre4ture/conpty.git?branch=feature/spawn_with_initial_terminal_size_param#74b01581f7ffe306dc1f447dc76af0e53874337a"
 dependencies = [
  "windows",
 ]
