@@ -16,6 +16,7 @@ use regex::Regex;
 use rlimit::setrlimit;
 #[cfg(feature = "sleep")]
 use rstest::rstest;
+use uucore::windows_sys::Win32::System::Console::{GetConsoleMode, SetConsoleMode, CONSOLE_MODE, ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT};
 use std::borrow::Cow;
 use std::collections::VecDeque;
 #[cfg(not(windows))]
@@ -31,6 +32,7 @@ use std::os::unix::process::CommandExt;
 use std::os::unix::process::ExitStatusExt;
 #[cfg(windows)]
 use std::os::windows::fs::{symlink_dir, symlink_file};
+use std::os::windows::io::AsRawHandle;
 #[cfg(windows)]
 use std::path::MAIN_SEPARATOR_STR;
 use std::path::{Path, PathBuf};
@@ -1704,6 +1706,26 @@ impl UCommand {
                 panic!("attaching to new console failed!");
             }
 
+            let stdin_h = std::io::stdin().as_raw_handle() as isize;
+
+            let mut mode = CONSOLE_MODE::default();
+            let failed = unsafe { GetConsoleMode(stdin_h, &mut mode) == 0 };
+            if failed {
+                panic!("GetConsoleMode failed!");
+            }
+
+            match false {
+                true => mode |= ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT,
+                false => mode &= !ENABLE_ECHO_INPUT,
+            };
+
+            let failed = unsafe {
+                SetConsoleMode(stdin_h, mode) == 0
+            };
+            if failed {
+                panic!("SetConsoleMode failed!");
+            }
+
             cmd_child.exit(0).unwrap(); // kill the sleep 100
             cmd_child.wait(Some(500)).unwrap();
 
@@ -2354,8 +2376,11 @@ impl UChild {
     pub fn wait_with_output(mut self) -> io::Result<Output> {
         // some apps do not stop execution until their stdin gets closed.
         // to prevent a endless waiting here, we close the stdin.
+        println!("joining pipe_in thread ...");
         self.join(); // ensure that all pending async input is piped in
+        println!("closing stdin ...");
         self.close_stdin();
+        println!("closing stdin ... done");
 
         let output = if let Some(timeout) = self.timeout {
             let child = self.raw;
@@ -2719,8 +2744,15 @@ impl UChild {
         self.raw.stdin.take();
         if self.stdin_pty.is_some() {
             // a pty can not be closed. We need to send a EOT:
+            println!("sending EOT");
             let _ = self.try_write_in(END_OF_TRANSMISSION_SEQUENCE);
+            println!("dropping stdin_pty");
             self.stdin_pty.take();
+        }
+        #[cfg(windows)]
+        if let Some(conpty_child) = &mut self.child_console {
+            // println!("closing conpty input");
+            // conpty_child.close_input();
         }
         self
     }
