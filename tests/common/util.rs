@@ -57,7 +57,10 @@ static ALREADY_RUN: &str = " you have already run this UCommand, if you want to 
 static MULTIPLE_STDIN_MEANINGLESS: &str = "Ucommand is designed around a typical use case of: provide args and input stream -> spawn process -> block until completion -> return output streams. For verifying that a particular section of the input stream is what causes a particular behavior, use the Command type directly.";
 
 static NO_STDIN_MEANINGLESS: &str = "Setting this flag has no effect if there is no stdin";
+#[cfg(unix)]
 static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\n', 0x04];
+#[cfg(windows)]
+static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\r', b'\n', 0x1A]; // send ^Z
 
 pub const TESTS_BINARY: &str = env!("CARGO_BIN_EXE_coreutils");
 pub const PATH: &str = env!("PATH");
