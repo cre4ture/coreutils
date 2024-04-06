@@ -12,11 +12,10 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
-use uucore::windows_sys::Win32::System::Console::{
-    AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS,
-};
-use uucore::windows_sys::Win32::System::Console::{
-    GetConsoleMode, SetConsoleMode, CONSOLE_MODE, ENABLE_ECHO_INPUT,
+use windows::Win32::Foundation::HANDLE;
+use windows::Win32::System::Console::{
+    AttachConsole, FreeConsole, GetConsoleMode, SetConsoleMode, ATTACH_PARENT_PROCESS,
+    CONSOLE_MODE, ENABLE_ECHO_INPUT,
 };
 
 use super::util::{ForwardedOutput, TerminalSimulation, TESTS_BINARY};
@@ -112,20 +111,18 @@ impl ConsoleSpawnWrap {
                 )
                 .unwrap();
 
-            let result = unsafe { FreeConsole() };
-            if result == 0 {
-                panic!("detaching from current console failed!");
-            }
-            let mut result = 0;
+            unsafe { FreeConsole() }.unwrap();
+
+            let mut result = Err(windows::core::Error::empty());
             for _i in 0..500 {
                 result = unsafe { AttachConsole(cmd_child.pid()) };
-                if result != 0 {
+                if result.is_ok() {
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(1));
             }
-            if result == 0 {
-                panic!("attaching to new console failed!");
+            if let Err(e) = result {
+                panic!("attaching to new console failed! {:?}", e);
             }
 
             // Disable the echo mode that is on by default on windows.
@@ -143,26 +140,20 @@ impl ConsoleSpawnWrap {
     fn post_spawn(&mut self) {
         if let Some(_console) = &self.child_console {
             // after spawning of the child, we reset the console to the original one
-            unsafe { FreeConsole() };
-            unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+            unsafe { FreeConsole() }.unwrap();
+            unsafe { AttachConsole(ATTACH_PARENT_PROCESS) }.unwrap();
         }
     }
 
     fn disable_echo_mode() {
-        let stdin_h = std::io::stdin().as_raw_handle() as isize;
+        let stdin_h = HANDLE(std::io::stdin().as_raw_handle() as isize);
 
         let mut mode = CONSOLE_MODE::default();
-        let failed = unsafe { GetConsoleMode(stdin_h, &mut mode) == 0 };
-        if failed {
-            panic!("GetConsoleMode failed!");
-        }
+        unsafe { GetConsoleMode(stdin_h, &mut mode) }.unwrap();
 
         mode &= !ENABLE_ECHO_INPUT;
 
-        let failed = unsafe { SetConsoleMode(stdin_h, mode) == 0 };
-        if failed {
-            panic!("SetConsoleMode failed!");
-        }
+        unsafe { SetConsoleMode(stdin_h, mode) }.unwrap();
     }
 }
 
