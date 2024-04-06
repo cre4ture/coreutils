@@ -178,6 +178,9 @@ impl Drop for ConsoleSpawnWrap {
 
 fn read_till_show_cursor(cmd_child: &mut conpty::Process) {
     let mut reader = cmd_child.output().unwrap();
+    // this keyword/sequence is the ANSI escape sequence that is printed
+    // as last part of the header.
+    // It make the cursor visible again, after it was hidden in the beginning.
     let keyword = "\x1b[?25h".as_bytes();
     let key_len = keyword.len();
     let mut last = VecDeque::with_capacity(key_len);
