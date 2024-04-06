@@ -12,10 +12,10 @@
 use super::unix::{ConsoleSpawnWrap, END_OF_TRANSMISSION_SEQUENCE};
 #[cfg(windows)]
 use super::windows::{ConsoleSpawnWrap, END_OF_TRANSMISSION_SEQUENCE};
-#[cfg(unix)]
-use nix::pty::OpenptyResult;
 use pretty_assertions::assert_eq;
 use regex::Regex;
+#[cfg(unix)]
+use rlimit::setrlimit;
 #[cfg(feature = "sleep")]
 use rstest::rstest;
 use std::borrow::Cow;
@@ -2220,11 +2220,8 @@ impl UChild {
     pub fn wait_with_output(mut self) -> io::Result<Output> {
         // some apps do not stop execution until their stdin gets closed.
         // to prevent a endless waiting here, we close the stdin.
-        println!("joining pipe_in thread ...");
         self.join(); // ensure that all pending async input is piped in
-        println!("closing stdin ...");
         self.close_stdin();
-        println!("closing stdin ... done");
 
         let output = if let Some(timeout) = self.timeout {
             let child = self.raw;
@@ -2255,8 +2252,6 @@ impl UChild {
             self.raw.wait_with_output()
         };
 
-        println!("wait for child process end ... done");
-
         let mut output = output?;
 
         if let Some(join_handle) = self.join_handle.take() {
@@ -2266,30 +2261,17 @@ impl UChild {
                 .unwrap();
         };
 
-        println!("joined stdin (again!?)");
-
-        if let Some(csw) = self.console_spawn_wrap {
-            mem::drop(csw);
-            println!("dropped csw ... done");
-        }
-
-        println!("dropped csw");
+        self.console_spawn_wrap = None;
 
         if let Some(handle) = self.captured_stdout.reader_thread_handle.take() {
             handle.join().unwrap();
         }
-
-        println!("joined stdout");
-
         if let Some(stdout) = self.captured_stdout.captured.as_mut() {
             output.stdout = stdout.output_bytes();
         }
         if let Some(handle) = self.captured_stderr.reader_thread_handle.take() {
             handle.join().unwrap();
         }
-
-        println!("joined stderr");
-
         if let Some(stderr) = self.captured_stderr.captured.as_mut() {
             output.stderr = stderr.output_bytes();
         }

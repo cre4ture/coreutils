@@ -3,6 +3,14 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
+//spell-checker: ignore xpixel ypixel Openpty
+
+use std::{fs::File, io::Write};
+
+use nix::pty::OpenptyResult;
+
+use super::util::{ForwardedOutput, TerminalSimulation};
+
 pub(crate) static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\n', 0x04];
 
 #[derive(Debug)]
@@ -11,7 +19,23 @@ pub(crate) struct ConsoleSpawnWrap {
 }
 
 impl ConsoleSpawnWrap {
-    fn setup_stdio_hook(&mut self) {
+    pub(crate) fn new(terminal_simulation: Option<TerminalSimulation>) -> Self {
+        Self {
+            terminal_simulation,
+        }
+    }
+
+    pub(crate) fn spawn<T: FnOnce(&mut ConsoleSpawnWrap)>(&mut self, spawn_function: T) {
+        spawn_function(self);
+    }
+
+    pub(crate) fn setup_stdio_hook(
+        &mut self,
+        command: &mut std::process::Command,
+        captured_stdout: &mut ForwardedOutput,
+        captured_stderr: &mut ForwardedOutput,
+        stdin_pty: &mut Option<Box<dyn Write + Send>>,
+    ) {
         if let Some(simulated_terminal) = &self.terminal_simulation {
             let terminal_size = simulated_terminal.size.unwrap_or_default();
             let c_terminal_size = libc::winsize {
@@ -26,7 +50,7 @@ impl ConsoleSpawnWrap {
                     slave: pi_slave,
                     master: pi_master,
                 } = nix::pty::openpty(&c_terminal_size, None).unwrap();
-                stdin_pty = Some(Box::new(File::from(pi_master)));
+                *stdin_pty = Some(Box::new(File::from(pi_master)));
                 command.stdin(pi_slave);
             }
 

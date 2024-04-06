@@ -32,7 +32,7 @@ pub(crate) struct ConsoleSpawnWrap {
 static CONSOLE_SPAWNING_MUTEX: std::sync::Mutex<u32> = std::sync::Mutex::new(0);
 
 impl ConsoleSpawnWrap {
-    pub fn new(terminal_simulation: Option<TerminalSimulation>) -> Self {
+    pub(crate) fn new(terminal_simulation: Option<TerminalSimulation>) -> Self {
         Self {
             terminal_simulation,
             child_console: None,
@@ -40,9 +40,17 @@ impl ConsoleSpawnWrap {
     }
 
     pub(crate) fn spawn<T: FnOnce(&mut ConsoleSpawnWrap)>(&mut self, spawn_function: T) {
+        // To be able to properly spawn the child process inside of the new console,
+        // We need to attach our own process temporarily to the new console.
+        // This is due to the lack of the std::process interface accepting windows startup information parameters.
+        // In this critical phase where our own process is attached to the new console,
+        // we can't allow other threads to spawn own consoles or read/write something from/to stdio.
+        // This can happen e.g. during execution of multiple test cases in parallel.
+        // Therefor this list of guards here:
         let _guards = if self.terminal_simulation.is_some() {
             Some((
                 CONSOLE_SPAWNING_MUTEX.lock().unwrap(),
+                std::io::stdin().lock(),
                 std::io::stdout().lock(),
                 std::io::stderr().lock(),
             ))
@@ -63,9 +71,11 @@ impl ConsoleSpawnWrap {
         stdin_pty: &mut Option<Box<dyn Write + Send>>,
     ) {
         if let Some(simulated_terminal) = &self.terminal_simulation {
+            // 0. we spawn a dummy (sleep) process inside a new console
             // 1. we attach our process to the new console.
-            // 2. we spawn the child inheriting the stdio of the console
-            // 3. we re-attach our process to the console of the parent
+            // 2. we kill the dummy process
+            // 3. we spawn the child inheriting the stdio of the console
+            // 4. we re-attach our process to the console of the parent
             if simulated_terminal.stdin {
                 command.stdin(Stdio::inherit());
             }
@@ -79,6 +89,7 @@ impl ConsoleSpawnWrap {
             let mut dummy_cmd = std::process::Command::new(PathBuf::from(TESTS_BINARY));
             #[rustfmt::skip]
             dummy_cmd.args([
+                // using "env" with extended functionality as a tool for very basic scripting ("&&")
                 "env",
                 // this newline is needed to trigger the windows console header generation now
                 TESTS_BINARY, "echo", "", "&&",
@@ -92,7 +103,8 @@ impl ConsoleSpawnWrap {
             .spawn(dummy_cmd)
             .unwrap();
 
-            read_till_show_cursor(&mut cmd_child); // read and ignore full windows console header
+            // read and ignore full windows console header (ANSI escape sequences).
+            read_till_show_cursor(&mut cmd_child);
             captured_stdout
                 .spawn_reader_thread(
                     Box::new(cmd_child.output().unwrap()),
@@ -126,6 +138,14 @@ impl ConsoleSpawnWrap {
         }
     }
 
+    fn post_spawn(&mut self) {
+        if let Some(_console) = &self.child_console {
+            // after spawning of the child, we reset the console to the original one
+            unsafe { FreeConsole() };
+            unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+        }
+    }
+
     fn disable_echo_mode() {
         let stdin_h = std::io::stdin().as_raw_handle() as isize;
 
@@ -142,26 +162,15 @@ impl ConsoleSpawnWrap {
             panic!("SetConsoleMode failed!");
         }
     }
-
-    fn post_spawn(&mut self) {
-        if let Some(_console) = &self.child_console {
-            // after spawning of the child, we reset the console to the original one
-            unsafe { FreeConsole() };
-            unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
-        }
-    }
 }
 
 impl Drop for ConsoleSpawnWrap {
     fn drop(&mut self) {
-        println!("dropping ConsoleSpawnWrap ...");
         if let Some(console) = &mut self.child_console {
-            println!("dropping ConsoleSpawnWrap.console ...");
             let _ = console.exit(0);
             console.wait(Some(500)).unwrap();
         }
         self.child_console = None;
-        println!("dropping ConsoleSpawnWrap ... done!");
     }
 }
 
