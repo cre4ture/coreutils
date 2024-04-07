@@ -32,10 +32,11 @@ fn set_echo_mode(on: bool) {
     let mut mode = CONSOLE_MODE::default();
     unsafe { GetConsoleMode(stdin_h, &mut mode) }.unwrap();
 
-    match on {
-        true => mode |= ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT,
-        false => mode &= !ENABLE_ECHO_INPUT,
-    };
+    if on {
+        mode |= ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT;
+    } else {
+        mode &= !ENABLE_ECHO_INPUT;
+    }
 
     unsafe { SetConsoleMode(stdin_h, mode) }.unwrap();
 }
@@ -47,8 +48,7 @@ fn get_echo_mode() -> bool {
     let mut mode = CONSOLE_MODE::default();
     unsafe { GetConsoleMode(stdin_h, &mut mode) }.unwrap();
 
-    let on = (mode & ENABLE_ECHO_INPUT).0 != 0;
-    on
+    (mode & ENABLE_ECHO_INPUT).0 != 0
 }
 
 fn apply_setting(setting: &str) -> UResult<()> {
