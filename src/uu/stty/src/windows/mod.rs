@@ -26,6 +26,7 @@ pub(crate) fn open_file_of_options(f: &str) -> io::Result<OwnedFileDescriptorOrH
 }
 
 fn set_echo_mode(on: bool) {
+    // setting the echo mode works only on stdin.
     let stdin_h = HANDLE(std::io::stdin().as_raw_handle() as isize);
 
     let mut mode = CONSOLE_MODE::default();
