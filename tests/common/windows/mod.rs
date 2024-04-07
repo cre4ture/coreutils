@@ -131,7 +131,9 @@ impl ConsoleSpawnWrap {
     fn reattach_to_original_console_and_stdio(&mut self) {
         if let Some(_console) = &self.child_console {
             unsafe { FreeConsole() }.unwrap();
-            unsafe { AttachConsole(ATTACH_PARENT_PROCESS) }.unwrap();
+            // this fails during debugging sessions. apparently there is no console
+            // attached to the parent process. ignore it.
+            let _ = unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
 
             if let Some(h) = self.original_stdin {
                 unsafe { SetStdHandle(STD_INPUT_HANDLE, h) }.unwrap();
