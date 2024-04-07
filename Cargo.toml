@@ -343,7 +343,7 @@ windows = { version = "0.54.0", features = [
   "Win32_System_WindowsProgramming",
   "Win32_System_IO",
   "Win32_Storage_FileSystem",
-]}
+] }
 xattr = "1.3.1"
 zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
 
