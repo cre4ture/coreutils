@@ -70,6 +70,14 @@ impl ConsoleSpawnWrap {
         stdin_pty: &mut Option<Box<dyn Write + Send>>,
     ) {
         if let Some(simulated_terminal) = &self.terminal_simulation {
+
+            let p_id = std::process::id();
+            let id = std::thread::current().id();
+            let stack_ptr: *const std::thread::ThreadId = &id;
+            let mut f = std::fs::OpenOptions::new().create(true).append(true)
+                .open(format!("{}_p{}_{:?}.txt", r"D:\dev\coreutils\test_output", p_id, id)).unwrap();
+            writeln!(f, "created file, start spawning terminal. PID: {}, ThreadId: {:?}, ptr: {:?}", p_id, id, stack_ptr);
+
             // 0. we spawn a dummy (sleep) process inside a new console
             // 1. we attach our process to the new console.
             // 2. we kill the dummy process
@@ -90,9 +98,16 @@ impl ConsoleSpawnWrap {
             dummy_cmd.args([
                 // using "env" with extended functionality as a tool for very basic scripting ("&&")
                 "env",
+                // Disable the echo mode that is on by default on windows.
+                // Otherwise, one would get every input line automatically back as an output.
+                TESTS_BINARY, "stty", "--", "-echo", "&&",
+                TESTS_BINARY, "touch", "D:/dev/coreutils/i_was_there_0.txt", "&&",
                 // this newline is needed to trigger the windows console header generation now
-                TESTS_BINARY, "echo", "", "&&",
+                TESTS_BINARY, "echo", "hello world", "&&",
+                TESTS_BINARY, "echo", "data !!!!!!!!!!!!!!!!!!!!!!!!!!!", "&&",
+                TESTS_BINARY, "touch", "D:/dev/coreutils/i_was_there.txt", "&&",
                 // this sleep will be killed shortly, but we need it to prevent the console to close
+                // until we attached our own process
                 TESTS_BINARY, "sleep", "100",
             ]);
             let terminal_size = simulated_terminal.size.unwrap_or_default();
@@ -102,8 +117,13 @@ impl ConsoleSpawnWrap {
             .spawn(dummy_cmd)
             .unwrap();
 
+            writeln!(f, "terminal spawned!");
+
             // read and ignore full windows console header (ANSI escape sequences).
-            read_till_show_cursor(&mut cmd_child);
+            read_till_show_cursor(&mut cmd_child, &mut f);
+
+            writeln!(f, "ANSI header read");
+
             captured_stdout
                 .spawn_reader_thread(
                     Box::new(cmd_child.output().unwrap()),
@@ -111,7 +131,11 @@ impl ConsoleSpawnWrap {
                 )
                 .unwrap();
 
+            writeln!(f, "reader task spawned");
+
             unsafe { FreeConsole() }.unwrap();
+
+            writeln!(f, "after FreeConsole()");
 
             let mut result = Err(windows::core::Error::empty());
             for _i in 0..500 {
@@ -125,12 +149,12 @@ impl ConsoleSpawnWrap {
                 panic!("attaching to new console failed! {:?}", e);
             }
 
-            // Disable the echo mode that is on by default on windows.
-            // Otherwise, one would get every input line automatically back as an output.
-            Self::disable_echo_mode();
+            writeln!(f, "after AttachConsole()");
 
             cmd_child.exit(0).unwrap(); // kill the sleep 100
             cmd_child.wait(Some(500)).unwrap();
+
+            writeln!(f, "after killing dummy process()");
 
             *stdin_pty = Some(Box::new(cmd_child.input().unwrap()));
             self.child_console = Some(cmd_child);
@@ -144,17 +168,6 @@ impl ConsoleSpawnWrap {
             unsafe { AttachConsole(ATTACH_PARENT_PROCESS) }.unwrap();
         }
     }
-
-    fn disable_echo_mode() {
-        let stdin_h = HANDLE(std::io::stdin().as_raw_handle() as isize);
-
-        let mut mode = CONSOLE_MODE::default();
-        unsafe { GetConsoleMode(stdin_h, &mut mode) }.unwrap();
-
-        mode &= !ENABLE_ECHO_INPUT;
-
-        unsafe { SetConsoleMode(stdin_h, mode) }.unwrap();
-    }
 }
 
 impl Drop for ConsoleSpawnWrap {
@@ -167,21 +180,28 @@ impl Drop for ConsoleSpawnWrap {
     }
 }
 
-fn read_till_show_cursor(cmd_child: &mut conpty::Process) {
+fn read_till_show_cursor(cmd_child: &mut conpty::Process, f: &mut std::fs::File) {
     let mut reader = cmd_child.output().unwrap();
     // this keyword/sequence is the ANSI escape sequence that is printed
     // as last part of the header.
     // It make the cursor visible again, after it was hidden in the beginning.
+    // writeln!(f, "skip read header");
+    // return;
+
+    writeln!(f, "start read header");
     let keyword = "\x1b[?25h".as_bytes();
     let key_len = keyword.len();
     let mut last = VecDeque::with_capacity(key_len);
     loop {
         let mut buf = [0u8];
         reader.read_exact(&mut buf).unwrap();
+        writeln!(f, "read header: {}", buf[0]);
         while last.len() >= key_len {
             last.pop_front();
         }
         last.push_back(buf[0]);
+        let l = last.iter().map(|x|*x).collect::<Vec<_>>();
+        writeln!(f, "read header, last: {}", l.escape_ascii());
         if (last.len() == key_len) && last.iter().zip(keyword.iter()).all(|(a, b)| a == b) {
             break;
         }

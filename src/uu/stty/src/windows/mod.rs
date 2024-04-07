@@ -12,6 +12,7 @@ use uucore::{
     error::{UResult, USimpleError},
     io::OwnedFileDescriptorOrHandle,
 };
+use windows::Win32::{Foundation::HANDLE, System::Console::{GetConsoleMode, SetConsoleMode, CONSOLE_MODE, ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT}};
 
 use crate::Options;
 
@@ -19,12 +20,38 @@ pub(crate) fn open_file_of_options(f: &str) -> io::Result<OwnedFileDescriptorOrH
     OwnedFileDescriptorOrHandle::from(std::fs::OpenOptions::new().read(true).open(f)?)
 }
 
-pub(crate) fn stty(opts: &Options) -> UResult<()> {
-    if opts.settings.is_some() {
-        return Err(USimpleError::new(
+fn set_echo_mode(on: bool) {
+    let stdin_h = HANDLE(std::io::stdin().as_raw_handle() as isize);
+
+    let mut mode = CONSOLE_MODE::default();
+    unsafe { GetConsoleMode(stdin_h, &mut mode) }.unwrap();
+
+    match on {
+        true => mode |= ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT,
+        false => mode &= !ENABLE_ECHO_INPUT,
+    };
+
+    unsafe { SetConsoleMode(stdin_h, mode) }.unwrap();
+}
+
+fn apply_setting(setting: &str) -> UResult<()> {
+    match setting {
+        "-echo" => set_echo_mode(false),
+        "echo" => set_echo_mode(true),
+        other => return Err(USimpleError::new(
             2,
-            "changing settings on windows not (yet) supported!",
-        ));
+            format!("changing the setting '{other}' on windows is not (yet) supported!"),
+        )),
+    };
+
+    Ok(())
+}
+
+pub(crate) fn stty(opts: &Options) -> UResult<()> {
+    if let Some(settings) = &opts.settings {
+        for setting in settings {
+            apply_setting(setting)?;
+        }
     }
 
     if !opts.file.as_raw().is_terminal() {
