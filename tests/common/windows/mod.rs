@@ -14,9 +14,8 @@ use windows::Win32::Foundation::HANDLE as WinHANDLE;
 
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::Console::{
-    AttachConsole, FreeConsole, GetStdHandle, SetStdHandle,
-    ATTACH_PARENT_PROCESS, STD_ERROR_HANDLE,
-    STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    AttachConsole, FreeConsole, GetStdHandle, SetStdHandle, ATTACH_PARENT_PROCESS,
+    STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
 };
 
 use super::util::{ForwardedOutput, TerminalSimulation, TESTS_BINARY};
