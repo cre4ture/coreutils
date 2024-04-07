@@ -121,7 +121,7 @@ impl CmdResult {
         println!("command exit status: {:?}", self.exit_status);
         println!(
             "stdout:\n{}\nstderr:\n{}",
-            self.stdout.escape_ascii(),
+            self.stdout().escape_ascii(),
             self.stderr().escape_ascii()
         );
     }
