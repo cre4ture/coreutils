@@ -12,7 +12,12 @@ use uucore::{
     error::{UResult, USimpleError},
     io::OwnedFileDescriptorOrHandle,
 };
-use windows::Win32::{Foundation::HANDLE, System::Console::{GetConsoleMode, SetConsoleMode, CONSOLE_MODE, ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT}};
+use windows::Win32::{
+    Foundation::HANDLE,
+    System::Console::{
+        GetConsoleMode, SetConsoleMode, CONSOLE_MODE, ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT,
+    },
+};
 
 use crate::Options;
 
@@ -38,10 +43,12 @@ fn apply_setting(setting: &str) -> UResult<()> {
     match setting {
         "-echo" => set_echo_mode(false),
         "echo" => set_echo_mode(true),
-        other => return Err(USimpleError::new(
-            2,
-            format!("changing the setting '{other}' on windows is not (yet) supported!"),
-        )),
+        other => {
+            return Err(USimpleError::new(
+                2,
+                format!("changing the setting '{other}' on windows is not (yet) supported!"),
+            ))
+        }
     };
 
     Ok(())
