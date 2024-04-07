@@ -40,6 +40,17 @@ fn set_echo_mode(on: bool) {
     unsafe { SetConsoleMode(stdin_h, mode) }.unwrap();
 }
 
+fn get_echo_mode() -> bool {
+    // getting the echo mode works only on stdin.
+    let stdin_h = HANDLE(std::io::stdin().as_raw_handle() as isize);
+
+    let mut mode = CONSOLE_MODE::default();
+    unsafe { GetConsoleMode(stdin_h, &mut mode) }.unwrap();
+
+    let on = (mode & ENABLE_ECHO_INPUT).0 != 0;
+    on
+}
+
 fn apply_setting(setting: &str) -> UResult<()> {
     match setting {
         "-echo" => set_echo_mode(false),
@@ -76,6 +87,7 @@ pub(crate) fn stty(opts: &Options) -> UResult<()> {
         print!("speed {baud} baud");
         print!("; rows {}; columns {}", terminal_height.0, terminal_width.0);
         println!("; line = {line_discipline};");
+        println!("{}echo", if get_echo_mode() { "" } else { "-" });
     }
 
     Ok(())
