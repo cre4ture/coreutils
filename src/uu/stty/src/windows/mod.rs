@@ -71,23 +71,25 @@ pub(crate) fn stty(opts: &Options) -> UResult<()> {
         for setting in settings {
             apply_setting(setting)?;
         }
-    }
+    } else {
 
-    if !opts.file.as_raw().is_terminal() {
-        return Err(USimpleError::new(1, "is not a tty"));
-    }
+        if !opts.file.as_raw().is_terminal() {
+            return Err(USimpleError::new(1, "is not a tty"));
+        }
 
-    let baud = 38400; // just a fake default value
-    let (terminal_width, terminal_height) =
-        terminal_size::terminal_size_using_handle(opts.file.as_raw().as_raw_handle())
-            .ok_or(USimpleError::new(2, "failed to determine terminal size"))?;
-    let line_discipline = 0; // don't mix up with cursor position!
+        let baud = 38400; // just a fake default value
+        let (terminal_width, terminal_height) =
+            terminal_size::terminal_size_using_handle(opts.file.as_raw().as_raw_handle())
+                .ok_or(USimpleError::new(2, "failed to determine terminal size"))?;
+        let line_discipline = 0; // don't mix up with cursor position!
 
-    if opts.all {
-        print!("speed {baud} baud");
-        print!("; rows {}; columns {}", terminal_height.0, terminal_width.0);
-        println!("; line = {line_discipline};");
-        println!("{}echo", if get_echo_mode() { "" } else { "-" });
+        if opts.all {
+            print!("speed {baud} baud");
+            print!("; rows {}; columns {}", terminal_height.0, terminal_width.0);
+            println!("; line = {line_discipline};");
+            println!("{}echo", if get_echo_mode() { "" } else { "-" });
+        }
+
     }
 
     Ok(())

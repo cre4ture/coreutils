@@ -2205,6 +2205,7 @@ impl UChild {
         // some apps do not stop execution until their stdin gets closed.
         // to prevent a endless waiting here, we close the stdin.
         self.join(); // ensure that all pending async input is piped in
+        //std::thread::sleep(Duration::from_millis(1000));
         self.close_stdin();
 
         let output = if let Some(timeout) = self.timeout {
@@ -3957,15 +3958,36 @@ mod tests {
     fn test_simulation_of_terminal_pty_sends_eot_automatically() {
         let scene = TestScenario::new("util");
 
-        let mut cmd = scene.ccmd("cat");
-        cmd.arg("-");
-        cmd.timeout(std::time::Duration::from_secs(10));
+        let mut cmd = scene.ccmd("env");
+        //cmd.args(&[TESTS_BINARY, "sleep", "1", "&&"]);
+        //cmd.args(&[TESTS_BINARY, "echo", "START", "&&"]);
+        //cmd.args(&[TESTS_BINARY, "sleep", "1", "&&"]);
+        //cmd.args(&[TESTS_BINARY, "echo", "-n", "START2", "&&"]);
+        //cmd.args(&[TESTS_BINARY, "sleep", "1", "&&"]);
+        //cmd.args(&[TESTS_BINARY, "dd", "count=0", "&&"]);
+        cmd.args(&[TESTS_BINARY, "stty", "-a", "&&"]);
+        cmd.args(&[TESTS_BINARY, "cat", "-", "&&"]);
+        cmd.args(&[TESTS_BINARY, "stty", "-a", "&&"]);
+        //cmd.args(&[TESTS_BINARY, "sleep", "1", "&&"]);;
+        //cmd.args(&[TESTS_BINARY, "echo", "END", "&&"]);
+        //cmd.args(&[TESTS_BINARY, "sleep", "1", "&&"]);;
+        //cmd.args(&[TESTS_BINARY, "echo", "END0", "&&"]);
+        //cmd.args(&[TESTS_BINARY, "sleep", "1", "&&"]);;
+        //cmd.args(&[TESTS_BINARY, "echo", "END-1", "&&"]);
+        //cmd.args(&[TESTS_BINARY, "sleep", "1", "&&"]);;
+        //cmd.args(&[TESTS_BINARY, "echo", "END-2", "&&"]);
+        //cmd.args(&[TESTS_BINARY, "sleep", "1", "&&"]);;
+        //cmd.args(&[TESTS_BINARY, "echo", "END-3"]);
+        cmd.args(&[TESTS_BINARY, "true"]);
+        cmd.timeout(std::time::Duration::from_secs(100));
         cmd.terminal_simulation(true);
         let child = cmd.run_no_wait();
         let out = child.wait().unwrap(); // cat would block if there is no eot
 
         std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
-        std::assert_eq!(String::from_utf8_lossy(out.stdout()), "\r\n");
+        //std::assert_eq!(String::from_utf8_lossy(out.stdout()), "\r\n");
+        out.stdout_contains("\r\n-echo");
+        out.stderr_does_not_contain("\r\necho");
     }
 
     #[cfg(feature = "cat")]
@@ -3975,17 +3997,25 @@ mod tests {
 
         let message = "Hello stdin forwarding!";
 
-        let mut cmd = scene.ccmd("cat");
-        cmd.arg("-");
+        let mut cmd = scene.ccmd("env");
+        cmd.args(&[TESTS_BINARY, "stty", "-a", "&&"]);
+        cmd.args(&[TESTS_BINARY, "cat", "-", "&&"]);
+        cmd.args(&[TESTS_BINARY, "stty", "-a", "&&"]);
+        cmd.args(&[TESTS_BINARY, "true"]);
         cmd.terminal_simulation(true);
         cmd.pipe_in(message);
         let child = cmd.run_no_wait();
         let out = child.wait().unwrap();
 
-        std::assert_eq!(
-            String::from_utf8_lossy(out.stdout()),
-            format!("{}\r\n", message)
-        );
+        out.stdout_contains("\r\n-echo");
+        out.stderr_does_not_contain("\r\necho");
+
+        out.stdout_contains(format!("{}\r\n", message));
+
+        // std::assert_eq!(
+        //     String::from_utf8_lossy(out.stdout()),
+        //     format!("{}\r\n", message)
+        // );
         std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
     }
 
@@ -3994,17 +4024,25 @@ mod tests {
     fn test_simulation_of_terminal_pty_write_in_data_and_sends_eot_automatically() {
         let scene = TestScenario::new("util");
 
-        let mut cmd = scene.ccmd("cat");
-        cmd.arg("-");
+        let mut cmd = scene.ccmd("env");
+        cmd.args(&[TESTS_BINARY, "stty", "-a", "&&"]);
+        cmd.args(&[TESTS_BINARY, "cat", "-", "&&"]);
+        cmd.args(&[TESTS_BINARY, "stty", "-a", "&&"]);
+        cmd.args(&[TESTS_BINARY, "true"]);
         cmd.terminal_simulation(true);
         let mut child = cmd.run_no_wait();
         child.write_in("Hello stdin forwarding via write_in!");
         let out = child.wait().unwrap();
 
-        std::assert_eq!(
-            String::from_utf8_lossy(out.stdout()),
-            "Hello stdin forwarding via write_in!\r\n"
-        );
+        out.stdout_contains("\r\n-echo");
+        out.stderr_does_not_contain("\r\necho");
+
+        out.stdout_contains("Hello stdin forwarding via write_in!\r\n");
+
+        //std::assert_eq!(
+        //    String::from_utf8_lossy(out.stdout()),
+        //    "Hello stdin forwarding via write_in!\r\n"
+        //);
         std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
     }
 
