@@ -3982,7 +3982,10 @@ mod tests {
         cmd.timeout(std::time::Duration::from_secs(100));
         cmd.terminal_simulation(true);
         let child = cmd.run_no_wait();
-        let out = child.wait().unwrap(); // cat would block if there is no eot
+        // cat would block if there is no eot
+        let out = child.wait().unwrap();
+
+        out.print_outputs();
 
         std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
         //std::assert_eq!(String::from_utf8_lossy(out.stdout()), "\r\n");
@@ -4006,6 +4009,8 @@ mod tests {
         cmd.pipe_in(message);
         let child = cmd.run_no_wait();
         let out = child.wait().unwrap();
+
+        out.print_outputs();
 
         out.stdout_contains("\r\n-echo");
         out.stderr_does_not_contain("\r\necho");

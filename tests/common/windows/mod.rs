@@ -3,29 +3,23 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-//spell-checker: ignore conpty conin conout
+//spell-checker: ignore conpty conin conout ENDHEA
 
 mod process;
 
-use std::borrow::Borrow;
 use std::cmp::max;
 use std::collections::VecDeque;
 use std::io::{Read, StderrLock, StdinLock, StdoutLock, Write};
 use std::mem;
-use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+use std::os::windows::io::AsRawHandle;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::MutexGuard;
 use std::time::Duration;
-use uucore::io::OwnedFileDescriptorOrHandle;
-use uucore::windows_sys::Win32::Storage::FileSystem::HandleLogFull;
-use windows::Win32::Foundation::{CloseHandle, HANDLE as WinHANDLE};
-
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::Console::{
-    AttachConsole, FreeConsole, GetConsoleMode, GetConsoleProcessList, GetStdHandle, SetConsoleMode, SetStdHandle, ATTACH_PARENT_PROCESS, CONSOLE_MODE, ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, ENABLE_VIRTUAL_TERMINAL_INPUT, ENABLE_VIRTUAL_TERMINAL_PROCESSING, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE
+    AttachConsole, FreeConsole, GetConsoleMode, GetConsoleProcessList, GetStdHandle, SetConsoleMode, SetStdHandle, ATTACH_PARENT_PROCESS, CONSOLE_MODE, ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE
 };
-use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, WaitForSingleObject};
 
 use super::util::{ForwardedOutput, TerminalSimulation, TESTS_BINARY};
 
@@ -41,7 +35,7 @@ trait None {}
 
 #[derive(Debug)]
 struct BlockOtherThreadsGuard {
-    list: (MutexGuard<'static, u32>, StdinLock<'static>, StdoutLock<'static>, StderrLock<'static>),
+    _list: (MutexGuard<'static, u32>, StdinLock<'static>, StdoutLock<'static>, StderrLock<'static>),
 }
 
 impl BlockOtherThreadsGuard {
@@ -54,7 +48,7 @@ impl BlockOtherThreadsGuard {
         // This can happen e.g. during execution of multiple test cases in parallel.
         // Therefor this list of guards here:
         Self {
-            list: (
+            _list: (
                 CONSOLE_SPAWNING_MUTEX.lock().unwrap(),
                 std::io::stdin().lock(),
                 std::io::stdout().lock(),
@@ -66,9 +60,9 @@ impl BlockOtherThreadsGuard {
 
 #[derive(Debug)]
 struct AttachStdioGuard {
-    original_stdin: Option<WinHANDLE>,
-    original_stdout: Option<WinHANDLE>,
-    original_stderr: Option<WinHANDLE>,
+    original_stdin: Option<HANDLE>,
+    original_stdout: Option<HANDLE>,
+    original_stderr: Option<HANDLE>,
 }
 
 impl AttachStdioGuard {
@@ -208,7 +202,7 @@ impl ConsoleSpawnWrap {
                 TESTS_BINARY, "echo", "-n", END_OF_HEADER_KEYWORD, "&&",
                 // this sleep will be killed shortly, but we need it to prevent the console to close
                 // before we attached our own process
-                TESTS_BINARY, "sleep", "100",
+                TESTS_BINARY, "sleep", "3600",
             ]);
             let terminal_size = simulated_terminal.size.unwrap_or_default();
             let options = conpty::ProcessOptions {
@@ -219,8 +213,6 @@ impl ConsoleSpawnWrap {
 
             *stdin_pty = Some(Box::new(cmd_child.input().unwrap()));
             let mut reader = cmd_child.output().unwrap();
-
-            //cmd_child.input().unwrap().write_all(END_OF_TRANSMISSION_SEQUENCE);
 
             // read and ignore full windows console header (ANSI escape sequences).
             let header = read_till_show_cursor_ansi_escape(&mut reader);
@@ -236,14 +228,7 @@ impl ConsoleSpawnWrap {
 
             self.guard = Some(AllReAttachConsoleGuard::new(cmd_child.pid()));
 
-            //std::thread::sleep(Duration::from_millis(5000));
-
-            //std::thread::sleep(Duration::from_millis(5000));
-
             self.configure_stdio_for_spawn_of_child(&simulated_terminal, command);
-
-            //cmd_child.exit(0).unwrap(); // kill the "sleep 100"
-            //cmd_child.wait(Some(500)).unwrap();
 
             self.child_console = Some(cmd_child);
         }
@@ -345,7 +330,7 @@ fn read_till_show_cursor_ansi_escape<T: Read>(reader: &mut T) -> Vec<u8> {
     let mut last = VecDeque::with_capacity(key_len);
     let mut full_buf = Vec::new();
     let (mut found1, mut found2) = (false, false);
-    let mut s = String::new();
+    let mut _s = String::new();
     loop {
         let mut buf = [0u8];
         reader.read_exact(&mut buf).unwrap();
@@ -354,7 +339,7 @@ fn read_till_show_cursor_ansi_escape<T: Read>(reader: &mut T) -> Vec<u8> {
         }
         last.push_back(buf[0]);
         full_buf.push(buf[0]);
-        s = format!("{}", full_buf.escape_ascii());
+        _s = format!("{}", full_buf.escape_ascii());
         if last.len() == key_len {
             let compare_fn = |keyword: &[u8]| { last.iter().zip(keyword.iter()).all(|(a, b)| a == b) };
             found1 = found1 || compare_fn(keyword1);
@@ -381,18 +366,6 @@ fn set_echo_mode(on: bool, stdin_h: HANDLE) {
     // mode |= ENABLE_VIRTUAL_TERMINAL_INPUT;
 
     unsafe { SetConsoleMode(stdin_h, mode) }.unwrap();
-}
-
-fn disable_virtual_terminal_sequence_processing() -> windows::core::Result<()> {
-    let stdout_h = HANDLE(std::io::stdout().as_raw_handle() as isize);
-    unsafe {
-        let mut mode = CONSOLE_MODE::default();
-        GetConsoleMode(stdout_h, &mut mode)?;
-        mode &= !ENABLE_VIRTUAL_TERMINAL_PROCESSING; // DISABLE_NEWLINE_AUTO_RETURN
-        SetConsoleMode(stdout_h, mode)?;
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
