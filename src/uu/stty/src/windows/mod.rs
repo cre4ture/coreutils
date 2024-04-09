@@ -72,7 +72,6 @@ pub(crate) fn stty(opts: &Options) -> UResult<()> {
             apply_setting(setting)?;
         }
     } else {
-
         if !opts.file.as_raw().is_terminal() {
             return Err(USimpleError::new(1, "is not a tty"));
         }
@@ -89,7 +88,6 @@ pub(crate) fn stty(opts: &Options) -> UResult<()> {
             println!("; line = {line_discipline};");
             println!("{}echo", if get_echo_mode() { "" } else { "-" });
         }
-
     }
 
     Ok(())

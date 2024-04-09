@@ -2205,7 +2205,7 @@ impl UChild {
         // some apps do not stop execution until their stdin gets closed.
         // to prevent a endless waiting here, we close the stdin.
         self.join(); // ensure that all pending async input is piped in
-        //std::thread::sleep(Duration::from_millis(1000));
+                     //std::thread::sleep(Duration::from_millis(1000));
         self.close_stdin();
 
         let output = if let Some(timeout) = self.timeout {

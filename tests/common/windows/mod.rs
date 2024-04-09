@@ -18,15 +18,17 @@ use std::sync::MutexGuard;
 use std::time::Duration;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::Console::{
-    AttachConsole, FreeConsole, GetConsoleMode, GetConsoleProcessList, GetStdHandle, SetConsoleMode, SetStdHandle, ATTACH_PARENT_PROCESS, CONSOLE_MODE, ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE
+    AttachConsole, FreeConsole, GetConsoleMode, GetConsoleProcessList, GetStdHandle,
+    SetConsoleMode, SetStdHandle, ATTACH_PARENT_PROCESS, CONSOLE_MODE, ENABLE_ECHO_INPUT,
+    ENABLE_LINE_INPUT, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
 };
 
 use super::util::{ForwardedOutput, TerminalSimulation, TESTS_BINARY};
 
 pub(crate) static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\r', b'\n', 0x1A, b'\r', b'\n']; // send ^Z
-//pub(crate) static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\r', b'\n', 0x5A, b'\r', b'\n']; // send ^Z
-//pub(crate) static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\r', b'\n', 0x04, b'\r', b'\n'];
-//pub(crate) static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\r', b'\n', 0x17, b'\r', b'\n'];
+                                                                                             //pub(crate) static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\r', b'\n', 0x5A, b'\r', b'\n']; // send ^Z
+                                                                                             //pub(crate) static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\r', b'\n', 0x04, b'\r', b'\n'];
+                                                                                             //pub(crate) static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\r', b'\n', 0x17, b'\r', b'\n'];
 
 static CONSOLE_SPAWNING_MUTEX: std::sync::Mutex<u32> = std::sync::Mutex::new(0);
 static END_OF_HEADER_KEYWORD: &str = "ENDHEA";
@@ -35,7 +37,12 @@ trait None {}
 
 #[derive(Debug)]
 struct BlockOtherThreadsGuard {
-    _list: (MutexGuard<'static, u32>, StdinLock<'static>, StdoutLock<'static>, StderrLock<'static>),
+    _list: (
+        MutexGuard<'static, u32>,
+        StdinLock<'static>,
+        StdoutLock<'static>,
+        StderrLock<'static>,
+    ),
 }
 
 impl BlockOtherThreadsGuard {
@@ -53,7 +60,7 @@ impl BlockOtherThreadsGuard {
                 std::io::stdin().lock(),
                 std::io::stdout().lock(),
                 std::io::stderr().lock(),
-            )
+            ),
         }
     }
 }
@@ -75,26 +82,27 @@ impl AttachStdioGuard {
         unsafe { SetStdHandle(STD_INPUT_HANDLE, HANDLE(0)) }.unwrap();
         unsafe { SetStdHandle(STD_OUTPUT_HANDLE, HANDLE(0)) }.unwrap();
         unsafe { SetStdHandle(STD_ERROR_HANDLE, HANDLE(0)) }.unwrap();
-        Self{
+        Self {
             original_stdin,
             original_stdout,
-            original_stderr
+            original_stderr,
         }
     }
 }
 
 impl Drop for AttachStdioGuard {
     fn drop(&mut self) {
-        self.original_stdin.inspect(|h| unsafe { SetStdHandle(STD_INPUT_HANDLE, *h) }.unwrap());
-        self.original_stdout.inspect(|h| unsafe { SetStdHandle(STD_OUTPUT_HANDLE, *h) }.unwrap());
-        self.original_stderr.inspect(|h| unsafe { SetStdHandle(STD_ERROR_HANDLE, *h) }.unwrap());
+        self.original_stdin
+            .inspect(|h| unsafe { SetStdHandle(STD_INPUT_HANDLE, *h) }.unwrap());
+        self.original_stdout
+            .inspect(|h| unsafe { SetStdHandle(STD_OUTPUT_HANDLE, *h) }.unwrap());
+        self.original_stderr
+            .inspect(|h| unsafe { SetStdHandle(STD_ERROR_HANDLE, *h) }.unwrap());
     }
 }
 
 #[derive(Debug)]
-struct SwitchToConsoleGuard {
-
-}
+struct SwitchToConsoleGuard {}
 
 impl SwitchToConsoleGuard {
     fn new(process_id: u32) -> Self {
@@ -111,7 +119,7 @@ impl SwitchToConsoleGuard {
         if let Err(e) = result {
             panic!("attaching to new console failed! {:?}", e);
         }
-        Self{}
+        Self {}
     }
 }
 
@@ -158,7 +166,6 @@ impl ConsoleSpawnWrap {
     }
 
     pub(crate) fn spawn<T: FnOnce(&mut ConsoleSpawnWrap)>(&mut self, spawn_function: T) {
-
         spawn_function(self);
 
         self.guard = None;
@@ -219,12 +226,8 @@ impl ConsoleSpawnWrap {
             println!("read header: {}", header.escape_ascii());
 
             captured_stdout
-                .spawn_reader_thread(
-                    Box::new(reader),
-                    "win_conpty_reader".into(),
-                )
+                .spawn_reader_thread(Box::new(reader), "win_conpty_reader".into())
                 .unwrap();
-
 
             self.guard = Some(AllReAttachConsoleGuard::new(cmd_child.pid()));
 
@@ -235,7 +238,7 @@ impl ConsoleSpawnWrap {
     }
 
     fn get_console_process_id_list(exclude_self: bool) -> Vec<u32> {
-        let process_count = unsafe { GetConsoleProcessList(&mut [0,0,0]) };
+        let process_count = unsafe { GetConsoleProcessList(&mut [0, 0, 0]) };
         if process_count > 0 {
             let mut buffer = Vec::new();
             buffer.resize(process_count as usize + 20, 0);
@@ -253,18 +256,21 @@ impl ConsoleSpawnWrap {
         panic!("failed to get console process id list!");
     }
 
-    fn kill_and_wait_all_console_processes(&mut self)
-    {
+    fn kill_and_wait_all_console_processes(&mut self) {
         if let Some(console) = &self.child_console {
             let _guards = AllReAttachConsoleGuard::new(console.pid());
             let process_ids = Self::get_console_process_id_list(true);
             mem::drop(_guards);
 
-            let handles = process_ids.into_iter().filter_map(|id|{
-                process::ProcessHandle::new_from_id(id).ok()
+            let handles = process_ids
+                .into_iter()
+                .filter_map(|id| process::ProcessHandle::new_from_id(id).ok());
+            handles.clone().for_each(|ph| {
+                let _ = ph.terminate(88);
             });
-            handles.clone().for_each(|ph| { let _ = ph.terminate(88); } );
-            handles.for_each(|ph| { let _ = ph.wait_for_end(5000); } );
+            handles.for_each(|ph| {
+                let _ = ph.wait_for_end(5000);
+            });
         }
     }
 
@@ -341,7 +347,7 @@ fn read_till_show_cursor_ansi_escape<T: Read>(reader: &mut T) -> Vec<u8> {
         full_buf.push(buf[0]);
         _s = format!("{}", full_buf.escape_ascii());
         if last.len() == key_len {
-            let compare_fn = |keyword: &[u8]| { last.iter().zip(keyword.iter()).all(|(a, b)| a == b) };
+            let compare_fn = |keyword: &[u8]| last.iter().zip(keyword.iter()).all(|(a, b)| a == b);
             found1 = found1 || compare_fn(keyword1);
             found2 = found2 || compare_fn(keyword2);
             if found1 && found2 {
@@ -400,8 +406,8 @@ mod tests {
 
     #[test]
     fn test_detection_of_keywords_succeeds_with_second_and_first_keyword_and_stuff_in_between() {
-        let mut string = "jaslkdfjklasfjaklsdfjsalkfdjalskfjklsajdfENDHEAadsadafsdgsadgsa\x1b[?25h".as_bytes();
+        let mut string =
+            "jaslkdfjklasfjaklsdfjsalkfdjalskfjklsajdfENDHEAadsadafsdgsadgsa\x1b[?25h".as_bytes();
         read_till_show_cursor_ansi_escape(&mut string);
     }
-
 }
