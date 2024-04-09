@@ -7,6 +7,7 @@
 
 mod process;
 
+use std::borrow::Borrow;
 use std::cmp::max;
 use std::collections::VecDeque;
 use std::io::{Read, StderrLock, StdinLock, StdoutLock, Write};
@@ -131,17 +132,17 @@ impl Drop for SwitchToConsoleGuard {
 
 #[derive(Debug)]
 struct AllReAttachConsoleGuard {
-    ot: BlockOtherThreadsGuard,
-    io: AttachStdioGuard,
-    cn: SwitchToConsoleGuard,
+    _ot: BlockOtherThreadsGuard,
+    _io: AttachStdioGuard,
+    _cn: SwitchToConsoleGuard,
 }
 
 impl AllReAttachConsoleGuard {
     fn new(process_id: u32) -> Self {
         Self {
-            ot: BlockOtherThreadsGuard::new(),
-            io: AttachStdioGuard::new(),
-            cn: SwitchToConsoleGuard::new(process_id),
+            _ot: BlockOtherThreadsGuard::new(),
+            _io: AttachStdioGuard::new(),
+            _cn: SwitchToConsoleGuard::new(process_id),
         }
     }
 }
@@ -151,7 +152,6 @@ pub(crate) struct ConsoleSpawnWrap {
     terminal_simulation: Option<TerminalSimulation>,
     child_console: Option<conpty::Process>,
     guard: Option<AllReAttachConsoleGuard>,
-    process_cleanup: Vec<process::ProcessHandle>,
 }
 
 impl ConsoleSpawnWrap {
@@ -160,23 +160,12 @@ impl ConsoleSpawnWrap {
             terminal_simulation,
             child_console: None,
             guard: None,
-            process_cleanup: Vec::new(),
         }
     }
 
     pub(crate) fn spawn<T: FnOnce(&mut ConsoleSpawnWrap)>(&mut self, spawn_function: T) {
 
         spawn_function(self);
-
-        if self.guard.is_some() {
-            // do this before releasing the guard as it only works
-            // when attached to console.
-            let process_ids = Self::get_console_process_id_list(true);
-            let handles = process_ids.into_iter().filter_map(|id|{
-                process::ProcessHandle::new_from_id(id).ok()
-            });
-            self.process_cleanup = handles.collect();
-        }
 
         self.guard = None;
     }
@@ -216,7 +205,7 @@ impl ConsoleSpawnWrap {
                 //TESTS_BINARY, "sleep", "1", "&&",
                 //TESTS_BINARY, "echo", "DUMMY4", "&&",
                 // this newline is needed to trigger the windows console header generation now
-                TESTS_BINARY, "echo", END_OF_HEADER_KEYWORD, "&&",
+                TESTS_BINARY, "echo", "-n", END_OF_HEADER_KEYWORD, "&&",
                 // this sleep will be killed shortly, but we need it to prevent the console to close
                 // before we attached our own process
                 TESTS_BINARY, "sleep", "100",
@@ -281,8 +270,17 @@ impl ConsoleSpawnWrap {
 
     fn kill_and_wait_all_console_processes(&mut self)
     {
-        self.process_cleanup.iter().for_each(|ph| { let _ = ph.terminate(88); } );
-        mem::take(&mut self.process_cleanup).into_iter().for_each(|ph| { let _ = ph.wait_for_end(5000); } );
+        if let Some(console) = &self.child_console {
+            let _guards = AllReAttachConsoleGuard::new(console.pid());
+            let process_ids = Self::get_console_process_id_list(true);
+            mem::drop(_guards);
+
+            let handles = process_ids.into_iter().filter_map(|id|{
+                process::ProcessHandle::new_from_id(id).ok()
+            });
+            handles.clone().for_each(|ph| { let _ = ph.terminate(88); } );
+            handles.for_each(|ph| { let _ = ph.wait_for_end(5000); } );
+        }
     }
 
     fn configure_stdio_for_spawn_of_child(
