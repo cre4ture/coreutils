@@ -240,14 +240,13 @@ impl ConsoleSpawnWrap {
     fn get_console_process_id_list(exclude_self: bool) -> Vec<u32> {
         let process_count = unsafe { GetConsoleProcessList(&mut [0, 0, 0]) };
         if process_count > 0 {
-            let mut buffer = Vec::new();
-            buffer.resize(process_count as usize + 20, 0);
+            let mut buffer = vec![0; process_count as usize + 20];
             let process_count = unsafe { GetConsoleProcessList(&mut buffer) } as usize;
             if process_count <= buffer.len() {
                 buffer.resize(process_count, 0);
                 if exclude_self {
                     let own_id = std::process::id();
-                    buffer = buffer.into_iter().filter(|id| (*id) != own_id).collect();
+                    buffer.retain(|id| (*id) != own_id);
                 }
                 return buffer;
             }
