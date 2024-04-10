@@ -1531,12 +1531,7 @@ impl UCommand {
     /// (unix: pty, windows: ConPTY)
     pub fn terminal_simulation(&mut self, enable: bool) -> &mut Self {
         if enable {
-            self.terminal_simulation = Some(TerminalSimulation {
-                stdin: true,
-                stdout: true,
-                stderr: true,
-                ..Default::default()
-            });
+            self.terminal_simulation = Some(TerminalSimulation::full());
         } else {
             self.terminal_simulation = None;
         }
@@ -4038,8 +4033,8 @@ mod tests {
 
         std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
         //std::assert_eq!(String::from_utf8_lossy(out.stdout()), "\r\n");
-        out.stdout_contains("\r\n-echo");
-        out.stderr_does_not_contain("\r\necho");
+        out.stdout_matches(&Regex::new(r"\s-echo\s").unwrap());
+        out.stdout_does_not_match(&Regex::new(r"\secho\s").unwrap());
     }
 
     #[cfg(feature = "cat")]
@@ -4061,8 +4056,8 @@ mod tests {
 
         out.print_outputs();
 
-        out.stdout_contains("\r\n-echo");
-        out.stderr_does_not_contain("\r\necho");
+        out.stdout_matches(&Regex::new(r"\s-echo\s").unwrap());
+        out.stdout_does_not_match(&Regex::new(r"\secho\s").unwrap());
 
         out.stdout_contains(format!("{}\r\n", message));
 
@@ -4109,8 +4104,8 @@ mod tests {
         child.write_in("Hello stdin forwarding via write_in!");
         let out = child.wait().unwrap();
 
-        out.stdout_contains("\r\n-echo");
-        out.stderr_does_not_contain("\r\necho");
+        out.stdout_matches(&Regex::new(r"\s-echo\s").unwrap());
+        out.stdout_does_not_match(&Regex::new(r"\secho\s").unwrap());
 
         out.stdout_contains("Hello stdin forwarding via write_in!\r\n");
 
