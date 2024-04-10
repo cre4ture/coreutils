@@ -33,8 +33,6 @@ pub(crate) static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\r', b'\n', 0x1A, b'
 static CONSOLE_SPAWNING_MUTEX: std::sync::Mutex<u32> = std::sync::Mutex::new(0);
 static END_OF_HEADER_KEYWORD: &str = "ENDHEA";
 
-trait None {}
-
 #[derive(Debug)]
 struct BlockOtherThreadsGuard {
     _list: (
