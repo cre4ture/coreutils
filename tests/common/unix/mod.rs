@@ -5,23 +5,29 @@
 
 //spell-checker: ignore xpixel ypixel Openpty winsize
 
-use std::{fs::File, io::Write};
+use std::{
+    fs::File,
+    io::{self, Write},
+    thread::JoinHandle,
+};
 
 use nix::pty::OpenptyResult;
 
-use super::util::{ForwardedOutput, TerminalSimulation};
+use super::util::{ForwardedOutput, TerminalSimulation, TESTS_BINARY};
 
 pub(crate) static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\n', 0x04];
 
 #[derive(Debug)]
 pub(crate) struct ConsoleSpawnWrap {
     terminal_simulation: Option<TerminalSimulation>,
+    dummy_out_reader: Option<JoinHandle<()>>,
 }
 
 impl ConsoleSpawnWrap {
     pub(crate) fn new(terminal_simulation: Option<TerminalSimulation>) -> Self {
         Self {
             terminal_simulation,
+            dummy_out_reader: None,
         }
     }
 
@@ -45,41 +51,58 @@ impl ConsoleSpawnWrap {
                 ws_ypixel: terminal_size.pixels_y,
             };
 
+            let OpenptyResult {
+                slave: pi_slave,
+                master: pi_master,
+            } = nix::pty::openpty(&c_terminal_size, None).unwrap();
+
+            if !simulated_terminal.echo {
+                std::process::Command::new(TESTS_BINARY)
+                    .args(["stty", "--", "-echo"])
+                    .stdin(pi_slave.try_clone().unwrap())
+                    .stdout(pi_slave.try_clone().unwrap())
+                    .stderr(pi_slave.try_clone().unwrap())
+                    .spawn()
+                    .unwrap()
+                    .wait()
+                    .unwrap();
+            }
+
             if simulated_terminal.stdin {
-                let OpenptyResult {
-                    slave: pi_slave,
-                    master: pi_master,
-                } = nix::pty::openpty(&c_terminal_size, None).unwrap();
-                *stdin_pty = Some(Box::new(File::from(pi_master)));
-                command.stdin(pi_slave);
+                *stdin_pty = Some(Box::new(File::from(pi_master.try_clone().unwrap())));
+                command.stdin(pi_slave.try_clone().unwrap());
             }
 
             if simulated_terminal.stdout {
-                let OpenptyResult {
-                    slave: po_slave,
-                    master: po_master,
-                } = nix::pty::openpty(&c_terminal_size, None).unwrap();
-                captured_stdout
-                    .spawn_reader_thread(
-                        Box::new(File::from(po_master)),
-                        "stdout_reader".to_string(),
-                    )
-                    .unwrap();
-                command.stdout(po_slave);
+                command.stdout(pi_slave.try_clone().unwrap());
             }
 
             if simulated_terminal.stderr {
-                let OpenptyResult {
-                    slave: pe_slave,
-                    master: pe_master,
-                } = nix::pty::openpty(&c_terminal_size, None).unwrap();
-                captured_stderr
+                command.stderr(pi_slave);
+            }
+
+            let forwarded = if simulated_terminal.stdout {
+                Some(captured_stdout)
+            } else if simulated_terminal.stderr {
+                Some(captured_stderr)
+            } else {
+                None
+            };
+
+            if let Some(forwarded_io) = forwarded {
+                forwarded_io
                     .spawn_reader_thread(
-                        Box::new(File::from(pe_master)),
-                        "stderr_reader".to_string(),
+                        Box::new(File::from(pi_master)),
+                        "console_out_reader".to_string(),
                     )
                     .unwrap();
-                command.stderr(pe_slave);
+            } else {
+                self.dummy_out_reader = std::thread::Builder::new()
+                    .name("dummy_console_out_reader".to_string())
+                    .spawn(move || {
+                        ForwardedOutput::read_from_pty(Box::new(File::from(pi_master)), io::sink());
+                    })
+                    .ok();
             }
         }
     }

@@ -1242,12 +1242,72 @@ impl Default for TerminalSize {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct TerminalSimulation {
     pub size: Option<TerminalSize>,
     pub stdin: bool,
     pub stdout: bool,
     pub stderr: bool,
+    pub echo: bool,
+}
+
+impl Default for TerminalSimulation {
+    fn default() -> Self {
+        Self {
+            size: None,
+            stdin: true,
+            stdout: true,
+            stderr: true,
+            echo: true,
+        }
+    }
+}
+
+impl TerminalSimulation {
+    pub fn new() -> Self {
+        Self {
+            size: None,
+            stdin: false,
+            stdout: false,
+            stderr: false,
+            echo: false,
+        }
+    }
+
+    pub fn full() -> Self {
+        Self {
+            size: None,
+            stdin: true,
+            stdout: true,
+            stderr: true,
+            echo: true,
+        }
+    }
+
+    pub fn echo(mut self, value: bool) -> Self {
+        self.echo = value;
+        self
+    }
+
+    pub fn size(mut self, size: TerminalSize) -> Self {
+        self.size = Some(size);
+        self
+    }
+
+    pub fn stdin(mut self, value: bool) -> Self {
+        self.stdin = value;
+        self
+    }
+
+    pub fn stdout(mut self, value: bool) -> Self {
+        self.stdout = value;
+        self
+    }
+
+    pub fn stderr(mut self, value: bool) -> Self {
+        self.stderr = value;
+        self
+    }
 }
 
 /// A `UCommand` is a builder wrapping an individual Command that provides several additional features:
@@ -1783,7 +1843,7 @@ impl ForwardedOutput {
         }
     }
 
-    fn read_from_pty(pty_fd: Box<dyn Read>, out: File) {
+    pub fn read_from_pty<TO: Write>(pty_fd: Box<dyn Read>, out: TO) {
         let mut reader = std::io::BufReader::new(pty_fd);
         let mut writer = std::io::BufWriter::new(out);
         let result = std::io::copy(&mut reader, &mut writer);
@@ -3757,12 +3817,9 @@ mod tests {
             .succeeds();
         std::assert_eq!(
             String::from_utf8_lossy(out.stdout()),
-            "stdin is atty\r\nterminal size: 24 80\r\nstdout is atty\r\nstderr is atty\r\n"
+            "\r\nstdin is atty\r\nterminal size: 24 80\r\nstdout is atty\r\nstderr is atty\r\nThis is an error message.\r\n"
         );
-        std::assert_eq!(
-            String::from_utf8_lossy(out.stderr()),
-            "This is an error message.\r\n"
-        );
+        std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
     }
 
     #[cfg(unix)]
@@ -3796,10 +3853,7 @@ mod tests {
     #[test]
     fn test_simulation_of_terminal_for_stdin_only_with_tty() {
         let scene = TestScenario::new("util");
-        let config = TerminalSimulation {
-            stdin: true,
-            ..Default::default()
-        };
+        let config = TerminalSimulation::full().stdout(false).stderr(false);
 
         scene
             .ccmd("tty")
@@ -3849,10 +3903,7 @@ mod tests {
     #[test]
     fn test_simulation_of_terminal_for_stdout_only_with_tty() {
         let scene = TestScenario::new("util");
-        let config = TerminalSimulation {
-            stdout: true,
-            ..Default::default()
-        };
+        let config = TerminalSimulation::full().stdin(false).stderr(false);
 
         scene
             .ccmd("tty")
@@ -3902,10 +3953,7 @@ mod tests {
     #[test]
     fn test_simulation_of_terminal_for_stderr_only_with_tty() {
         let scene = TestScenario::new("util");
-        let config = TerminalSimulation {
-            stderr: true,
-            ..Default::default()
-        };
+        let config = TerminalSimulation::full().stdin(false).stdout(false);
 
         scene
             .ccmd("tty")
@@ -3944,6 +3992,7 @@ mod tests {
                 stdout: true,
                 stdin: true,
                 stderr: true,
+                echo: false,
             })
             .run();
 
@@ -3980,7 +4029,7 @@ mod tests {
         //cmd.args(&[TESTS_BINARY, "echo", "END-3"]);
         cmd.args(&[TESTS_BINARY, "true"]);
         cmd.timeout(std::time::Duration::from_secs(100));
-        cmd.terminal_simulation(true);
+        cmd.terminal_sim_stdio(TerminalSimulation::full().echo(false));
         let child = cmd.run_no_wait();
         // cat would block if there is no eot
         let out = child.wait().unwrap();
@@ -3995,7 +4044,7 @@ mod tests {
 
     #[cfg(feature = "cat")]
     #[test]
-    fn test_simulation_of_terminal_pty_pipes_into_data_and_sends_eot_automatically() {
+    fn test_simulation_of_terminal_pty_pipes_into_data_and_sends_eot_automatically_no_echo() {
         let scene = TestScenario::new("util");
 
         let message = "Hello stdin forwarding!";
@@ -4005,7 +4054,7 @@ mod tests {
         cmd.args(&[TESTS_BINARY, "cat", "-", "&&"]);
         cmd.args(&[TESTS_BINARY, "stty", "-a", "&&"]);
         cmd.args(&[TESTS_BINARY, "true"]);
-        cmd.terminal_simulation(true);
+        cmd.terminal_sim_stdio(TerminalSimulation::full().echo(false));
         cmd.pipe_in(message);
         let child = cmd.run_no_wait();
         let out = child.wait().unwrap();
@@ -4026,7 +4075,28 @@ mod tests {
 
     #[cfg(feature = "cat")]
     #[test]
-    fn test_simulation_of_terminal_pty_write_in_data_and_sends_eot_automatically() {
+    fn test_simulation_of_terminal_pty_pipes_into_data_and_sends_eot_automatically_with_echo() {
+        let scene = TestScenario::new("util");
+
+        let message = "Hello stdin forwarding!";
+
+        let mut cmd = scene.ccmd("cat");
+        cmd.arg("-");
+        cmd.terminal_sim_stdio(TerminalSimulation::full().echo(true));
+        cmd.pipe_in(message);
+        let child = cmd.run_no_wait();
+        let out = child.wait().unwrap();
+
+        std::assert_eq!(
+            String::from_utf8_lossy(out.stdout()),
+            format!("{}\r\n{}\r\n", message, message)
+        );
+        std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
+    }
+
+    #[cfg(feature = "cat")]
+    #[test]
+    fn test_simulation_of_terminal_pty_write_in_data_and_sends_eot_automatically_no_echo() {
         let scene = TestScenario::new("util");
 
         let mut cmd = scene.ccmd("env");
@@ -4034,7 +4104,7 @@ mod tests {
         cmd.args(&[TESTS_BINARY, "cat", "-", "&&"]);
         cmd.args(&[TESTS_BINARY, "stty", "-a", "&&"]);
         cmd.args(&[TESTS_BINARY, "true"]);
-        cmd.terminal_simulation(true);
+        cmd.terminal_sim_stdio(TerminalSimulation::full().echo(false));
         let mut child = cmd.run_no_wait();
         child.write_in("Hello stdin forwarding via write_in!");
         let out = child.wait().unwrap();
@@ -4048,6 +4118,25 @@ mod tests {
         //    String::from_utf8_lossy(out.stdout()),
         //    "Hello stdin forwarding via write_in!\r\n"
         //);
+        std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
+    }
+
+    #[cfg(feature = "cat")]
+    #[test]
+    fn test_simulation_of_terminal_pty_write_in_data_and_sends_eot_automatically_with_echo() {
+        let scene = TestScenario::new("util");
+
+        let mut cmd = scene.ccmd("cat");
+        cmd.arg("-");
+        cmd.terminal_sim_stdio(TerminalSimulation::full().echo(true));
+        let mut child = cmd.run_no_wait();
+        child.write_in("Hello stdin forwarding via write_in!");
+        let out = child.wait().unwrap();
+
+        std::assert_eq!(
+            String::from_utf8_lossy(out.stdout()),
+            "Hello stdin forwarding via write_in!\r\nHello stdin forwarding via write_in!\r\n"
+        );
         std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
     }
 

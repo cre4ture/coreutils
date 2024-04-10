@@ -20,19 +20,14 @@ fn runs() {
 fn print_all() {
     let res = new_ucmd!()
         .arg("-a")
-        .terminal_sim_stdio(TerminalSimulation {
-            size: Some(TerminalSize {
-                cols: 60,
-                rows: 30,
-                #[cfg(unix)]
-                pixels_x: 60 * 8,
-                #[cfg(unix)]
-                pixels_y: 30 * 10,
-            }),
-            stdin: true,
-            stdout: true,
-            stderr: true,
-        })
+        .terminal_sim_stdio(TerminalSimulation::full().size(TerminalSize {
+            cols: 60,
+            rows: 30,
+            #[cfg(unix)]
+            pixels_x: 60 * 8,
+            #[cfg(unix)]
+            pixels_y: 30 * 10,
+        }))
         .succeeds();
 
     res.stdout_contains("rows 30; columns 60;");
