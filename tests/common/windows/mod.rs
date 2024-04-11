@@ -90,12 +90,15 @@ impl AttachStdioGuard {
 
 impl Drop for AttachStdioGuard {
     fn drop(&mut self) {
-        self.original_stdin
-            .inspect(|h| unsafe { SetStdHandle(STD_INPUT_HANDLE, *h) }.unwrap());
-        self.original_stdout
-            .inspect(|h| unsafe { SetStdHandle(STD_OUTPUT_HANDLE, *h) }.unwrap());
-        self.original_stderr
-            .inspect(|h| unsafe { SetStdHandle(STD_ERROR_HANDLE, *h) }.unwrap());
+        if let Some(h) = self.original_stdin {
+            unsafe { SetStdHandle(STD_INPUT_HANDLE, h) }.unwrap()
+        };
+        if let Some(h) = self.original_stdout {
+            unsafe { SetStdHandle(STD_OUTPUT_HANDLE, h) }.unwrap()
+        };
+        if let Some(h) = self.original_stderr {
+            unsafe { SetStdHandle(STD_ERROR_HANDLE, h) }.unwrap()
+        };
     }
 }
 
