@@ -308,10 +308,10 @@ jobs:
     - uses: Swatinem/rust-cache@v2
     - name: Run sccache-cache
       uses: mozilla-actions/sccache-action@v0.0.4
-    - name: Setup tmate session
-      uses: mxschmitt/action-tmate@v3
+#    - name: Setup tmate session
+#      uses: mxschmitt/action-tmate@v3
     - name: Test
-      run: cargo nextest run --no-capture --hide-progress-bar --profile ci ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }}
+      run: cargo nextest run --hide-progress-bar --profile ci ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} --no-capture
       env:
         RUST_BACKTRACE: "1"
 
@@ -1009,6 +1009,8 @@ jobs:
         UTILITY_LIST="$(./util/show-utils.sh ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }})"
         CARGO_UTILITY_LIST_OPTIONS="$(for u in ${UTILITY_LIST}; do echo -n "-puu_${u} "; done;)"
         outputs CARGO_UTILITY_LIST_OPTIONS
+    - name: Setup tmate session
+      uses: mxschmitt/action-tmate@v3
     - name: Test
       run: cargo nextest run --profile ci --hide-progress-bar ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} -p uucore -p coreutils
       env:
