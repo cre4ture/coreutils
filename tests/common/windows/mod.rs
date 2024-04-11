@@ -208,9 +208,8 @@ impl ConsoleSpawnWrap {
                 TESTS_BINARY, "sleep", "3600",
             ]);
             let terminal_size = simulated_terminal.size.unwrap_or_default();
-            let options = conpty::ProcessOptions {
-                console_size: Some((terminal_size.cols as i16, terminal_size.rows as i16)),
-            };
+            let mut options = conpty::ProcessOptions::default();
+            options.set_console_size(Some((terminal_size.cols as i16, terminal_size.rows as i16)));
 
             let mut cmd_child = options.spawn(dummy_cmd).unwrap();
 

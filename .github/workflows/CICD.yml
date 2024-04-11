@@ -1009,8 +1009,8 @@ jobs:
         UTILITY_LIST="$(./util/show-utils.sh ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }})"
         CARGO_UTILITY_LIST_OPTIONS="$(for u in ${UTILITY_LIST}; do echo -n "-puu_${u} "; done;)"
         outputs CARGO_UTILITY_LIST_OPTIONS
-    - name: Setup tmate session
-      uses: mxschmitt/action-tmate@v3
+#    - name: Setup tmate session
+#      uses: mxschmitt/action-tmate@v3
     - name: Test
       run: cargo nextest run --profile ci --hide-progress-bar ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} -p uucore -p coreutils
       env:

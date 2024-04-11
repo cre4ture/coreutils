@@ -326,10 +326,10 @@ checksum = "120133d4db2ec47efe2e26502ee984747630c67f51974fca0b6c1340cf2368d3"
 
 [[package]]
 name = "conpty"
-version = "0.5.1"
-source = "git+https://github.com/cre4ture/conpty.git?branch=feature/spawn_with_initial_terminal_size_param#e1049d1d4c49cea134f5837fba15841e9883ec35"
+version = "0.6.0"
+source = "git+https://github.com/cre4ture/conpty.git?branch=feature/reduced_deps#db91bde56645e781c1df3373f1a8e3e420a44e39"
 dependencies = [
- "windows 0.44.0",
+ "windows 0.54.0",
 ]
 
 [[package]]
@@ -3383,15 +3383,6 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
-
-[[package]]
-name = "windows"
-version = "0.44.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e745dab35a0c4c77aa3ce42d595e13d2003d6902d6b08c9ef5fc326d08da12b"
-dependencies = [
- "windows-targets 0.42.2",
-]
 
 [[package]]
 name = "windows"
