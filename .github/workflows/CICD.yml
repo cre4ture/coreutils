@@ -3,7 +3,7 @@ name: CICD
 # spell-checker:ignore (abbrev/names) CICD CodeCOV MacOS MinGW MSVC musl taiki
 # spell-checker:ignore (env/flags) Awarnings Ccodegen Coverflow Cpanic Dwarnings RUSTDOCFLAGS RUSTFLAGS Zpanic CARGOFLAGS
 # spell-checker:ignore (jargon) SHAs deps dequote softprops subshell toolchain fuzzers
-# spell-checker:ignore (people) Peltoche rivy dtolnay
+# spell-checker:ignore (people) Peltoche rivy dtolnay mxschmitt
 # spell-checker:ignore (shell/tools) choco clippy dmake dpkg esac fakeroot fdesc fdescfs gmake grcov halium lcov libssl mkdir popd printf pushd rsync rustc rustfmt rustup shopt utmpdump xargs
 # spell-checker:ignore (misc) aarch alnum armhf bindir busytest coreutils defconfig DESTDIR gecos gnueabihf issuecomment maint multisize nullglob onexitbegin onexitend pell runtest Swatinem tempfile testsuite toybox uutils
 
@@ -308,6 +308,8 @@ jobs:
     - uses: Swatinem/rust-cache@v2
     - name: Run sccache-cache
       uses: mozilla-actions/sccache-action@v0.0.4
+    - name: Setup tmate session
+      uses: mxschmitt/action-tmate@v3
     - name: Test
       run: cargo nextest run --hide-progress-bar --profile ci ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }}
       env:
