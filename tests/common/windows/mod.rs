@@ -184,25 +184,20 @@ impl ConsoleSpawnWrap {
             // 4. we re-attach our process to the console of the parent
 
             let mut dummy_cmd = std::process::Command::new(PathBuf::from(TESTS_BINARY));
+            // using "env" with extended functionality as a tool for very basic scripting ("&&")
             #[rustfmt::skip]
-            dummy_cmd.args([
-                // using "env" with extended functionality as a tool for very basic scripting ("&&")
-                "env",
-                // There was a instability in the CI that was caused by still active echo.
-                // Try to make this more stable by delaying the setting change a bit.
-                //TESTS_BINARY, "sleep", "0.05", "&&",
+            dummy_cmd.arg("env");
+            // There was a instability in the CI that was caused by still active echo.
+            // Try to make this more stable by delaying the setting change a bit.
+            // dummy_cmd.args([TESTS_BINARY, "sleep", "0.05", "&&"]);
+            if !simulated_terminal.echo {
                 // Disable the echo mode that is on by default.
                 // Otherwise, one would get every input line automatically back as an output.
-                TESTS_BINARY, "stty", "--", "-echo", "&&",
-                TESTS_BINARY, "stty", "-a", "&&",
-                //TESTS_BINARY, "echo", "-n", "DUMMY1", "&&",
-                //TESTS_BINARY, "cat", "-", "&&",
-                //TESTS_BINARY, "sleep", "1", "&&",
-                //TESTS_BINARY, "echo", "DUMMY2", "&&",
-                //TESTS_BINARY, "sleep", "1", "&&",
-                //TESTS_BINARY, "echo", "DUMMY3", "&&",
-                //TESTS_BINARY, "sleep", "1", "&&",
-                //TESTS_BINARY, "echo", "DUMMY4", "&&",
+                dummy_cmd.args([TESTS_BINARY, "stty", "--", "-echo", "&&"]);
+            }
+            dummy_cmd.args([TESTS_BINARY, "stty", "-a", "&&"]);
+            #[rustfmt::skip]
+            dummy_cmd.args([
                 // this newline is needed to trigger the windows console header generation now
                 TESTS_BINARY, "echo", "-n", END_OF_HEADER_KEYWORD, "&&",
                 // this sleep will be killed shortly, but we need it to prevent the console to close
@@ -281,8 +276,11 @@ impl ConsoleSpawnWrap {
                 .read(true)
                 .open("CONIN$")
                 .unwrap();
-            //set_echo_mode(false, HANDLE(_pty_conin.as_raw_handle() as isize));
-            set_echo_mode(false, HANDLE(std::io::stdin().as_raw_handle() as isize));
+
+            if !simulated_terminal.echo {
+                //set_echo_mode(false, HANDLE(_pty_conin.as_raw_handle() as isize));
+                set_echo_mode(false, HANDLE(std::io::stdin().as_raw_handle() as isize));
+            }
             //disable_virtual_terminal_sequence_processing();
             // using this handle here directly pipes the data correctly, also the .is_terminal() returns true.
             // But on CI, the echo is still activated. Unclear why.
