@@ -54,8 +54,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@nightly
-    ## note: requires 'nightly' toolchain b/c `cargo-udeps` uses the `rustc` '-Z save-analysis' option
-    ## * ... ref: <https://github.com/est31/cargo-udeps/issues/73>
+      ## note: requires 'nightly' toolchain b/c `cargo-udeps` uses the `rustc` '-Z save-analysis' option
+      ## * ... ref: <https://github.com/est31/cargo-udeps/issues/73>
     - uses: taiki-e/install-action@cargo-udeps
     - uses: Swatinem/rust-cache@v2
     - name: Initialize workflow variables
@@ -98,11 +98,11 @@ jobs:
       matrix:
         job:
           - { os: ubuntu-latest  , features: feat_os_unix }
-# for now, don't build it on mac & windows because the doc is only published from linux
-# + it needs a bunch of duplication for build
-# and I don't want to add a doc step in the regular build to avoid long builds
-#          - { os: macos-latest   , features: feat_os_macos }
-#          - { os: windows-latest , features: feat_os_windows }
+          # for now, don't build it on mac & windows because the doc is only published from linux
+          # + it needs a bunch of duplication for build
+          # and I don't want to add a doc step in the regular build to avoid long builds
+          #          - { os: macos-latest   , features: feat_os_macos }
+          #          - { os: windows-latest , features: feat_os_windows }
     steps:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@master
@@ -308,8 +308,8 @@ jobs:
     - uses: Swatinem/rust-cache@v2
     - name: Run sccache-cache
       uses: mozilla-actions/sccache-action@v0.0.4
-#    - name: Setup tmate session
-#      uses: mxschmitt/action-tmate@v3
+      #    - name: Setup tmate session
+      #      uses: mxschmitt/action-tmate@v3
     - name: Test
       run: echo "cargo nextest run --hide-progress-bar --profile ci --features ${{ matrix.job.features }} --no-capture" && cargo nextest run --hide-progress-bar --profile ci --features ${{ matrix.job.features }} --no-capture
       env:
@@ -947,8 +947,8 @@ jobs:
     - uses: Swatinem/rust-cache@v2
     - name: Run sccache-cache
       uses: mozilla-actions/sccache-action@v0.0.4
-    # - name: Reattach HEAD ## may be needed for accurate code coverage info
-    #   run: git checkout ${{ github.head_ref }}
+      # - name: Reattach HEAD ## may be needed for accurate code coverage info
+      #   run: git checkout ${{ github.head_ref }}
     - name: Initialize workflow variables
       id: vars
       shell: bash
@@ -1009,8 +1009,8 @@ jobs:
         UTILITY_LIST="$(./util/show-utils.sh ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }})"
         CARGO_UTILITY_LIST_OPTIONS="$(for u in ${UTILITY_LIST}; do echo -n "-puu_${u} "; done;)"
         outputs CARGO_UTILITY_LIST_OPTIONS
-#    - name: Setup tmate session
-#      uses: mxschmitt/action-tmate@v3
+        #    - name: Setup tmate session
+        #      uses: mxschmitt/action-tmate@v3
     - name: Test
       run: echo "cargo nextest run --profile ci --hide-progress-bar ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} -p uucore -p coreutils" && cargo nextest run --profile ci --hide-progress-bar ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} -p uucore -p coreutils
       env:
