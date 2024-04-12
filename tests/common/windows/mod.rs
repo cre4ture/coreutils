@@ -211,12 +211,15 @@ impl ConsoleSpawnWrap {
             let mut options = conpty::ProcessOptions::default();
             options.set_console_size(Some((terminal_size.cols as i16, terminal_size.rows as i16)));
 
+            println!("spawning ... {:?}", dummy_cmd);
             let mut cmd_child = options.spawn(dummy_cmd).unwrap();
+            println!("spawning ... Done!");
 
             *stdin_pty = Some(Box::new(cmd_child.input().unwrap()));
             let mut reader = cmd_child.output().unwrap();
 
             // read and ignore full windows console header (ANSI escape sequences).
+            println!("start read header ... ");
             let header = read_till_show_cursor_ansi_escape(&mut reader);
             println!("read header: {}", header.escape_ascii());
 
@@ -343,6 +346,7 @@ fn read_till_show_cursor_ansi_escape<T: Read>(reader: &mut T) -> Vec<u8> {
         last.push_back(buf[0]);
         full_buf.push(buf[0]);
         _s = format!("{}", full_buf.escape_ascii());
+        println!("read: {}", _s);
         if last.len() == key_len {
             let compare_fn = |keyword: &[u8]| last.iter().zip(keyword.iter()).all(|(a, b)| a == b);
             found1 = found1 || compare_fn(keyword1);
