@@ -311,7 +311,7 @@ jobs:
 #    - name: Setup tmate session
 #      uses: mxschmitt/action-tmate@v3
     - name: Test
-      run: echo "cargo nextest run --hide-progress-bar --profile ci ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} --no-capture" && cargo nextest run --hide-progress-bar --profile ci ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} --no-capture
+      run: echo "cargo nextest run --hide-progress-bar --profile ci --features ${{ matrix.job.features }} --no-capture" && cargo nextest run --hide-progress-bar --profile ci --features ${{ matrix.job.features }} --no-capture
       env:
         RUST_BACKTRACE: "1"
 
@@ -338,7 +338,7 @@ jobs:
     - name: Run sccache-cache
       uses: mozilla-actions/sccache-action@v0.0.4
     - name: Test
-      run: cargo nextest run --hide-progress-bar --profile ci ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }}
+      run: cargo nextest run --hide-progress-bar --profile ci --features ${{ matrix.job.features }}
       env:
         RUST_BACKTRACE: "1"
 
