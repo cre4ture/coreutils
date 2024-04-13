@@ -3756,4 +3756,21 @@ mod tests {
             .no_stderr()
             .stdout_is("8\n16\n");
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_os_error_126() {
+        use portable_pty::{CommandBuilder, PtySize, PtySystem};
+
+        let pty = portable_pty::NativePtySystem::default();
+        let pair = pty
+            .openpty(PtySize {
+                rows: 30,
+                cols: 80,
+                pixel_height: 0,
+                pixel_width: 0,
+            })
+            .unwrap();
+        pair.slave.spawn_command(CommandBuilder::new_default_prog()).unwrap();
+    }
 }
