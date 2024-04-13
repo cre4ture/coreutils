@@ -516,10 +516,7 @@ xattr = { workspace = true }
 
 [target.'cfg(windows)'.dev-dependencies]
 windows = { workspace = true }
-
-[target.'cfg(windows)'.dev-dependencies.conpty]
-git = "https://github.com/cre4ture/conpty.git"
-branch = "feature/reduced_deps"
+portable-pty = "0.8.1"
 
 [build-dependencies]
 phf_codegen = { workspace = true }

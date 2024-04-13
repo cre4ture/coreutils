@@ -3,10 +3,11 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-//spell-checker: ignore conpty conin conout ENDHEA
+//spell-checker: ignore conpty conin conout ENDHEA openpty
 
 mod process;
 
+use portable_pty::{CommandBuilder, PtySize, PtySystem};
 use std::cmp::max;
 use std::collections::VecDeque;
 use std::io::{Read, StderrLock, StdinLock, StdoutLock, Write};
@@ -26,9 +27,6 @@ use windows::Win32::System::Console::{
 use super::util::{ForwardedOutput, TerminalSimulation, TESTS_BINARY};
 
 pub(crate) static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\r', b'\n', 0x1A, b'\r', b'\n']; // send ^Z
-                                                                                             //pub(crate) static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\r', b'\n', 0x5A, b'\r', b'\n']; // send ^Z
-                                                                                             //pub(crate) static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\r', b'\n', 0x04, b'\r', b'\n'];
-                                                                                             //pub(crate) static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\r', b'\n', 0x17, b'\r', b'\n'];
 
 static CONSOLE_SPAWNING_MUTEX: std::sync::Mutex<u32> = std::sync::Mutex::new(0);
 static END_OF_HEADER_KEYWORD: &str = "ENDHEA";
@@ -150,10 +148,11 @@ impl AllReAttachConsoleGuard {
     }
 }
 
-#[derive(Debug)]
 pub(crate) struct ConsoleSpawnWrap {
     terminal_simulation: Option<TerminalSimulation>,
-    child_console: Option<conpty::Process>,
+    pty_system: Option<Box<dyn portable_pty::PtySystem>>,
+    pty_pair: Option<portable_pty::PtyPair>,
+    child_console: Option<Box<dyn portable_pty::Child + Sync + Send>>,
     guard: Option<AllReAttachConsoleGuard>,
 }
 
@@ -161,6 +160,8 @@ impl ConsoleSpawnWrap {
     pub(crate) fn new(terminal_simulation: Option<TerminalSimulation>) -> Self {
         Self {
             terminal_simulation,
+            pty_system: None,
+            pty_pair: None,
             child_console: None,
             guard: None,
         }
@@ -208,15 +209,25 @@ impl ConsoleSpawnWrap {
                 TESTS_BINARY, "sleep", "3600",
             ]);
             let terminal_size = simulated_terminal.size.unwrap_or_default();
-            let mut options = conpty::ProcessOptions::default();
-            options.set_console_size(Some((terminal_size.cols as i16, terminal_size.rows as i16)));
+            let pty = Box::new(portable_pty::NativePtySystem::default());
+            let pair = pty
+                .openpty(PtySize {
+                    rows: terminal_size.rows,
+                    cols: terminal_size.cols,
+                    pixel_height: 0,
+                    pixel_width: 0,
+                })
+                .unwrap();
 
-            println!("spawning ... {:?}", dummy_cmd);
-            let mut cmd_child = options.spawn(dummy_cmd).unwrap();
-            println!("spawning ... Done!");
+            let mut cmd2 = CommandBuilder::new(dummy_cmd.get_program());
+            cmd2.args(dummy_cmd.get_args());
 
-            *stdin_pty = Some(Box::new(cmd_child.input().unwrap()));
-            let mut reader = cmd_child.output().unwrap();
+            println!("spawning ... {:?}", cmd2);
+            let child = pair.slave.spawn_command(cmd2).unwrap();
+            println!("spawning ... Done! pid: {}", child.process_id().unwrap());
+
+            *stdin_pty = Some(Box::new(pair.master.take_writer().unwrap()));
+            let mut reader = pair.master.try_clone_reader().unwrap();
 
             // read and ignore full windows console header (ANSI escape sequences).
             println!("start read header ... ");
@@ -227,11 +238,13 @@ impl ConsoleSpawnWrap {
                 .spawn_reader_thread(Box::new(reader), "win_conpty_reader".into())
                 .unwrap();
 
-            self.guard = Some(AllReAttachConsoleGuard::new(cmd_child.pid()));
+            self.guard = Some(AllReAttachConsoleGuard::new(child.process_id().unwrap()));
 
             self.configure_stdio_for_spawn_of_child(&simulated_terminal, command);
 
-            self.child_console = Some(cmd_child);
+            self.pty_system = Some(pty);
+            self.pty_pair = Some(pair);
+            self.child_console = Some(child);
         }
     }
 
@@ -255,7 +268,7 @@ impl ConsoleSpawnWrap {
 
     fn kill_and_wait_all_console_processes(&mut self) {
         if let Some(console) = &self.child_console {
-            let _guards = AllReAttachConsoleGuard::new(console.pid());
+            let _guards = AllReAttachConsoleGuard::new(console.process_id().unwrap());
             let process_ids = Self::get_console_process_id_list(true);
             mem::drop(_guards);
 
@@ -316,8 +329,8 @@ impl Drop for ConsoleSpawnWrap {
     fn drop(&mut self) {
         self.kill_and_wait_all_console_processes();
         if let Some(console) = &mut self.child_console {
-            let _ = console.exit(0);
-            console.wait(Some(500)).unwrap();
+            let _ = console.kill();
+            console.wait().unwrap();
         }
         self.child_console = None;
     }
@@ -369,8 +382,6 @@ fn set_echo_mode(on: bool, stdin_h: HANDLE) {
     } else {
         mode &= !ENABLE_ECHO_INPUT;
     }
-
-    // mode |= ENABLE_VIRTUAL_TERMINAL_INPUT;
 
     unsafe { SetConsoleMode(stdin_h, mode) }.unwrap();
 }
