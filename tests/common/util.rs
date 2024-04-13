@@ -1258,7 +1258,10 @@ impl Default for TerminalSimulation {
             stdin: true,
             stdout: true,
             stderr: true,
-            echo: true,
+            // by default normal consoles
+            // have echo enabled. But its
+            // prone to OS specific behavior.
+            echo: false,
         }
     }
 }

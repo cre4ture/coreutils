@@ -29,7 +29,7 @@ fn test_terminal_simulation() {
 fn test_terminal_simulation_all_stdio() {
     let output = new_ucmd!()
         .args(&["-d", "in,out,err"])
-        .terminal_simulation(true)
+        .terminal_sim_stdio(TerminalSimulation::default())
         .succeeds();
 
     #[cfg(unix)]
