@@ -150,6 +150,7 @@ UNIX_PROGS := \
 	sleep \
 	stat \
 	stdbuf \
+	stty \
 	timeout \
 	touch \
 	tty \
