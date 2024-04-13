@@ -4085,9 +4085,14 @@ mod tests {
         let child = cmd.run_no_wait();
         let out = child.wait().unwrap();
 
+        #[cfg(not(any(target_os = "freebsd", target_os = "macos")))]
+        let expected = format!("{}\r\n{}\r\n", message, message);
+        #[cfg(any(target_os = "freebsd", target_os = "macos"))]
+        let expected = format!("{}\r\n{}{}\r\n", message, "^D\u{8}\u{8}", message);
+
         std::assert_eq!(
             String::from_utf8_lossy(out.stdout()),
-            format!("{}\r\n{}\r\n", message, message)
+            expected
         );
         std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
     }
