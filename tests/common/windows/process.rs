@@ -3,12 +3,19 @@ use std::os::{
     windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
 };
 
-use windows::Win32::{
-    Foundation::{E_ABORT, E_FAIL, FALSE, HANDLE, WAIT_ABANDONED_0, WAIT_OBJECT_0, WAIT_TIMEOUT},
+use uucore::windows_sys::Win32::{
+    Foundation::{
+        FALSE, HANDLE, INVALID_HANDLE_VALUE, WAIT_ABANDONED_0, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    },
     System::Threading::{OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_TERMINATE},
 };
 
-use windows::core::Result;
+pub(crate) enum Error {
+    Timeout,
+    ProcessOpenFailed,
+    TerminateProcessFailed,
+    WaitFailedUnknown(String),
+}
 
 #[derive(Debug)]
 pub(crate) struct ProcessHandle {
@@ -16,35 +23,38 @@ pub(crate) struct ProcessHandle {
 }
 
 impl ProcessHandle {
-    pub(crate) fn new_from_id(process_id: u32) -> Result<Self> {
+    pub(crate) fn new_from_id(process_id: u32) -> Result<Self, Error> {
         let handle = unsafe {
-            OwnedHandle::from_raw_handle(
-                OpenProcess(PROCESS_TERMINATE, FALSE, process_id)?.0 as *mut c_void,
-            )
+            let result = OpenProcess(PROCESS_TERMINATE, FALSE, process_id);
+            if result == INVALID_HANDLE_VALUE {
+                return Err(Error::ProcessOpenFailed);
+            }
+            OwnedHandle::from_raw_handle(result as *mut c_void)
         };
         Ok(Self { handle })
     }
 
-    pub(crate) fn terminate(&self, exit_code: u32) -> Result<()> {
-        unsafe { TerminateProcess(self.win_handle(), exit_code)? };
-        Ok(())
+    pub(crate) fn terminate(&self, exit_code: u32) -> Result<(), Error> {
+        let success = unsafe { TerminateProcess(self.win_handle(), exit_code) } != 0;
+        if success {
+            Ok(())
+        } else {
+            Err(Error::TerminateProcessFailed)
+        }
     }
 
-    pub(crate) fn wait_for_end(&self, timeout_ms: u32) -> Result<()> {
+    pub(crate) fn wait_for_end(&self, timeout_ms: u32) -> Result<(), Error> {
         match unsafe { WaitForSingleObject(self.win_handle(), timeout_ms) } {
             WAIT_OBJECT_0 | WAIT_ABANDONED_0 => Ok(()),
-            WAIT_TIMEOUT => Err(windows::core::Error::new(
-                E_ABORT,
-                "Timeout on wait for process",
-            )),
-            event => Err(windows::core::Error::new(
-                E_FAIL,
-                format!("unexpected response when waiting: {:?}", event),
-            )),
+            WAIT_TIMEOUT => Err(Error::Timeout),
+            event => Err(Error::WaitFailedUnknown(format!(
+                "unexpected response when waiting: {:?}",
+                event
+            ))),
         }
     }
 
     fn win_handle(&self) -> HANDLE {
-        HANDLE(self.handle.as_raw_handle() as isize)
+        self.handle.as_raw_handle() as HANDLE
     }
 }

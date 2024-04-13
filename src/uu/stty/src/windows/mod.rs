@@ -11,11 +11,12 @@ use std::{
 use uucore::{
     error::{UResult, USimpleError},
     io::OwnedFileDescriptorOrHandle,
-};
-use windows::Win32::{
-    Foundation::HANDLE,
-    System::Console::{
-        GetConsoleMode, SetConsoleMode, CONSOLE_MODE, ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT,
+    show_error,
+    windows_sys::Win32::{
+        Foundation::HANDLE,
+        System::Console::{
+            GetConsoleMode, SetConsoleMode, CONSOLE_MODE, ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT,
+        },
     },
 };
 
@@ -27,10 +28,14 @@ pub(crate) fn open_file_of_options(f: &str) -> io::Result<OwnedFileDescriptorOrH
 
 fn set_echo_mode(on: bool) {
     // setting the echo mode works only on stdin.
-    let stdin_h = HANDLE(std::io::stdin().as_raw_handle() as isize);
+    let stdin_h = std::io::stdin().as_raw_handle() as HANDLE;
 
     let mut mode = CONSOLE_MODE::default();
-    unsafe { GetConsoleMode(stdin_h, &mut mode) }.unwrap();
+    let success = unsafe { GetConsoleMode(stdin_h, &mut mode) } != 0;
+    if !success {
+        show_error!("failed to GetConsoleMode.");
+        return;
+    }
 
     if on {
         mode |= ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT;
@@ -38,17 +43,23 @@ fn set_echo_mode(on: bool) {
         mode &= !ENABLE_ECHO_INPUT;
     }
 
-    unsafe { SetConsoleMode(stdin_h, mode) }.unwrap();
+    let success = unsafe { SetConsoleMode(stdin_h, mode) } != 0;
+    if !success {
+        show_error!("failed to SetConsoleMode.");
+    }
 }
 
-fn get_echo_mode() -> bool {
+fn get_echo_mode() -> Option<bool> {
     // getting the echo mode works only on stdin.
-    let stdin_h = HANDLE(std::io::stdin().as_raw_handle() as isize);
+    let stdin_h = std::io::stdin().as_raw_handle() as HANDLE;
 
     let mut mode = CONSOLE_MODE::default();
-    unsafe { GetConsoleMode(stdin_h, &mut mode) }.unwrap();
+    let success = unsafe { GetConsoleMode(stdin_h, &mut mode) } != 0;
+    if !success {
+        return None;
+    }
 
-    (mode & ENABLE_ECHO_INPUT).0 != 0
+    Some((mode & ENABLE_ECHO_INPUT) != 0)
 }
 
 fn apply_setting(setting: &str) -> UResult<()> {
@@ -86,7 +97,9 @@ pub(crate) fn stty(opts: &Options) -> UResult<()> {
             print!("speed {baud} baud");
             print!("; rows {}; columns {}", terminal_height.0, terminal_width.0);
             println!("; line = {line_discipline};");
-            println!("{}echo", if get_echo_mode() { "" } else { "-" });
+            if let Some(mode) = get_echo_mode() {
+                println!("{}echo", if mode { "" } else { "-" });
+            }
         }
     }
 

@@ -311,7 +311,7 @@ jobs:
       #    - name: Setup tmate session
       #      uses: mxschmitt/action-tmate@v3
     - name: Test
-      run: echo "cargo nextest run --hide-progress-bar --profile ci --features ${{ matrix.job.features }} --no-capture" && cargo nextest run --hide-progress-bar --profile ci --features ${{ matrix.job.features }} --no-capture
+      run: cargo nextest run --hide-progress-bar --profile ci --features ${{ matrix.job.features }}
       env:
         RUST_BACKTRACE: "1"
 
@@ -1012,7 +1012,7 @@ jobs:
         # - name: Setup tmate session
         #  uses: mxschmitt/action-tmate@v3
     - name: Test
-      run: echo "cargo nextest run --profile ci --hide-progress-bar ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} -p uucore -p coreutils" && cargo nextest run --profile ci --hide-progress-bar ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} -p uucore -p coreutils
+      run: cargo nextest run --profile ci --hide-progress-bar ${{ steps.vars.outputs.CARGO_FEATURES_OPTION }} -p uucore -p coreutils
       env:
         RUSTC_WRAPPER: ""
         RUSTFLAGS: "-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort"

@@ -17,8 +17,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::MutexGuard;
 use std::time::Duration;
-use windows::Win32::Foundation::HANDLE;
-use windows::Win32::System::Console::{
+use uucore::windows_sys::Win32::Foundation::HANDLE;
+use uucore::windows_sys::Win32::System::Console::{
     AttachConsole, FreeConsole, GetConsoleMode, GetConsoleProcessList, GetStdHandle,
     SetConsoleMode, SetStdHandle, ATTACH_PARENT_PROCESS, CONSOLE_MODE, ENABLE_ECHO_INPUT,
     ENABLE_LINE_INPUT, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
@@ -63,21 +63,21 @@ impl BlockOtherThreadsGuard {
 
 #[derive(Debug)]
 struct AttachStdioGuard {
-    original_stdin: Option<HANDLE>,
-    original_stdout: Option<HANDLE>,
-    original_stderr: Option<HANDLE>,
+    original_stdin: HANDLE,
+    original_stdout: HANDLE,
+    original_stderr: HANDLE,
 }
 
 impl AttachStdioGuard {
     fn new() -> Self {
-        let original_stdin = unsafe { GetStdHandle(STD_INPUT_HANDLE) }.ok();
-        let original_stdout = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) }.ok();
-        let original_stderr = unsafe { GetStdHandle(STD_ERROR_HANDLE) }.ok();
+        let original_stdin = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
+        let original_stdout = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+        let original_stderr = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
         // setting the handles to null prevents that the spawned child inherits from something
         // other than the pseudo console.
-        unsafe { SetStdHandle(STD_INPUT_HANDLE, HANDLE(0)) }.unwrap();
-        unsafe { SetStdHandle(STD_OUTPUT_HANDLE, HANDLE(0)) }.unwrap();
-        unsafe { SetStdHandle(STD_ERROR_HANDLE, HANDLE(0)) }.unwrap();
+        let _ = unsafe { SetStdHandle(STD_INPUT_HANDLE, 0 as HANDLE) };
+        let _ = unsafe { SetStdHandle(STD_OUTPUT_HANDLE, 0 as HANDLE) };
+        let _ = unsafe { SetStdHandle(STD_ERROR_HANDLE, 0 as HANDLE) };
         Self {
             original_stdin,
             original_stdout,
@@ -88,15 +88,9 @@ impl AttachStdioGuard {
 
 impl Drop for AttachStdioGuard {
     fn drop(&mut self) {
-        if let Some(h) = self.original_stdin {
-            unsafe { SetStdHandle(STD_INPUT_HANDLE, h) }.unwrap()
-        };
-        if let Some(h) = self.original_stdout {
-            unsafe { SetStdHandle(STD_OUTPUT_HANDLE, h) }.unwrap()
-        };
-        if let Some(h) = self.original_stderr {
-            unsafe { SetStdHandle(STD_ERROR_HANDLE, h) }.unwrap()
-        };
+        let _ = unsafe { SetStdHandle(STD_INPUT_HANDLE, self.original_stdin) };
+        let _ = unsafe { SetStdHandle(STD_OUTPUT_HANDLE, self.original_stdout) };
+        let _ = unsafe { SetStdHandle(STD_ERROR_HANDLE, self.original_stderr) };
     }
 }
 
@@ -105,18 +99,18 @@ struct SwitchToConsoleGuard {}
 
 impl SwitchToConsoleGuard {
     fn new(process_id: u32) -> Self {
-        unsafe { FreeConsole() }.unwrap();
+        let _ = unsafe { FreeConsole() };
 
-        let mut result = Err(windows::core::Error::empty());
+        let mut success = false;
         for _i in 0..1 {
-            result = unsafe { AttachConsole(process_id) };
-            if result.is_ok() {
+            success = unsafe { AttachConsole(process_id) } != 0;
+            if success {
                 break;
             }
             std::thread::sleep(Duration::from_millis(2));
         }
-        if let Err(e) = result {
-            panic!("attaching to new console failed! {:?}", e);
+        if !success {
+            panic!("attaching to new console failed!");
         }
         Self {}
     }
@@ -124,7 +118,7 @@ impl SwitchToConsoleGuard {
 
 impl Drop for SwitchToConsoleGuard {
     fn drop(&mut self) {
-        unsafe { FreeConsole() }.unwrap();
+        let _ = unsafe { FreeConsole() };
         // this fails during debugging sessions. apparently there is no console
         // attached to the parent process. ignore it.
         let _ = unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
@@ -249,10 +243,13 @@ impl ConsoleSpawnWrap {
     }
 
     fn get_console_process_id_list(exclude_self: bool) -> Vec<u32> {
-        let process_count = unsafe { GetConsoleProcessList(&mut [0, 0, 0]) };
+        let mut dummy_buf = [0, 0, 0];
+        let process_count =
+            unsafe { GetConsoleProcessList(dummy_buf.as_mut_ptr(), dummy_buf.len() as u32) };
         if process_count > 0 {
             let mut buffer = vec![0; process_count as usize + 20];
-            let process_count = unsafe { GetConsoleProcessList(&mut buffer) } as usize;
+            let process_count =
+                unsafe { GetConsoleProcessList(buffer.as_mut_ptr(), buffer.len() as u32) } as usize;
             if process_count <= buffer.len() {
                 buffer.resize(process_count, 0);
                 if exclude_self {
@@ -297,7 +294,7 @@ impl ConsoleSpawnWrap {
 
             if !simulated_terminal.echo {
                 //set_echo_mode(false, HANDLE(_pty_conin.as_raw_handle() as isize));
-                set_echo_mode(false, HANDLE(std::io::stdin().as_raw_handle() as isize));
+                set_echo_mode(false, std::io::stdin().as_raw_handle() as HANDLE);
             }
             //disable_virtual_terminal_sequence_processing();
             // using this handle here directly pipes the data correctly, also the .is_terminal() returns true.
@@ -375,7 +372,11 @@ fn read_till_show_cursor_ansi_escape<T: Read>(reader: &mut T) -> Vec<u8> {
 
 fn set_echo_mode(on: bool, stdin_h: HANDLE) {
     let mut mode = CONSOLE_MODE::default();
-    unsafe { GetConsoleMode(stdin_h, &mut mode) }.unwrap();
+    let success = unsafe { GetConsoleMode(stdin_h, &mut mode) } != 0;
+    if !success {
+        eprintln!("failed to GetConsoleMode.");
+        return;
+    }
 
     if on {
         mode |= ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT;
@@ -383,7 +384,10 @@ fn set_echo_mode(on: bool, stdin_h: HANDLE) {
         mode &= !ENABLE_ECHO_INPUT;
     }
 
-    unsafe { SetConsoleMode(stdin_h, mode) }.unwrap();
+    let success = unsafe { SetConsoleMode(stdin_h, mode) } != 0;
+    if !success {
+        eprintln!("failed to SetConsoleMode.");
+    }
 }
 
 #[cfg(test)]

@@ -24,7 +24,7 @@ mod options {
 fn inspect_one(
     silent: bool,
     name: Option<&str>,
-    fx: OwnedFileDescriptorOrHandle,
+    fx: &OwnedFileDescriptorOrHandle,
 ) -> std::io::Result<bool> {
     let is_terminal = fx.as_raw().is_terminal();
 
@@ -79,7 +79,7 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
             }
         }?;
 
-        let is_terminal = inspect_one(silent, with_name.then_some(d.as_str()), selected_stdio)
+        let is_terminal = inspect_one(silent, with_name.then_some(d.as_str()), &selected_stdio)
             .map_err(|_| -> std::io::Error {
                 // Don't return to prevent a panic later when another flush is attempted
                 // because the `uucore_procs::main` macro inserts a flush after execution for every utility.

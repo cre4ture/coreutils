@@ -20,9 +20,6 @@ uucore = { workspace = true }
 nix = { workspace = true, features = ["term", "ioctl"] }
 terminal_size = { workspace = true }
 
-[target.'cfg(windows)'.dependencies]
-windows = { workspace = true }
-
 [[bin]]
 name = "stty"
 path = "src/main.rs"
