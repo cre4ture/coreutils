@@ -3815,7 +3815,7 @@ mod tests {
             .succeeds();
         std::assert_eq!(
             String::from_utf8_lossy(out.stdout()),
-            "\r\nstdin is atty\r\nterminal size: 24 80\r\nstdout is atty\r\nstderr is atty\r\nThis is an error message.\r\n"
+            "stdin is atty\r\nterminal size: 24 80\r\nstdout is atty\r\nstderr is atty\r\nThis is an error message.\r\n"
         );
         std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
     }
