@@ -397,33 +397,33 @@ mod tests {
     #[test]
     #[should_panic(expected = "failed to fill whole buffer")]
     fn test_detection_of_keywords_fails_only_first_keyword() {
-        let mut string = "jaslkdfjklasfjaklsdfjsalkfdjalskfjklsajdf\x1b[?25h".as_bytes();
+        let mut string = "====================================\x1b[?25h".as_bytes();
         read_till_show_cursor_ansi_escape(&mut string);
     }
 
     #[test]
     #[should_panic(expected = "failed to fill whole buffer")]
     fn test_detection_of_keywords_fails_only_second_keyword() {
-        let mut string = "jaslkdfjklasfjaklsdfjsalkfdjalskfjklsajdfENDHEA".as_bytes();
+        let mut string = "--------------------------------ENDHEA".as_bytes();
         read_till_show_cursor_ansi_escape(&mut string);
     }
 
     #[test]
     fn test_detection_of_keywords_succeeds_with_first_and_second_keyword() {
-        let mut string = "jaslkdfjklasfjaklsdfjsalkfdjalskfjklsajdf\x1b[?25hENDHEA".as_bytes();
+        let mut string = "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\x1b[?25hENDHEA".as_bytes();
         read_till_show_cursor_ansi_escape(&mut string);
     }
 
     #[test]
     fn test_detection_of_keywords_succeeds_with_second_and_first_keyword() {
-        let mut string = "jaslkdfjklasfjaklsdfjsalkfdjalskfjklsajdfENDHEA\x1b[?25h".as_bytes();
+        let mut string = ".....................................ENDHEA\x1b[?25h".as_bytes();
         read_till_show_cursor_ansi_escape(&mut string);
     }
 
     #[test]
     fn test_detection_of_keywords_succeeds_with_second_and_first_keyword_and_stuff_in_between() {
         let mut string =
-            "jaslkdfjklasfjaklsdfjsalkfdjalskfjklsajdfENDHEAadsadafsdgsadgsa\x1b[?25h".as_bytes();
+            "+++++++++++++++++++++ENDHEA+++++++++++++++++++++++\x1b[?25h".as_bytes();
         read_till_show_cursor_ansi_escape(&mut string);
     }
 }
