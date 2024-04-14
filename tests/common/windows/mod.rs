@@ -243,11 +243,11 @@ impl ConsoleSpawnWrap {
     }
 
     fn get_console_process_id_list(exclude_self: bool) -> Vec<u32> {
-        let mut dummy_buf = [0, 0, 0];
+        let mut dummy_buf = [0u32, 0u32, 0u32];
         let process_count =
             unsafe { GetConsoleProcessList(dummy_buf.as_mut_ptr(), dummy_buf.len() as u32) };
         if process_count > 0 {
-            let mut buffer = vec![0; process_count as usize + 20];
+            let mut buffer = vec![0u32; process_count as usize + 20];
             let process_count =
                 unsafe { GetConsoleProcessList(buffer.as_mut_ptr(), buffer.len() as u32) } as usize;
             if process_count <= buffer.len() {
