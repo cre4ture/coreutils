@@ -1534,7 +1534,7 @@ impl UCommand {
     /// (unix: pty, windows: ConPTY)
     pub fn terminal_simulation(&mut self, enable: bool) -> &mut Self {
         if enable {
-            self.terminal_simulation = Some(TerminalSimulation::full());
+            self.terminal_simulation = Some(TerminalSimulation::default());
         } else {
             self.terminal_simulation = None;
         }
