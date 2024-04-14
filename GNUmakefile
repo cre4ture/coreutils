@@ -229,6 +229,7 @@ TEST_PROGS  := \
 	split \
 	stat \
 	stdbuf \
+	stty \
 	sum \
 	tac \
 	tail \
@@ -238,6 +239,7 @@ TEST_PROGS  := \
 	true \
 	truncate \
 	tsort \
+	tty \
 	uname \
 	unexpand \
 	uniq \
