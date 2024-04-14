@@ -4090,10 +4090,7 @@ mod tests {
         #[cfg(any(target_os = "freebsd", target_os = "macos"))]
         let expected = format!("{}\r\n{}{}\r\n", message, "^D\u{8}\u{8}", message);
 
-        std::assert_eq!(
-            String::from_utf8_lossy(out.stdout()),
-            expected
-        );
+        std::assert_eq!(String::from_utf8_lossy(out.stdout()), expected);
         std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
     }
 
@@ -4136,10 +4133,13 @@ mod tests {
         child.write_in("Hello stdin forwarding via write_in!");
         let out = child.wait().unwrap();
 
-        std::assert_eq!(
-            String::from_utf8_lossy(out.stdout()),
-            "Hello stdin forwarding via write_in!\r\nHello stdin forwarding via write_in!\r\n"
-        );
+        #[cfg(any(target_os = "macos", target_os = "freebsd"))]
+        let expected = r"Hello stdin forwarding via write_in!\r\n^D\u{8}\u{8}Hello stdin forwarding via write_in!\r\n";
+        #[cfg(not(any(target_os = "macos", target_os = "freebsd")))]
+        let expected =
+            r"Hello stdin forwarding via write_in!\r\nHello stdin forwarding via write_in!\r\n";
+
+        std::assert_eq!(format!("{}", out.stdout().escape_ascii()), expected);
         std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
     }
 
