@@ -110,6 +110,7 @@ PROGS       := \
 	sleep \
 	sort \
 	split \
+	stty \
 	sum \
 	sync \
 	tac \

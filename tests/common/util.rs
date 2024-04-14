@@ -2263,7 +2263,6 @@ impl UChild {
         // some apps do not stop execution until their stdin gets closed.
         // to prevent a endless waiting here, we close the stdin.
         self.join(); // ensure that all pending async input is piped in
-                     //std::thread::sleep(Duration::from_millis(1000));
         self.close_stdin();
 
         let output = if let Some(timeout) = self.timeout {
@@ -2304,7 +2303,7 @@ impl UChild {
                 .unwrap();
         };
 
-        // this drops the console, which is important on windows do un-block the reader tasks.
+        // this drops the console, which is important on windows to un-block the reader tasks.
         self.console_spawn_wrap = None;
 
         if let Some(handle) = self.captured_stdout.reader_thread_handle.take() {
@@ -4006,25 +4005,9 @@ mod tests {
         let scene = TestScenario::new("util");
 
         let mut cmd = scene.ccmd("env");
-        //cmd.args(&[TESTS_BINARY, "sleep", "1", "&&"]);
-        //cmd.args(&[TESTS_BINARY, "echo", "START", "&&"]);
-        //cmd.args(&[TESTS_BINARY, "sleep", "1", "&&"]);
-        //cmd.args(&[TESTS_BINARY, "echo", "-n", "START2", "&&"]);
-        //cmd.args(&[TESTS_BINARY, "sleep", "1", "&&"]);
-        //cmd.args(&[TESTS_BINARY, "dd", "count=0", "&&"]);
         cmd.args(&[TESTS_BINARY, "stty", "-a", "&&"]);
         cmd.args(&[TESTS_BINARY, "cat", "-", "&&"]);
         cmd.args(&[TESTS_BINARY, "stty", "-a", "&&"]);
-        //cmd.args(&[TESTS_BINARY, "sleep", "1", "&&"]);;
-        //cmd.args(&[TESTS_BINARY, "echo", "END", "&&"]);
-        //cmd.args(&[TESTS_BINARY, "sleep", "1", "&&"]);;
-        //cmd.args(&[TESTS_BINARY, "echo", "END0", "&&"]);
-        //cmd.args(&[TESTS_BINARY, "sleep", "1", "&&"]);;
-        //cmd.args(&[TESTS_BINARY, "echo", "END-1", "&&"]);
-        //cmd.args(&[TESTS_BINARY, "sleep", "1", "&&"]);;
-        //cmd.args(&[TESTS_BINARY, "echo", "END-2", "&&"]);
-        //cmd.args(&[TESTS_BINARY, "sleep", "1", "&&"]);;
-        //cmd.args(&[TESTS_BINARY, "echo", "END-3"]);
         cmd.args(&[TESTS_BINARY, "true"]);
         cmd.timeout(std::time::Duration::from_secs(100));
         cmd.terminal_sim_stdio(TerminalSimulation::full().echo(false));
