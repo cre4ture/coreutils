@@ -215,6 +215,12 @@ jobs:
       env:
         RUSTFLAGS: "-Awarnings"
         RUST_BACKTRACE: "1"
+    - name: Setup tmate session
+      if: always()
+      uses: mxschmitt/action-tmate@v3
+      env:
+        RUSTFLAGS: "-Awarnings"
+        RUST_BACKTRACE: "1"
 
   deps:
     name: Dependencies
