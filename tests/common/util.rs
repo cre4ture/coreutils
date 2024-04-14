@@ -4018,7 +4018,7 @@ mod tests {
         out.print_outputs();
 
         std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
-        //std::assert_eq!(String::from_utf8_lossy(out.stdout()), "\r\n");
+        std::assert_eq!(String::from_utf8_lossy(out.stdout()), "\r\n");
         out.stdout_matches(&Regex::new(r"\s-echo\s").unwrap());
         out.stdout_does_not_match(&Regex::new(r"\secho\s").unwrap());
     }
