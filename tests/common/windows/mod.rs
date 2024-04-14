@@ -422,8 +422,7 @@ mod tests {
 
     #[test]
     fn test_detection_of_keywords_succeeds_with_second_and_first_keyword_and_stuff_in_between() {
-        let mut string =
-            "+++++++++++++++++++++ENDHEA+++++++++++++++++++++++\x1b[?25h".as_bytes();
+        let mut string = "+++++++++++++++++++++ENDHEA+++++++++++++++++++++++\x1b[?25h".as_bytes();
         read_till_show_cursor_ansi_escape(&mut string);
     }
 }
