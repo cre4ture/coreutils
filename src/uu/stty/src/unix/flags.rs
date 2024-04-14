@@ -42,6 +42,7 @@ pub const CONTROL_FLAGS: &[Flag<C>] = &[
     Flag::new("cstopb", C::CSTOPB),
     Flag::new("cread", C::CREAD).sane(),
     Flag::new("clocal", C::CLOCAL),
+    #[cfg(not(target_os = "redox"))]
     Flag::new("crtscts", C::CRTSCTS),
 ];
 
@@ -60,7 +61,9 @@ pub const INPUT_FLAGS: &[Flag<I>] = &[
     Flag::new("ixon", I::IXON),
     // not supported by nix
     // Flag::new("iuclc", I::IUCLC),
+    #[cfg(not(target_os = "redox"))]
     Flag::new("ixany", I::IXANY),
+    #[cfg(not(target_os = "redox"))]
     Flag::new("imaxbel", I::IMAXBEL).sane(),
     #[cfg(any(target_os = "android", target_os = "linux", target_os = "macos"))]
     Flag::new("iutf8", I::IUTF8),
@@ -237,13 +240,21 @@ pub const LOCAL_FLAGS: &[Flag<L>] = &[
     // Not supported by nix
     // Flag::new("xcase", L::XCASE),
     Flag::new("tostop", L::TOSTOP),
+    #[cfg(not(target_os = "redox"))]
     Flag::new("echoprt", L::ECHOPRT),
+    #[cfg(not(target_os = "redox"))]
     Flag::new("prterase", L::ECHOPRT).hidden(),
+    #[cfg(not(target_os = "redox"))]
     Flag::new("echoctl", L::ECHOCTL).sane(),
+    #[cfg(not(target_os = "redox"))]
     Flag::new("ctlecho", L::ECHOCTL).sane().hidden(),
+    #[cfg(not(target_os = "redox"))]
     Flag::new("echoke", L::ECHOKE).sane(),
+    #[cfg(not(target_os = "redox"))]
     Flag::new("crtkill", L::ECHOKE).sane().hidden(),
+    #[cfg(not(target_os = "redox"))]
     Flag::new("flusho", L::FLUSHO),
+    #[cfg(not(target_os = "redox"))]
     Flag::new("extproc", L::EXTPROC),
 ];
 
