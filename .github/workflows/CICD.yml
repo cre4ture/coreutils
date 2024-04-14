@@ -713,6 +713,9 @@ jobs:
         ${{ matrix.job.cargo-options }} ${{ steps.dep_vars.outputs.CARGO_UTILITY_LIST_OPTIONS }}
       env:
         RUST_BACKTRACE: "1"
+    - name: Setup tmate session
+      if: failure()
+      uses: mxschmitt/action-tmate@v3
     - name: Archive executable artifacts
       uses: actions/upload-artifact@v4
       with:
