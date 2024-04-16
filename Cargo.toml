@@ -334,7 +334,7 @@ unicode-width = "0.1.11"
 utf-8 = "0.7.6"
 walkdir = "2.5"
 winapi-util = "0.1.6"
-windows-sys = { version = "0.48.0", default-features = false }
+windows-sys = { version = "0.48.0", default-features = false, features = ["Win32_Foundation", "Win32_Security", "Win32_System_Pipes"]}
 xattr = "1.3.1"
 zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
 
@@ -506,7 +506,6 @@ rand_pcg = "0.3"
 xattr = { workspace = true }
 
 [target.'cfg(windows)'.dev-dependencies]
-portable-pty = "0.8.1"
 
 [build-dependencies]
 phf_codegen = { workspace = true }

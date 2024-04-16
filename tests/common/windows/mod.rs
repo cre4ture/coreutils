@@ -3,13 +3,14 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-//spell-checker: ignore conpty conin conout ENDHEA openpty
+//spell-checker: ignore conpty conin conout ENDHEA
 
+mod conpty;
 mod process;
 
-use portable_pty::{CommandBuilder, PtySize, PtySystem};
 use std::cmp::max;
 use std::collections::VecDeque;
+use std::fs::File;
 use std::io::{Read, StderrLock, StdinLock, StdoutLock, Write};
 use std::mem;
 use std::os::windows::io::AsRawHandle;
@@ -144,9 +145,7 @@ impl AllReAttachConsoleGuard {
 
 pub(crate) struct ConsoleSpawnWrap {
     terminal_simulation: Option<TerminalSimulation>,
-    pty_system: Option<Box<dyn portable_pty::PtySystem>>,
-    pty_pair: Option<portable_pty::PtyPair>,
-    child_console: Option<Box<dyn portable_pty::Child + Sync + Send>>,
+    child_console: Option<conpty::Process>,
     guard: Option<AllReAttachConsoleGuard>,
 }
 
@@ -154,8 +153,6 @@ impl ConsoleSpawnWrap {
     pub(crate) fn new(terminal_simulation: Option<TerminalSimulation>) -> Self {
         Self {
             terminal_simulation,
-            pty_system: None,
-            pty_pair: None,
             child_console: None,
             guard: None,
         }
@@ -203,25 +200,17 @@ impl ConsoleSpawnWrap {
                 TESTS_BINARY, "sleep", "3600",
             ]);
             let terminal_size = simulated_terminal.size.unwrap_or_default();
-            let pty = Box::new(portable_pty::NativePtySystem::default());
-            let pair = pty
-                .openpty(PtySize {
-                    rows: terminal_size.rows,
-                    cols: terminal_size.cols,
-                    pixel_height: 0,
-                    pixel_width: 0,
-                })
-                .unwrap();
 
-            let mut cmd2 = CommandBuilder::new(dummy_cmd.get_program());
-            cmd2.args(dummy_cmd.get_args());
+            println!("spawning ... {:?}", dummy_cmd);
+            let cmd_child = conpty::spawn_command(
+                dummy_cmd,
+                (terminal_size.cols as i16, terminal_size.rows as i16),
+            )
+            .unwrap();
+            println!("spawning ... Done!");
 
-            println!("spawning ... {:?}", cmd2);
-            let child = pair.slave.spawn_command(cmd2).unwrap();
-            println!("spawning ... Done! pid: {}", child.process_id().unwrap());
-
-            *stdin_pty = Some(Box::new(pair.master.take_writer().unwrap()));
-            let mut reader = pair.master.try_clone_reader().unwrap();
+            *stdin_pty = Some(Box::new(File::from(cmd_child.input.try_clone().unwrap())));
+            let mut reader = File::from(cmd_child.output.try_clone().unwrap());
 
             // read and ignore full windows console header (ANSI escape sequences).
             println!("start read header ... ");
@@ -232,13 +221,11 @@ impl ConsoleSpawnWrap {
                 .spawn_reader_thread(Box::new(reader), "win_conpty_reader".into())
                 .unwrap();
 
-            self.guard = Some(AllReAttachConsoleGuard::new(child.process_id().unwrap()));
+            self.guard = Some(AllReAttachConsoleGuard::new(cmd_child.pid()));
 
             self.configure_stdio_for_spawn_of_child(&simulated_terminal, command);
 
-            self.pty_system = Some(pty);
-            self.pty_pair = Some(pair);
-            self.child_console = Some(child);
+            self.child_console = Some(cmd_child);
         }
     }
 
@@ -265,7 +252,7 @@ impl ConsoleSpawnWrap {
 
     fn kill_and_wait_all_console_processes(&mut self) {
         if let Some(console) = &self.child_console {
-            let _guards = AllReAttachConsoleGuard::new(console.process_id().unwrap());
+            let _guards = AllReAttachConsoleGuard::new(console.pid());
             let process_ids = Self::get_console_process_id_list(true);
             mem::drop(_guards);
 
@@ -326,8 +313,8 @@ impl Drop for ConsoleSpawnWrap {
     fn drop(&mut self) {
         self.kill_and_wait_all_console_processes();
         if let Some(console) = &mut self.child_console {
-            let _ = console.kill();
-            console.wait().unwrap();
+            let _ = console.process_handle.terminate(0);
+            let _ = console.process_handle.wait_for_end(500);
         }
         self.child_console = None;
     }

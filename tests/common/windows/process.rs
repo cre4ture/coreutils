@@ -10,6 +10,8 @@ use uucore::windows_sys::Win32::{
     System::Threading::{OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_TERMINATE},
 };
 
+#[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) enum Error {
     Timeout,
     ProcessOpenFailed,
@@ -23,6 +25,10 @@ pub(crate) struct ProcessHandle {
 }
 
 impl ProcessHandle {
+    pub(crate) fn new_from_handle(handle: OwnedHandle) -> Self {
+        Self { handle }
+    }
+
     pub(crate) fn new_from_id(process_id: u32) -> Result<Self, Error> {
         let handle = unsafe {
             let result = OpenProcess(PROCESS_TERMINATE, FALSE, process_id);
