@@ -7,17 +7,13 @@
 //spell-checker: ignore HRESULT STARTF USESTDHANDLES STARTUPINFOW
 
 use std::{
-    ffi::{OsStr, OsString},
-    mem::{self, size_of},
-    os::{
+    ffi::{OsStr, OsString}, mem::{self, size_of}, os::{
         raw::c_void,
         windows::{
             ffi::OsStrExt,
             io::{AsRawHandle, FromRawHandle, OwnedHandle},
         },
-    },
-    process::Command,
-    ptr::{null, null_mut},
+    }, process::Command, ptr::{null, null_mut}
 };
 
 use uucore::windows_sys::{
@@ -33,22 +29,14 @@ use uucore::windows_sys::{
             Threading::{
                 CreateProcessW, InitializeProcThreadAttributeList, UpdateProcThreadAttribute,
                 CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT, PROCESS_INFORMATION,
-                STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW,
+                STARTF_USESTDHANDLES, STARTUPINFOEXW,
             },
         },
     },
 };
 
 use super::process::ProcessHandle;
-
-#[derive(Debug)]
-#[allow(dead_code)]
-pub(crate) enum Error {
-    StdOsIo(std::io::Error),
-    Message(String),
-}
-
-pub(crate) type Result<T> = std::result::Result<T, Error>;
+use super::{Result, Error};
 
 // if given string is empty there will be produced a "\0" string in UTF-16
 fn convert_osstr_to_utf16(s: &OsStr) -> Vec<u16> {
@@ -72,7 +60,7 @@ fn build_command_line(command: &Command) -> OsString {
 pub(crate) struct Process {
     pub(crate) input: OwnedHandle,
     pub(crate) output: OwnedHandle,
-    _proc_info: STARTUPINFOEXW,
+    _proc_info: StartupInfoEx,
     _console: OwnedPseudoConsoleHandle,
     pub(crate) process_handle: ProcessHandle,
     _thread_handle: OwnedHandle,
@@ -97,13 +85,12 @@ pub(crate) fn spawn_command(command: Command, size: (i16, i16)) -> Result<Proces
     // todo: It would be great to be able to identify whether a attribute #![windows_subsystem = "windows"] is set and ignore it only in such case
     // But there's no way to do so?
 
-    let _ = enable_virtual_terminal_sequence_processing();
     let (console, output, input) = create_pseudo_console(COORD {
         X: size.0,
         Y: size.1,
     })?;
     let startup_info = initialize_startup_info_attached_to_con_pty(&console)?;
-    let proc = exec_proc(command, startup_info)?;
+    let proc = exec_proc(command, startup_info.startup_info)?;
     Ok(Process {
         input,
         output,
@@ -194,83 +181,89 @@ fn create_pseudo_console(
     Ok((console, con_reader, con_writer))
 }
 
+struct ProcThreadAttributeList {
+    attribute_list_dyn: Box<[u8]>,
+}
+
+impl ProcThreadAttributeList {
+    fn new(handle_pty: &OwnedPseudoConsoleHandle) -> Result<Self> {
+        let mut size: usize = 0;
+        let res =
+            unsafe { InitializeProcThreadAttributeList(null_mut(),
+                1, 0, &mut size) };
+
+        if res != 0 /* according to the documentation this initial call must fail! */ || size == 0 {
+            // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-initializeprocthreadattributelist#return-value
+            return Err(Error::Message(
+                "failed initialize proc attribute list".to_string(),
+            ));
+        }
+
+        let mut lp_attribute_list = vec![0u8; size].into_boxed_slice();
+
+        let lp_attribute_list_ptr = lp_attribute_list.as_mut_ptr() as _;
+
+        let handle_pty_ptr = handle_pty.handle as *const HPCON as *const c_void;
+
+        unsafe {
+            ok_or_win_error(InitializeProcThreadAttributeList(
+                lp_attribute_list_ptr,
+                1,
+                0,
+                &mut size,
+            ))?;
+            ok_or_win_error(UpdateProcThreadAttribute(
+                lp_attribute_list_ptr,
+                0,
+                PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+                handle_pty_ptr,
+                size_of::<HPCON>(),
+                null_mut(),
+                null_mut(),
+            ))?;
+        }
+
+        Ok(Self{
+            attribute_list_dyn: lp_attribute_list,
+        })
+    }
+
+    fn get_ptr(&mut self) -> *mut c_void {
+        self.attribute_list_dyn.as_mut_ptr() as _
+    }
+}
+
+struct StartupInfoEx {
+    _attribute_list: ProcThreadAttributeList,
+    startup_info: STARTUPINFOEXW,
+}
+
+impl StartupInfoEx {
+    fn new(handle_pty: &OwnedPseudoConsoleHandle) -> Result<Self> {
+        let mut attribute_list = ProcThreadAttributeList::new(handle_pty)?;
+
+        let mut si_ext: STARTUPINFOEXW = unsafe { ::core::mem::zeroed() };
+        si_ext.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
+        si_ext.lpAttributeList = attribute_list.get_ptr();
+
+        // avoid issues when debugging or using cargo-nextest.
+        // solution described here: https://github.com/microsoft/terminal/issues/4380#issuecomment-580865346
+        si_ext.StartupInfo.hStdInput = 0;
+        si_ext.StartupInfo.hStdOutput = 0;
+        si_ext.StartupInfo.hStdError = 0;
+        si_ext.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
+
+        Ok(Self { _attribute_list: attribute_list, startup_info: si_ext })
+    }
+}
+
 // const PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE: usize = 22 | 0x0002_0000;
 const PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE: usize = 0x00020016;
 
 fn initialize_startup_info_attached_to_con_pty(
     handle_pty: &OwnedPseudoConsoleHandle,
-) -> Result<STARTUPINFOEXW> {
-    let mut si_ext = STARTUPINFOEXW {
-        StartupInfo: STARTUPINFOW {
-            cb: 0,
-            lpReserved: null_mut(),
-            lpDesktop: null_mut(),
-            lpTitle: null_mut(),
-            dwX: 0,
-            dwY: 0,
-            dwXSize: 500,
-            dwYSize: 500,
-            dwXCountChars: 80,
-            dwYCountChars: 24,
-            dwFillAttribute: 0,
-            dwFlags: 0,
-            wShowWindow: 0,
-            cbReserved2: 0,
-            lpReserved2: null_mut(),
-            hStdInput: 0,
-            hStdOutput: 0,
-            hStdError: 0,
-        },
-        lpAttributeList: null_mut(),
-    };
-    si_ext.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
-
-    // avoid issues when debugging or using cargo-nextest.
-    // solution described here: https://github.com/microsoft/terminal/issues/4380#issuecomment-580865346
-    si_ext.StartupInfo.hStdInput = 0;
-    si_ext.StartupInfo.hStdOutput = 0;
-    si_ext.StartupInfo.hStdError = 0;
-    si_ext.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
-
-    let mut size: usize = 0;
-    let res =
-        ok_or_win_error(unsafe { InitializeProcThreadAttributeList(null_mut(), 1, 0, &mut size) });
-    if res.is_ok() /* according to the documentation this initial call must fail! */ || size == 0 {
-        // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-initializeprocthreadattributelist#return-value
-        return Err(Error::Message(
-            "failed initialize proc attribute list".to_string(),
-        ));
-    }
-
-    // SAFETY
-    // we leak the memory intentionally,
-    // it will be freed on DROP.
-    let lp_attribute_list = vec![0u8; size].into_boxed_slice();
-    let lp_attribute_list = Box::leak(lp_attribute_list);
-
-    si_ext.lpAttributeList = lp_attribute_list.as_mut_ptr() as _;
-
-    let handle_pty_ptr = handle_pty.handle as *const HPCON as *const c_void;
-
-    unsafe {
-        ok_or_win_error(InitializeProcThreadAttributeList(
-            si_ext.lpAttributeList,
-            1,
-            0,
-            &mut size,
-        ))?;
-        ok_or_win_error(UpdateProcThreadAttribute(
-            si_ext.lpAttributeList,
-            0,
-            PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-            handle_pty_ptr,
-            size_of::<HPCON>(),
-            null_mut(),
-            null_mut(),
-        ))?;
-    }
-
-    Ok(si_ext)
+) -> Result<StartupInfoEx> {
+    Ok(StartupInfoEx::new(handle_pty)?)
 }
 
 fn environment_block_unicode<'a>(

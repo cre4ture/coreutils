@@ -33,6 +33,15 @@ static CONSOLE_SPAWNING_MUTEX: std::sync::Mutex<u32> = std::sync::Mutex::new(0);
 static END_OF_HEADER_KEYWORD: &str = "ENDHEA";
 
 #[derive(Debug)]
+#[allow(dead_code)]
+pub(crate) enum Error {
+    StdOsIo(std::io::Error),
+    Message(String),
+}
+
+pub(crate) type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug)]
 struct BlockOtherThreadsGuard {
     _list: (
         MutexGuard<'static, u32>,
@@ -99,11 +108,11 @@ impl Drop for AttachStdioGuard {
 struct SwitchToConsoleGuard {}
 
 impl SwitchToConsoleGuard {
-    fn new(process_id: u32) -> Self {
+    fn new(process_id: u32) -> Result<Self> {
         let _ = unsafe { FreeConsole() };
 
         let mut success = false;
-        for _i in 0..1 {
+        for _i in 0..500 {
             success = unsafe { AttachConsole(process_id) } != 0;
             if success {
                 break;
@@ -111,9 +120,9 @@ impl SwitchToConsoleGuard {
             std::thread::sleep(Duration::from_millis(2));
         }
         if !success {
-            panic!("attaching to new console failed!");
+            return Err(Error::Message("attaching to new console failed!".to_string()));
         }
-        Self {}
+        Ok(Self {})
     }
 }
 
@@ -134,12 +143,12 @@ struct AllReAttachConsoleGuard {
 }
 
 impl AllReAttachConsoleGuard {
-    fn new(process_id: u32) -> Self {
-        Self {
+    fn new(process_id: u32) -> Result<Self> {
+        Ok(Self {
             _ot: BlockOtherThreadsGuard::new(),
             _io: AttachStdioGuard::new(),
-            _cn: SwitchToConsoleGuard::new(process_id),
-        }
+            _cn: SwitchToConsoleGuard::new(process_id)?,
+        })
     }
 }
 
@@ -221,11 +230,14 @@ impl ConsoleSpawnWrap {
                 .spawn_reader_thread(Box::new(reader), "win_conpty_reader".into())
                 .unwrap();
 
-            self.guard = Some(AllReAttachConsoleGuard::new(cmd_child.pid()));
-
-            self.configure_stdio_for_spawn_of_child(&simulated_terminal, command);
-
-            self.child_console = Some(cmd_child);
+            match AllReAttachConsoleGuard::new(cmd_child.pid()) {
+                Ok(guards) => {
+                    self.guard = Some(guards);
+                    self.configure_stdio_for_spawn_of_child(&simulated_terminal, command);
+                    self.child_console = Some(cmd_child);
+                }
+                Err(error) => eprintln!("error during locking: {:?}", error),
+            }
         }
     }
 
@@ -343,12 +355,13 @@ fn read_till_show_cursor_ansi_escape<T: Read>(reader: &mut T) -> Vec<u8> {
         last.push_back(buf[0]);
         full_buf.push(buf[0]);
         _s = format!("{}", full_buf.escape_ascii());
-        println!("read: {}", _s);
+        println!("read: {}~{},{}", _s, found1, found2);
         if last.len() == key_len {
             let compare_fn = |keyword: &[u8]| last.iter().zip(keyword.iter()).all(|(a, b)| a == b);
             found1 = found1 || compare_fn(keyword1);
             found2 = found2 || compare_fn(keyword2);
             if found1 && found2 {
+                println!("read: DONE! ~{},{}", found1, found2);
                 break;
             }
         }
