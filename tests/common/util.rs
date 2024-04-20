@@ -120,7 +120,7 @@ impl CmdResult {
     pub fn print_outputs(&self) {
         println!("command exit status: {:?}", self.exit_status);
         println!(
-            "stdout:\n{}\nstderr:\n{}",
+            "stdout2:\n{}\nstderr2:\n{}",
             self.stdout().escape_ascii(),
             self.stderr().escape_ascii()
         );
@@ -1743,7 +1743,9 @@ impl UCommand {
         console_spawn_wrap.spawn(|csw: &mut ConsoleSpawnWrap| {
             let (mut command, captured_stdout, captured_stderr, stdin_pty) =
                 self.setup_stdio(csw, command_with_args_and_env);
+
             let child_std = command.spawn().unwrap();
+
             *ref_maybe_child = Some(UChild::from(
                 self,
                 child_std,
@@ -3756,7 +3758,9 @@ mod tests {
             .terminal_simulation(true)
             .run();
 
-        out.print_outputs();
+        for i in 0..10 {
+            out.print_outputs();
+        }
 
         out.code_is(0);
         #[cfg(unix)]
@@ -3764,7 +3768,10 @@ mod tests {
             &Regex::new(r"in: /dev/.*\d+\r\nout: /dev/.*\d+\r\nerr: /dev/.*\d+\r\n").unwrap(),
         );
         #[cfg(windows)]
-        out.stdout_is("in: windows-terminal\r\nout: windows-terminal\r\nerr: windows-terminal\r\n");
+        assert_eq!(
+            String::from_utf8_lossy(out.stdout()),
+            "in: windows-terminal\r\nout: windows-terminal\r\nerr: windows-terminal\r\n"
+        );
 
         scene
             .ccmd("tty")
@@ -3993,7 +4000,9 @@ mod tests {
             })
             .run();
 
-        out.print_outputs();
+        for i in 0..10 {
+            out.print_outputs();
+        }
 
         out.succeeded();
         out.stdout_matches(&Regex::new(r"speed [0-9]+ baud; rows 200; columns 40;").unwrap());
@@ -4005,6 +4014,7 @@ mod tests {
         let scene = TestScenario::new("util");
 
         let mut cmd = scene.ccmd("env");
+        //cmd.args(&[TESTS_BINARY, "stty", "--", "-echo", "&&"]);
         cmd.args(&[TESTS_BINARY, "stty", "-a", "&&"]);
         cmd.args(&[TESTS_BINARY, "cat", "-", "&&"]);
         cmd.args(&[TESTS_BINARY, "stty", "-a", "&&"]);
@@ -4015,7 +4025,9 @@ mod tests {
         // cat would block if there is no eot
         let out = child.wait().unwrap();
 
-        out.print_outputs();
+        for _i in 0..10 {
+            out.print_outputs();
+        }
 
         std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
         //std::assert_eq!(String::from_utf8_lossy(out.stdout()), "\r\n");

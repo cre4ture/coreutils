@@ -3,6 +3,8 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 #![allow(unused_imports)]
+#![feature(windows_process_extensions_raw_attribute)]
+
 mod common;
 
 use common::util::TestScenario;

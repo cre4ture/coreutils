@@ -3,34 +3,33 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-//spell-checker: ignore conpty conin conout ENDHEA
+//spell-checker: ignore conpty conin conout ENDHEA PSEUDOCONSOLE STARTF USESTDHANDLES
 
-mod conpty;
-mod process;
+pub(crate) mod conpty;
 
-use std::cmp::max;
-use std::collections::VecDeque;
-use std::fs::File;
-use std::io::{Read, StderrLock, StdinLock, StdoutLock, Write};
-use std::mem;
-use std::os::windows::io::AsRawHandle;
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::sync::MutexGuard;
-use std::time::Duration;
-use uucore::windows_sys::Win32::Foundation::HANDLE;
-use uucore::windows_sys::Win32::System::Console::{
-    AttachConsole, FreeConsole, GetConsoleMode, GetConsoleProcessList, GetStdHandle,
-    SetConsoleMode, SetStdHandle, ATTACH_PARENT_PROCESS, CONSOLE_MODE, ENABLE_ECHO_INPUT,
-    ENABLE_LINE_INPUT, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+use std::mem::size_of_val;
+use std::os::raw::c_void;
+use std::os::windows::io::FromRawHandle;
+use std::ptr::null_mut;
+use std::thread::JoinHandle;
+use std::{
+    fs::File,
+    io::{self, Read, Write},
 };
+use std::{
+    os::windows::process::CommandExt,
+    process::{Command, Stdio},
+};
+use uucore::windows_sys::Win32::System::{
+    Console::GetConsoleProcessList, Threading::PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+};
+use windows_sys::Win32::System::Threading::STARTF_USESTDHANDLES;
+
+use self::conpty::OwnedPseudoConsoleHandle;
 
 use super::util::{ForwardedOutput, TerminalSimulation, TESTS_BINARY};
 
 pub(crate) static END_OF_TRANSMISSION_SEQUENCE: &[u8] = &[b'\r', b'\n', 0x1A, b'\r', b'\n']; // send ^Z
-
-static CONSOLE_SPAWNING_MUTEX: std::sync::Mutex<u32> = std::sync::Mutex::new(0);
-static END_OF_HEADER_KEYWORD: &str = "ENDHEA";
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -41,121 +40,11 @@ pub(crate) enum Error {
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug)]
-struct BlockOtherThreadsGuard {
-    _list: (
-        MutexGuard<'static, u32>,
-        StdinLock<'static>,
-        StdoutLock<'static>,
-        StderrLock<'static>,
-    ),
-}
-
-impl BlockOtherThreadsGuard {
-    fn new() -> Self {
-        // To be able to properly spawn the child process inside of the new console,
-        // We need to attach our own process temporarily to the new console.
-        // This is due to the lack of the std::process interface accepting windows startup information parameters.
-        // In this critical phase where our own process is attached to the new console,
-        // we can't allow other threads to spawn own consoles or read/write something from/to stdio.
-        // This can happen e.g. during execution of multiple test cases in parallel.
-        // Therefor this list of guards here:
-        Self {
-            _list: (
-                CONSOLE_SPAWNING_MUTEX.lock().unwrap(),
-                std::io::stdin().lock(),
-                std::io::stdout().lock(),
-                std::io::stderr().lock(),
-            ),
-        }
-    }
-}
-
-#[derive(Debug)]
-struct AttachStdioGuard {
-    original_stdin: HANDLE,
-    original_stdout: HANDLE,
-    original_stderr: HANDLE,
-}
-
-impl AttachStdioGuard {
-    fn new() -> Self {
-        let original_stdin = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
-        let original_stdout = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
-        let original_stderr = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
-        // setting the handles to null prevents that the spawned child inherits from something
-        // other than the pseudo console.
-        let _ = unsafe { SetStdHandle(STD_INPUT_HANDLE, 0 as HANDLE) };
-        let _ = unsafe { SetStdHandle(STD_OUTPUT_HANDLE, 0 as HANDLE) };
-        let _ = unsafe { SetStdHandle(STD_ERROR_HANDLE, 0 as HANDLE) };
-        Self {
-            original_stdin,
-            original_stdout,
-            original_stderr,
-        }
-    }
-}
-
-impl Drop for AttachStdioGuard {
-    fn drop(&mut self) {
-        let _ = unsafe { SetStdHandle(STD_INPUT_HANDLE, self.original_stdin) };
-        let _ = unsafe { SetStdHandle(STD_OUTPUT_HANDLE, self.original_stdout) };
-        let _ = unsafe { SetStdHandle(STD_ERROR_HANDLE, self.original_stderr) };
-    }
-}
-
-#[derive(Debug)]
-struct SwitchToConsoleGuard {}
-
-impl SwitchToConsoleGuard {
-    fn new(process_id: u32) -> Result<Self> {
-        let _ = unsafe { FreeConsole() };
-
-        let mut success = false;
-        for _i in 0..500 {
-            success = unsafe { AttachConsole(process_id) } != 0;
-            if success {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(2));
-        }
-        if !success {
-            return Err(Error::Message("attaching to new console failed!".to_string()));
-        }
-        Ok(Self {})
-    }
-}
-
-impl Drop for SwitchToConsoleGuard {
-    fn drop(&mut self) {
-        let _ = unsafe { FreeConsole() };
-        // this fails during debugging sessions. apparently there is no console
-        // attached to the parent process. ignore it.
-        let _ = unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
-    }
-}
-
-#[derive(Debug)]
-struct AllReAttachConsoleGuard {
-    _ot: BlockOtherThreadsGuard,
-    _io: AttachStdioGuard,
-    _cn: SwitchToConsoleGuard,
-}
-
-impl AllReAttachConsoleGuard {
-    fn new(process_id: u32) -> Result<Self> {
-        Ok(Self {
-            _ot: BlockOtherThreadsGuard::new(),
-            _io: AttachStdioGuard::new(),
-            _cn: SwitchToConsoleGuard::new(process_id)?,
-        })
-    }
-}
-
 pub(crate) struct ConsoleSpawnWrap {
     terminal_simulation: Option<TerminalSimulation>,
-    child_console: Option<conpty::Process>,
-    guard: Option<AllReAttachConsoleGuard>,
+    child_console: Option<conpty::OwnedPseudoConsoleHandle>,
+    dummy_out_reader: Option<JoinHandle<()>>,
+    background_cmd: Option<std::process::Child>,
 }
 
 impl ConsoleSpawnWrap {
@@ -163,80 +52,114 @@ impl ConsoleSpawnWrap {
         Self {
             terminal_simulation,
             child_console: None,
-            guard: None,
+            dummy_out_reader: None,
+            background_cmd: None,
         }
     }
 
     pub(crate) fn spawn<T: FnOnce(&mut ConsoleSpawnWrap)>(&mut self, spawn_function: T) {
         spawn_function(self);
+    }
 
-        self.guard = None;
+    fn prepare_command_to_use_console(
+        command: &mut std::process::Command,
+        pty: &OwnedPseudoConsoleHandle,
+        simulated_terminal: &TerminalSimulation,
+    ) {
+        let raw_hpc = pty.get_raw_handle();
+        unsafe {
+            command.raw_attribute_ptr(
+                PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE as usize,
+                raw_hpc as *const c_void,
+                size_of_val(&raw_hpc),
+            )
+        };
+        //command.creation_flags(STARTF_USESTDHANDLES);
+        Self::configure_stdio_for_spawn_of_child(&simulated_terminal, command);
+    }
+
+    fn run_command_in_console(mut cmd: Command, pty: &OwnedPseudoConsoleHandle) {
+        Self::prepare_command_to_use_console(&mut cmd, &pty, &TerminalSimulation::full());
+        cmd.spawn().unwrap().wait().unwrap();
+    }
+
+    fn set_title_of_console(title: &str, pty: &OwnedPseudoConsoleHandle) {
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/C", "title", title]);
+        Self::run_command_in_console(cmd, pty);
+    }
+
+    fn disable_echo_of_console(&mut self, pty: &OwnedPseudoConsoleHandle) {
+        let mut cmd = std::process::Command::new(TESTS_BINARY);
+        cmd.args(["env", TESTS_BINARY, "stty", "--", "-echo"]);
+        cmd.args(["&&", TESTS_BINARY, "echo", "disabled echo"]);
+        cmd.args(["&&", TESTS_BINARY, "sleep", "3600"]);
+        Self::prepare_command_to_use_console(&mut cmd, &pty, &TerminalSimulation::full());
+        // This process is spawned, but we don't wait for it.
+        // The long sleep is intended as the console will reset
+        // the echo setting as soon as the process terminates.
+        self.background_cmd = Some(cmd.spawn().unwrap());
     }
 
     pub(crate) fn setup_stdio_hook(
         &mut self,
         command: &mut std::process::Command,
         captured_stdout: &mut ForwardedOutput,
-        _captured_stderr: &mut ForwardedOutput,
+        captured_stderr: &mut ForwardedOutput,
         stdin_pty: &mut Option<Box<dyn Write + Send>>,
     ) {
         if let Some(simulated_terminal) = self.terminal_simulation.clone() {
-            // 0. we spawn a dummy (sleep) process inside a new console
-            // 1. we attach our process to the new console.
-            // 2. we kill the dummy process
-            // 3. we spawn the child inheriting the stdio of the console
-            // 4. we re-attach our process to the console of the parent
-
-            let mut dummy_cmd = std::process::Command::new(PathBuf::from(TESTS_BINARY));
-            // using "env" with extended functionality as a tool for very basic scripting ("&&")
-            #[rustfmt::skip]
-            dummy_cmd.arg("env");
-            // There was a instability in the CI that was caused by still active echo.
-            // Try to make this more stable by delaying the setting change a bit.
-            // dummy_cmd.args([TESTS_BINARY, "sleep", "0.05", "&&"]);
-            if !simulated_terminal.echo {
-                // Disable the echo mode that is on by default.
-                // Otherwise, one would get every input line automatically back as an output.
-                dummy_cmd.args([TESTS_BINARY, "stty", "--", "-echo", "&&"]);
-            }
-            dummy_cmd.args([TESTS_BINARY, "stty", "-a", "&&"]);
-            #[rustfmt::skip]
-            dummy_cmd.args([
-                // this newline is needed to trigger the windows console header generation now
-                TESTS_BINARY, "echo", "-n", END_OF_HEADER_KEYWORD, "&&",
-                // this sleep will be killed shortly, but we need it to prevent the console to close
-                // before we attached our own process
-                TESTS_BINARY, "sleep", "3600",
-            ]);
             let terminal_size = simulated_terminal.size.unwrap_or_default();
 
-            println!("spawning ... {:?}", dummy_cmd);
-            let cmd_child = conpty::spawn_command(
-                dummy_cmd,
-                (terminal_size.cols as i16, terminal_size.rows as i16),
-            )
+            let (pty, output, input) = conpty::create_pseudo_console((
+                terminal_size.cols as i16,
+                terminal_size.rows as i16,
+            ))
             .unwrap();
-            println!("spawning ... Done!");
 
-            *stdin_pty = Some(Box::new(File::from(cmd_child.input.try_clone().unwrap())));
-            let mut reader = File::from(cmd_child.output.try_clone().unwrap());
+            let title = "uutils_unittest_console";
+            Self::set_title_of_console(title, &pty);
+            if !simulated_terminal.echo {
+                self.disable_echo_of_console(&pty);
+            }
 
-            // read and ignore full windows console header (ANSI escape sequences).
-            println!("start read header ... ");
-            let header = read_till_show_cursor_ansi_escape(&mut reader);
-            println!("read header: {}", header.escape_ascii());
+            Self::prepare_command_to_use_console(command, &pty, &simulated_terminal);
 
-            captured_stdout
-                .spawn_reader_thread(Box::new(reader), "win_conpty_reader".into())
-                .unwrap();
+            self.child_console = Some(pty);
+            *stdin_pty = Some(Box::new(File::from(input)));
+            let mut reader = File::from(output);
 
-            match AllReAttachConsoleGuard::new(cmd_child.pid()) {
-                Ok(guards) => {
-                    self.guard = Some(guards);
-                    self.configure_stdio_for_spawn_of_child(&simulated_terminal, command);
-                    self.child_console = Some(cmd_child);
-                }
-                Err(error) => eprintln!("error during locking: {:?}", error),
+            let ansi_show_cursor = b"\x1b[?25h";
+            let disabled_echo = b"disabled echo\r\n";
+            let console_title = title.as_bytes();
+            let mut keywords = Vec::new();
+            keywords.push(ansi_show_cursor.as_ref());
+            keywords.push(console_title);
+            if !simulated_terminal.echo {
+                keywords.push(disabled_echo);
+            }
+            let _header = read_till_keywords(&mut reader, &keywords);
+            println!("read header: {}", _header.escape_ascii());
+
+            let forwarded = if simulated_terminal.stdout {
+                Some(captured_stdout)
+            } else if simulated_terminal.stderr {
+                Some(captured_stderr)
+            } else {
+                None
+            };
+
+            if let Some(forwarded_io) = forwarded {
+                forwarded_io
+                    .spawn_reader_thread(Box::new(reader), "win_conpty_reader".into())
+                    .unwrap();
+            } else {
+                self.dummy_out_reader = std::thread::Builder::new()
+                    .name("dummy_console_out_reader".to_string())
+                    .spawn(move || {
+                        ForwardedOutput::read_from_pty(Box::new(File::from(reader)), io::sink());
+                    })
+                    .ok();
             }
         }
     }
@@ -262,167 +185,113 @@ impl ConsoleSpawnWrap {
         panic!("failed to get console process id list!");
     }
 
-    fn kill_and_wait_all_console_processes(&mut self) {
-        if let Some(console) = &self.child_console {
-            let _guards = AllReAttachConsoleGuard::new(console.pid());
-            let process_ids = Self::get_console_process_id_list(true);
-            mem::drop(_guards);
-
-            let handles = process_ids
-                .into_iter()
-                .filter_map(|id| process::ProcessHandle::new_from_id(id).ok());
-            handles.clone().for_each(|ph| {
-                let _ = ph.terminate(88);
-            });
-            handles.for_each(|ph| {
-                let _ = ph.wait_for_end(5000);
-            });
-        }
-    }
+    //fn kill_and_wait_all_console_processes(&mut self) {
+    //    if let Some(console) = &self.child_console {
+    //        let _guards = AllReAttachConsoleGuard::new(console.pid());
+    //        let process_ids = Self::get_console_process_id_list(true);
+    //        mem::drop(_guards);
+    //        let handles = process_ids
+    //            .into_iter()
+    //            .filter_map(|id| process::ProcessHandle::new_from_id(id).ok());
+    //        handles.clone().for_each(|ph| {
+    //            let _ = ph.terminate(88);
+    //        });
+    //        handles.for_each(|ph| {
+    //            let _ = ph.wait_for_end(5000);
+    //        });
+    //    }
+    //}
 
     fn configure_stdio_for_spawn_of_child(
-        &mut self,
         simulated_terminal: &TerminalSimulation,
         command: &mut Command,
     ) {
-        if simulated_terminal.stdin {
-            let _pty_conin = std::fs::OpenOptions::new()
-                .read(true)
-                .open("CONIN$")
-                .unwrap();
+        let handle_fn = || unsafe { Stdio::from_raw_handle(0 as isize as *mut c_void) };
 
-            if !simulated_terminal.echo {
-                //set_echo_mode(false, HANDLE(_pty_conin.as_raw_handle() as isize));
-                set_echo_mode(false, std::io::stdin().as_raw_handle() as HANDLE);
-            }
-            //disable_virtual_terminal_sequence_processing();
-            // using this handle here directly pipes the data correctly, also the .is_terminal() returns true.
-            // But on CI, the echo is still activated. Unclear why.
-            command.stdin(Stdio::inherit());
+        if simulated_terminal.stdin {
+            command.stdin(handle_fn());
         }
         if simulated_terminal.stdout {
-            let mut _pty_conout = std::fs::OpenOptions::new()
-                .write(true)
-                .open("CONOUT$")
-                .unwrap();
-            // using this handle here directly pipes the data correctly, but the .is_terminal() returns false
-            // unclear why, but workaround of inherit() works somehow.
-            command.stdout(Stdio::inherit());
+            command.stdout(handle_fn());
         }
         if simulated_terminal.stderr {
-            let mut _pty_conout = std::fs::OpenOptions::new()
-                .write(true)
-                .open("CONOUT$")
-                .unwrap();
-            // using this handle here directly pipes the data correctly, but the .is_terminal() returns false
-            // unclear why, but workaround of inherit() works somehow.
-            command.stderr(Stdio::inherit());
+            command.stderr(handle_fn());
         }
     }
 }
 
 impl Drop for ConsoleSpawnWrap {
     fn drop(&mut self) {
-        self.kill_and_wait_all_console_processes();
-        if let Some(console) = &mut self.child_console {
-            let _ = console.process_handle.terminate(0);
-            let _ = console.process_handle.wait_for_end(500);
-        }
+        //self.kill_and_wait_all_console_processes();
         self.child_console = None;
+        if let Some(mut cmd) = std::mem::take(&mut self.background_cmd) {
+            let _ = cmd.kill();
+            let _ = cmd.wait();
+        }
     }
 }
 
-fn read_till_show_cursor_ansi_escape<T: Read>(reader: &mut T) -> Vec<u8> {
-    // this keyword/sequence is the ANSI escape sequence that is printed
-    // as last part of the header.
-    // It make the cursor visible again, after it was hidden in the beginning.
-    let keyword1 = "\x1b[?25h".as_bytes();
-    let keyword2 = END_OF_HEADER_KEYWORD.as_bytes();
-    if keyword1.len() != keyword2.len() {
-        panic!("keywords need to have same length");
-    }
-    let key_len = max(keyword1.len(), keyword2.len());
-    let mut last = VecDeque::with_capacity(key_len);
+fn compare_keyword_with_end(keyword: &[u8], buffer: &[u8]) -> bool {
+    keyword
+        .iter()
+        .rev()
+        .zip(buffer.iter().rev())
+        .all(|(a, b)| a == b)
+}
+
+fn read_till_keywords<T: Read>(reader: &mut T, keywords: &[&[u8]]) -> Vec<u8> {
     let mut full_buf = Vec::new();
-    let (mut found1, mut found2) = (false, false);
-    let mut _s = String::new();
+    let mut found_flags = Vec::new();
+    found_flags.resize(keywords.len(), false);
     loop {
         let mut buf = [0u8];
         reader.read_exact(&mut buf).unwrap();
-        while last.len() >= key_len {
-            last.pop_front();
-        }
-        last.push_back(buf[0]);
         full_buf.push(buf[0]);
-        _s = format!("{}", full_buf.escape_ascii());
-        println!("read: {}~{},{}", _s, found1, found2);
-        if last.len() == key_len {
-            let compare_fn = |keyword: &[u8]| last.iter().zip(keyword.iter()).all(|(a, b)| a == b);
-            found1 = found1 || compare_fn(keyword1);
-            found2 = found2 || compare_fn(keyword2);
-            if found1 && found2 {
-                println!("read: DONE! ~{},{}", found1, found2);
-                break;
+        for (i, keyword) in keywords.iter().enumerate() {
+            if !found_flags[i] && (full_buf.len() >= keyword.len()) {
+                found_flags[i] = compare_keyword_with_end(keyword, &full_buf);
             }
         }
-    }
-
-    full_buf
-}
-
-fn set_echo_mode(on: bool, stdin_h: HANDLE) {
-    let mut mode = CONSOLE_MODE::default();
-    let success = unsafe { GetConsoleMode(stdin_h, &mut mode) } != 0;
-    if !success {
-        eprintln!("failed to GetConsoleMode.");
-        return;
-    }
-
-    if on {
-        mode |= ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT;
-    } else {
-        mode &= !ENABLE_ECHO_INPUT;
-    }
-
-    let success = unsafe { SetConsoleMode(stdin_h, mode) } != 0;
-    if !success {
-        eprintln!("failed to SetConsoleMode.");
+        if found_flags.iter().all(|x| *x) {
+            return full_buf;
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::read_till_show_cursor_ansi_escape;
+    use super::read_till_keywords;
+    const KEYWORDS: [&[u8]; 2] = ["\x1b[?25h".as_bytes(), "ENDHEA".as_bytes()];
 
     #[test]
     #[should_panic(expected = "failed to fill whole buffer")]
     fn test_detection_of_keywords_fails_only_first_keyword() {
         let mut string = "====================================\x1b[?25h".as_bytes();
-        read_till_show_cursor_ansi_escape(&mut string);
+        read_till_keywords(&mut string, &KEYWORDS);
     }
 
     #[test]
     #[should_panic(expected = "failed to fill whole buffer")]
     fn test_detection_of_keywords_fails_only_second_keyword() {
         let mut string = "--------------------------------ENDHEA".as_bytes();
-        read_till_show_cursor_ansi_escape(&mut string);
+        read_till_keywords(&mut string, &KEYWORDS);
     }
 
     #[test]
     fn test_detection_of_keywords_succeeds_with_first_and_second_keyword() {
         let mut string = "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\x1b[?25hENDHEA".as_bytes();
-        read_till_show_cursor_ansi_escape(&mut string);
+        read_till_keywords(&mut string, &KEYWORDS);
     }
 
     #[test]
     fn test_detection_of_keywords_succeeds_with_second_and_first_keyword() {
         let mut string = ".....................................ENDHEA\x1b[?25h".as_bytes();
-        read_till_show_cursor_ansi_escape(&mut string);
+        read_till_keywords(&mut string, &KEYWORDS);
     }
 
     #[test]
     fn test_detection_of_keywords_succeeds_with_second_and_first_keyword_and_stuff_in_between() {
         let mut string = "+++++++++++++++++++++ENDHEA+++++++++++++++++++++++\x1b[?25h".as_bytes();
-        read_till_show_cursor_ansi_escape(&mut string);
+        read_till_keywords(&mut string, &KEYWORDS);
     }
 }
