@@ -23,8 +23,6 @@ use std::{
 use uucore::windows_sys::Win32::System::{
     Console::GetConsoleProcessList, Threading::PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
 };
-use windows_sys::Win32::System::Threading::STARTF_USESTDHANDLES;
-
 use self::conpty::OwnedPseudoConsoleHandle;
 
 use super::util::{ForwardedOutput, TerminalSimulation, TESTS_BINARY};
