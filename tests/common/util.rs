@@ -15,8 +15,10 @@ use pretty_assertions::assert_eq;
 use rlimit::setrlimit;
 #[cfg(feature = "sleep")]
 use rstest::rstest;
+use uucore::error::UResult;
+use uucore::io::OwnedFileDescriptorOrHandle;
 use std::borrow::Cow;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 #[cfg(not(windows))]
 use std::ffi::CString;
 use std::ffi::{OsStr, OsString};
@@ -1214,6 +1216,7 @@ pub struct TerminalSimulation {
     stdin: bool,
     stdout: bool,
     stderr: bool,
+    echo: bool,
 }
 
 /// A `UCommand` is a builder wrapping an individual Command that provides several additional features:
@@ -1461,47 +1464,6 @@ impl UCommand {
         self
     }
 
-    #[cfg(unix)]
-    fn read_from_pty(pty_fd: std::os::fd::OwnedFd, out: File) {
-        let read_file = std::fs::File::from(pty_fd);
-        let mut reader = std::io::BufReader::new(read_file);
-        let mut writer = std::io::BufWriter::new(out);
-        let result = std::io::copy(&mut reader, &mut writer);
-        match result {
-            Ok(_) => {}
-            // Input/output error (os error 5) is returned due to pipe closes. Buffer gets content anyway.
-            Err(e) if e.raw_os_error().unwrap_or_default() == 5 => {}
-            Err(e) => {
-                eprintln!("Unexpected error: {:?}", e);
-                panic!("error forwarding output of pty");
-            }
-        }
-    }
-
-    #[cfg(unix)]
-    fn spawn_reader_thread(
-        &self,
-        captured_output: Option<CapturedOutput>,
-        pty_fd_master: OwnedFd,
-        name: String,
-    ) -> Option<CapturedOutput> {
-        if let Some(mut captured_output_i) = captured_output {
-            let fd = captured_output_i.try_clone().unwrap();
-
-            let handle = std::thread::Builder::new()
-                .name(name)
-                .spawn(move || {
-                    Self::read_from_pty(pty_fd_master, fd);
-                })
-                .unwrap();
-
-            captured_output_i.reader_thread_handle = Some(handle);
-            Some(captured_output_i)
-        } else {
-            None
-        }
-    }
-
     /// Build the `std::process::Command` and apply the defaults on fields which were not specified
     /// by the user.
     ///
@@ -1525,9 +1487,7 @@ impl UCommand {
         &mut self,
     ) -> (
         Command,
-        Option<CapturedOutput>,
-        Option<CapturedOutput>,
-        Option<File>,
+        ChildStdIoWrapper,
     ) {
         if self.bin_path.is_some() {
             if let Some(util_name) = &self.util_name {
@@ -1605,36 +1565,38 @@ impl UCommand {
             self.timeout = Some(Duration::from_secs(30));
         }
 
-        let mut captured_stdout = None;
-        let mut captured_stderr = None;
+        let mut captured_stdout = ForwardedOutput::new(OwnedFileDescriptorOrHandle::from(std::io::stdout()).unwrap());
+        let mut captured_stderr = ForwardedOutput::new(OwnedFileDescriptorOrHandle::from(std::io::stderr()).unwrap());
         #[cfg(unix)]
-        let mut stdin_pty: Option<File> = None;
+        let mut stdin_pty: Option<Box<dyn Write + Send>> = None;
+        #[cfg(unix)]
+        let mut non_captured_console_out = ForwardedOutput::default();
         #[cfg(not(unix))]
         let stdin_pty: Option<File> = None;
         if self.stderr_to_stdout {
-            let mut output = CapturedOutput::default();
+            let mut output = TmpFileCapturedOutput::default();
 
             command
                 .stdin(self.stdin.take().unwrap_or_else(Stdio::null))
                 .stdout(Stdio::from(output.try_clone().unwrap()))
                 .stderr(Stdio::from(output.try_clone().unwrap()));
-            captured_stdout = Some(output);
+            captured_stdout.destination = ForwardedOutputDestination::TempFile(output);
         } else {
             let stdout = if self.stdout.is_some() {
                 self.stdout.take().unwrap()
             } else {
-                let mut stdout = CapturedOutput::default();
+                let mut stdout = TmpFileCapturedOutput::default();
                 let stdio = Stdio::from(stdout.try_clone().unwrap());
-                captured_stdout = Some(stdout);
+                captured_stdout.destination = ForwardedOutputDestination::TempFile(stdout);
                 stdio
             };
 
             let stderr = if self.stderr.is_some() {
                 self.stderr.take().unwrap()
             } else {
-                let mut stderr = CapturedOutput::default();
+                let mut stderr = TmpFileCapturedOutput::default();
                 let stdio = Stdio::from(stderr.try_clone().unwrap());
-                captured_stderr = Some(stderr);
+                captured_stderr.destination = ForwardedOutputDestination::TempFile(stderr);
                 stdio
             };
 
@@ -1653,40 +1615,50 @@ impl UCommand {
                 ws_ypixel: 30 * 10,
             });
 
+            let OpenptyResult {
+                slave: pi_slave,
+                master: pi_master,
+            } = nix::pty::openpty(&terminal_size, None).unwrap();
+
+            if !simulated_terminal.echo {
+                std::process::Command::new(TESTS_BINARY)
+                    .args(["stty", "--", "-echo"])
+                    .stdin(pi_slave.try_clone().unwrap())
+                    .stdout(pi_slave.try_clone().unwrap())
+                    .stderr(pi_slave.try_clone().unwrap())
+                    .spawn()
+                    .unwrap()
+                    .wait()
+                    .unwrap();
+            }
+
             if simulated_terminal.stdin {
-                let OpenptyResult {
-                    slave: pi_slave,
-                    master: pi_master,
-                } = nix::pty::openpty(&terminal_size, None).unwrap();
-                stdin_pty = Some(File::from(pi_master));
-                command.stdin(pi_slave);
+                stdin_pty = Some(Box::new(File::from(pi_master.try_clone().unwrap())));
+                command.stdin(pi_slave.try_clone().unwrap());
             }
 
             if simulated_terminal.stdout {
-                let OpenptyResult {
-                    slave: po_slave,
-                    master: po_master,
-                } = nix::pty::openpty(&terminal_size, None).unwrap();
-                captured_stdout = self.spawn_reader_thread(
-                    captured_stdout,
-                    po_master,
-                    "stdout_reader".to_string(),
-                );
-                command.stdout(po_slave);
+                command.stdout(pi_slave.try_clone().unwrap());
             }
 
             if simulated_terminal.stderr {
-                let OpenptyResult {
-                    slave: pe_slave,
-                    master: pe_master,
-                } = nix::pty::openpty(&terminal_size, None).unwrap();
-                captured_stderr = self.spawn_reader_thread(
-                    captured_stderr,
-                    pe_master,
-                    "stderr_reader".to_string(),
-                );
-                command.stderr(pe_slave);
+                command.stderr(pi_slave);
             }
+
+            let forwarded = if simulated_terminal.stdout {
+                &mut captured_stdout
+            } else if simulated_terminal.stderr {
+                &mut captured_stderr
+            } else {
+                &mut non_captured_console_out
+            };
+
+            forwarded
+                .spawn_reader_thread(
+                    Box::new(File::from(pi_master)),
+                    "console_out_reader".to_string(),
+                )
+                .unwrap();
         }
 
         #[cfg(unix)]
@@ -1708,7 +1680,12 @@ impl UCommand {
             }
         }
 
-        (command, captured_stdout, captured_stderr, stdin_pty)
+        let mut captured_outputs = HashMap::<ProcessOutputs, ForwardedOutput>::new();
+        captured_outputs.insert(ProcessOutputs::Normal, captured_stdout);
+        captured_outputs.insert(ProcessOutputs::Error, captured_stderr);
+        captured_outputs.insert(ProcessOutputs::ConsoleUncaptured, non_captured_console_out);
+
+        (command, ChildStdIoWrapper{ captured_outputs, stdin_pty })
     }
 
     /// Spawns the command, feeds the stdin if any, and returns the
@@ -1717,12 +1694,12 @@ impl UCommand {
         assert!(!self.has_run, "{}", ALREADY_RUN);
         self.has_run = true;
 
-        let (mut command, captured_stdout, captured_stderr, stdin_pty) = self.build();
+        let (mut command, stdio_wrapper) = self.build();
         log_info("run", self.to_string());
 
         let child = command.spawn().unwrap();
 
-        let mut child = UChild::from(self, child, captured_stdout, captured_stderr, stdin_pty);
+        let mut child = UChild::from(self, child, stdio_wrapper);
 
         if let Some(input) = self.bytes_into_stdin.take() {
             child.pipe_in(input);
@@ -1784,19 +1761,88 @@ impl std::fmt::Display for UCommand {
 /// Stored the captured output in a temporary file. The file is deleted as soon as
 /// [`CapturedOutput`] is dropped.
 #[derive(Debug)]
-struct CapturedOutput {
+pub(crate) struct TmpFileCapturedOutput {
     current_file: File,
     output: tempfile::NamedTempFile, // drop last
-    reader_thread_handle: Option<thread::JoinHandle<()>>,
 }
 
-impl CapturedOutput {
+enum ForwardedOutputDestination {
+    None,
+    Handle(OwnedFileDescriptorOrHandle),
+    TempFile(TmpFileCapturedOutput),
+}
+
+pub(crate) struct ForwardedOutput {
+    destination: ForwardedOutputDestination,
+    reader_thread: Option<JoinHandle<()>>,
+}
+
+impl ForwardedOutput {
+    fn new(direct_dest: OwnedFileDescriptorOrHandle) -> Self {
+        Self {
+            destination: ForwardedOutputDestination::Handle(direct_dest),
+            reader_thread: None,
+        }
+    }
+
+    fn default() -> Self {
+        Self {
+            destination: ForwardedOutputDestination::None,
+            reader_thread: None,
+        }
+    }
+
+    pub fn read_from_pty<TO: Write>(pty_fd: Box<dyn Read>, out: TO) {
+        let mut reader = std::io::BufReader::new(pty_fd);
+        let mut writer = std::io::BufWriter::new(out);
+        let result = std::io::copy(&mut reader, &mut writer);
+        match result {
+            Ok(_) => {}
+            // unix:
+            // Input/output error (os error 5) is returned due to pipe closes. Buffer gets content anyway.
+            Err(e) if e.raw_os_error().unwrap_or_default() == 5 => {}
+            // windows:
+            // Os { code: -2147024787, kind: Uncategorized, message: "The pipe was closed." }
+            Err(e) if e.raw_os_error().unwrap_or_default() == -2147024787 => {}
+            Err(e) => {
+                eprintln!("Unexpected error: {:?}", e);
+                panic!("error forwarding output of pty");
+            }
+        }
+    }
+
+    pub(crate) fn spawn_reader_thread(
+        &mut self,
+        source: Box<dyn Read + Send>,
+        name: String,
+    ) -> UResult<()> {
+        let destination: Box<dyn Write+Send> = match &self.destination {
+            ForwardedOutputDestination::None => Box::new(std::io::sink()),
+            ForwardedOutputDestination::Handle(h) => Box::new(h.try_clone()?.into_file()),
+            ForwardedOutputDestination::TempFile(f) => Box::new(f.output.reopen()?),
+        };
+
+        self.reader_thread =
+            Some(std::thread::Builder::new().name(name).spawn(move || {
+                Self::read_from_pty(source, destination);
+            })?);
+
+        Ok(())
+    }
+
+    fn join_reader_thread(&mut self) {
+        if let Some(handle) = self.reader_thread.take() {
+            handle.join().unwrap();
+        }
+    }
+}
+
+impl TmpFileCapturedOutput {
     /// Creates a new instance of `CapturedOutput`
     fn new(output: tempfile::NamedTempFile) -> Self {
         Self {
             current_file: output.reopen().unwrap(),
             output,
-            reader_thread_handle: None,
         }
     }
 
@@ -1859,7 +1905,7 @@ impl CapturedOutput {
     }
 }
 
-impl Default for CapturedOutput {
+impl Default for TmpFileCapturedOutput {
     fn default() -> Self {
         let mut retries = 10;
         let file = loop {
@@ -1873,12 +1919,11 @@ impl Default for CapturedOutput {
         Self {
             current_file: file.reopen().unwrap(),
             output: file,
-            reader_thread_handle: None,
         }
     }
 }
 
-impl Drop for CapturedOutput {
+impl Drop for TmpFileCapturedOutput {
     fn drop(&mut self) {
         let _ = remove_file(self.output.path());
     }
@@ -2000,14 +2045,50 @@ impl<'a> UChildAssertion<'a> {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Hash)]
+enum ProcessOutputs {
+    Normal,
+    Error,
+    ConsoleUncaptured,
+}
+
+struct ChildStdIoWrapper {
+    captured_outputs: HashMap<ProcessOutputs, ForwardedOutput>,
+    stdin_pty: Option<Box<dyn Write + Send>>,
+}
+
+impl ChildStdIoWrapper {
+    fn join_all(&mut self) {
+        for (_id, co) in &mut self.captured_outputs {
+            co.join_reader_thread();
+        }
+    }
+
+    fn get_captured(&mut self, id: &ProcessOutputs) -> Option<&mut TmpFileCapturedOutput> {
+        let Some(dest) = self.captured_outputs.get_mut(id) else {
+            return None;
+        };
+        let ForwardedOutputDestination::TempFile(f) = &mut dest.destination else {
+            return None;
+        };
+        Some(f)
+    }
+
+    fn captured(&mut self, id: &ProcessOutputs) -> &mut TmpFileCapturedOutput {
+        let co = self.get_captured(id);
+        let Some(f) = co else {
+            panic!("Usage error: This method cannot be used if the output wasn't captured.");
+        };
+        f
+    }
+}
+
 /// Abstraction for a [`std::process::Child`] to handle the child process.
 pub struct UChild {
     raw: Child,
     bin_path: PathBuf,
     util_name: Option<String>,
-    captured_stdout: Option<CapturedOutput>,
-    captured_stderr: Option<CapturedOutput>,
-    stdin_pty: Option<File>,
+    stdio_wrapper: ChildStdIoWrapper,
     ignore_stdin_write_error: bool,
     stderr_to_stdout: bool,
     join_handle: Option<JoinHandle<io::Result<()>>>,
@@ -2019,17 +2100,13 @@ impl UChild {
     fn from(
         ucommand: &UCommand,
         child: Child,
-        captured_stdout: Option<CapturedOutput>,
-        captured_stderr: Option<CapturedOutput>,
-        stdin_pty: Option<File>,
+        stdio_wrapper: ChildStdIoWrapper,
     ) -> Self {
         Self {
             raw: child,
             bin_path: ucommand.bin_path.clone().unwrap(),
             util_name: ucommand.util_name.clone(),
-            captured_stdout,
-            captured_stderr,
-            stdin_pty,
+            stdio_wrapper: stdio_wrapper,
             ignore_stdin_write_error: ucommand.ignore_stdin_write_error,
             stderr_to_stdout: ucommand.stderr_to_stdout,
             join_handle: None,
@@ -2213,18 +2290,10 @@ impl UChild {
                 .unwrap();
         };
 
-        if let Some(stdout) = self.captured_stdout.as_mut() {
-            if let Some(handle) = stdout.reader_thread_handle.take() {
-                handle.join().unwrap();
-            }
-            output.stdout = stdout.output_bytes();
-        }
-        if let Some(stderr) = self.captured_stderr.as_mut() {
-            if let Some(handle) = stderr.reader_thread_handle.take() {
-                handle.join().unwrap();
-            }
-            output.stderr = stderr.output_bytes();
-        }
+        self.stdio_wrapper.join_all();
+
+        output.stdout = self.stdio_wrapper.get_captured(&ProcessOutputs::Normal).map_or(b"".to_vec(), |x|x.output_bytes());
+        output.stderr = self.stdio_wrapper.get_captured(&ProcessOutputs::Error).map_or(b"".to_vec(), |x|x.output_bytes());
 
         Ok(output)
     }
@@ -2249,6 +2318,44 @@ impl UChild {
         String::from_utf8(self.stdout_all_bytes()).unwrap()
     }
 
+    fn get_raw_out(&mut self, id: &ProcessOutputs) -> Option<&mut dyn Read> {
+        match id {
+            ProcessOutputs::Normal => self.raw.stdout.as_mut().map(|x| x as &mut dyn Read),
+            ProcessOutputs::Error => self.raw.stderr.as_mut().map(|x| x as &mut dyn Read),
+            _ => panic!("no supported stdio requested!"),
+        }
+    }
+
+    fn x_std_out_bytes(&mut self, id: &ProcessOutputs) -> Vec<u8> {
+        if let Some(output) = self.stdio_wrapper.get_captured(id) {
+            output.output_bytes()
+        } else {
+            let raw_out = self.get_raw_out(id);
+            if let Some(raw_out) = raw_out {
+                let mut buffer: Vec<u8> = vec![];
+                raw_out.read_to_end(&mut buffer).unwrap();
+                buffer
+            } else {
+                vec![]
+            }
+        }
+    }
+
+    fn x_std_out_exact_bytes(&mut self, id: &ProcessOutputs, size: usize) -> Vec<u8> {
+        if let Some(output) = self.stdio_wrapper.get_captured(id) {
+            output.output_exact_bytes(size)
+        } else {
+            let raw_out = self.get_raw_out(id);
+            if let Some(raw_out) = raw_out {
+                let mut buffer = vec![0; size];
+                raw_out.read_exact(&mut buffer).unwrap();
+                buffer
+            } else {
+                vec![]
+            }
+        }
+    }
+
     /// Read, consume and return the output as bytes from [`Child`]'s stdout.
     ///
     /// Each subsequent call to any of the functions below will operate on the subsequent output of
@@ -2258,16 +2365,7 @@ impl UChild {
     /// * [`UChild::stdout_exact_bytes`]
     /// * and the call to itself [`UChild::stdout_bytes`]
     pub fn stdout_bytes(&mut self) -> Vec<u8> {
-        match self.captured_stdout.as_mut() {
-            Some(output) => output.output_bytes(),
-            None if self.raw.stdout.is_some() => {
-                let mut buffer: Vec<u8> = vec![];
-                let stdout = self.raw.stdout.as_mut().unwrap();
-                stdout.read_to_end(&mut buffer).unwrap();
-                buffer
-            }
-            None => vec![],
-        }
+        self.x_std_out_bytes(&ProcessOutputs::Normal)
     }
 
     /// Read and return all output from start of the child process until now.
@@ -2280,12 +2378,7 @@ impl UChild {
     /// * [`UChild::stdout_bytes`]
     /// * [`UChild::stdout_exact_bytes`]
     pub fn stdout_all_bytes(&mut self) -> Vec<u8> {
-        match self.captured_stdout.as_mut() {
-            Some(output) => output.output_all_bytes(),
-            None => {
-                panic!("Usage error: This method cannot be used if the output wasn't captured.")
-            }
-        }
+        self.stdio_wrapper.captured(&ProcessOutputs::Normal).output_all_bytes()
     }
 
     /// Read, consume and return the exact amount of bytes from `stdout`.
@@ -2293,16 +2386,7 @@ impl UChild {
     /// This method may block indefinitely if the `size` amount of bytes exceeds the amount of bytes
     /// that can be read. See also [`UChild::stdout_bytes`] for side effects.
     pub fn stdout_exact_bytes(&mut self, size: usize) -> Vec<u8> {
-        match self.captured_stdout.as_mut() {
-            Some(output) => output.output_exact_bytes(size),
-            None if self.raw.stdout.is_some() => {
-                let mut buffer = vec![0; size];
-                let stdout = self.raw.stdout.as_mut().unwrap();
-                stdout.read_exact(&mut buffer).unwrap();
-                buffer
-            }
-            None => vec![],
-        }
+        self.x_std_out_exact_bytes(&ProcessOutputs::Normal, size)
     }
 
     /// Read, consume and return the child's stderr as String.
@@ -2332,16 +2416,7 @@ impl UChild {
     /// If stderr is redirected to stdout with [`UCommand::stderr_to_stdout`] then always zero bytes
     /// are returned. See also [`UChild::stdout_bytes`] for side effects.
     pub fn stderr_bytes(&mut self) -> Vec<u8> {
-        match self.captured_stderr.as_mut() {
-            Some(output) => output.output_bytes(),
-            None if self.raw.stderr.is_some() => {
-                let mut buffer: Vec<u8> = vec![];
-                let stderr = self.raw.stderr.as_mut().unwrap();
-                stderr.read_to_end(&mut buffer).unwrap();
-                buffer
-            }
-            None => vec![],
-        }
+        self.x_std_out_bytes(&ProcessOutputs::Error)
     }
 
     /// Read and return all output from start of the child process until now.
@@ -2355,12 +2430,14 @@ impl UChild {
     /// * [`UChild::stderr_bytes`]
     /// * [`UChild::stderr_exact_bytes`]
     pub fn stderr_all_bytes(&mut self) -> Vec<u8> {
-        match self.captured_stderr.as_mut() {
-            Some(output) => output.output_all_bytes(),
-            None if self.stderr_to_stdout => vec![],
-            None => {
-                panic!("Usage error: This method cannot be used if the output wasn't captured.")
+        if let Some(co) = self.stdio_wrapper.get_captured(&ProcessOutputs::Error) {
+            co.output_all_bytes()
+        } else {
+            if !self.stderr_to_stdout {
+                panic!("Usage error: This method cannot be used if the output wasn't captured.");
             }
+
+            vec![]
         }
     }
 
@@ -2372,21 +2449,12 @@ impl UChild {
     /// # Important
     /// This method blocks indefinitely if the `size` amount of bytes cannot be read.
     pub fn stderr_exact_bytes(&mut self, size: usize) -> Vec<u8> {
-        match self.captured_stderr.as_mut() {
-            Some(output) => output.output_exact_bytes(size),
-            None if self.raw.stderr.is_some() => {
-                let stderr = self.raw.stderr.as_mut().unwrap();
-                let mut buffer = vec![0; size];
-                stderr.read_exact(&mut buffer).unwrap();
-                buffer
-            }
-            None => vec![],
-        }
+        self.x_std_out_exact_bytes(&ProcessOutputs::Error, size)
     }
 
     fn access_stdin_as_writer<'a>(&'a mut self) -> Box<dyn Write + Send + 'a> {
-        if let Some(stdin_fd) = &self.stdin_pty {
-            Box::new(BufWriter::new(stdin_fd.try_clone().unwrap()))
+        if let Some(stdin_pty) = &mut self.stdio_wrapper.stdin_pty {
+            Box::new(BufWriter::new(stdin_pty.as_mut()))
         } else {
             let stdin: &mut std::process::ChildStdin = self.raw.stdin.as_mut().unwrap();
             Box::new(BufWriter::new(stdin))
@@ -2394,7 +2462,7 @@ impl UChild {
     }
 
     fn take_stdin_as_writer(&mut self) -> Box<dyn Write + Send> {
-        if let Some(stdin_fd) = mem::take(&mut self.stdin_pty) {
+        if let Some(stdin_fd) = self.stdio_wrapper.stdin_pty.take() {
             Box::new(BufWriter::new(stdin_fd))
         } else {
             let stdin = self
@@ -2429,7 +2497,7 @@ impl UChild {
     pub fn pipe_in<T: Into<Vec<u8>>>(&mut self, content: T) -> &mut Self {
         let ignore_stdin_write_error = self.ignore_stdin_write_error;
         let mut content: Vec<u8> = content.into();
-        if self.stdin_pty.is_some() {
+        if self.stdio_wrapper.stdin_pty.is_some() {
             content.append(&mut END_OF_TRANSMISSION_SEQUENCE.to_vec());
         }
         let mut writer = self.take_stdin_as_writer();
@@ -2529,10 +2597,10 @@ impl UChild {
     /// Note, this does not have any effect if using the [`UChild::pipe_in`] method.
     pub fn close_stdin(&mut self) -> &mut Self {
         self.raw.stdin.take();
-        if self.stdin_pty.is_some() {
+        if self.stdio_wrapper.stdin_pty.is_some() {
             // a pty can not be closed. We need to send a EOT:
             let _ = self.try_write_in(END_OF_TRANSMISSION_SEQUENCE);
-            self.stdin_pty.take();
+            self.stdio_wrapper.stdin_pty.take();
         }
         self
     }
@@ -3664,11 +3732,11 @@ mod tests {
             .succeeds();
         std::assert_eq!(
             String::from_utf8_lossy(out.stdout()),
-            "stdin is a tty\r\nterminal size: 30 80\r\nstdout is a tty\r\nstderr is a tty\r\n"
+            "stdin is a tty\r\nterminal size: 30 80\r\nstdout is a tty\r\nstderr is a tty\r\nThis is an error message.\r\n"
         );
         std::assert_eq!(
             String::from_utf8_lossy(out.stderr()),
-            "This is an error message.\r\n"
+            ""
         );
     }
 
@@ -3773,15 +3841,16 @@ mod tests {
                 stdout: true,
                 stdin: true,
                 stderr: true,
+                echo: false,
             })
             .succeeds();
         std::assert_eq!(
             String::from_utf8_lossy(out.stdout()),
-            "stdin is a tty\r\nterminal size: 10 40\r\nstdout is a tty\r\nstderr is a tty\r\n"
+            "stdin is a tty\r\nterminal size: 10 40\r\nstdout is a tty\r\nstderr is a tty\r\nThis is an error message.\r\n"
         );
         std::assert_eq!(
             String::from_utf8_lossy(out.stderr()),
-            "This is an error message.\r\n"
+            ""
         );
     }
 
