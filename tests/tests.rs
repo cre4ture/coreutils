@@ -2,6 +2,9 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
+
+#![feature(windows_process_extensions_raw_attribute)]
+
 #[macro_use]
 mod common;
 

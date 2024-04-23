@@ -4,7 +4,7 @@
 // file that was distributed with this source code.
 // spell-checker:ignore parenb parmrk ixany iuclc onlcr ofdel icanon noflsh
 
-use crate::common::util::TestScenario;
+use crate::common::util::{TerminalSimulation, TerminalSize, TestScenario};
 
 #[test]
 fn test_invalid_arg() {
@@ -12,21 +12,38 @@ fn test_invalid_arg() {
 }
 
 #[test]
-#[ignore = "Fails because cargo test does not run in a tty"]
 fn runs() {
-    new_ucmd!().succeeds();
+    new_ucmd!().terminal_simulation(true).succeeds();
 }
 
 #[test]
-#[ignore = "Fails because cargo test does not run in a tty"]
 fn print_all() {
-    let res = new_ucmd!().succeeds();
+    let res = new_ucmd!()
+        .arg("-a")
+        .terminal_sim_stdio(TerminalSimulation::full().size(TerminalSize {
+            cols: 60,
+            rows: 30,
+            #[cfg(unix)]
+            pixels_x: 60 * 8,
+            #[cfg(unix)]
+            pixels_y: 30 * 10,
+        }))
+        .succeeds();
 
-    // Random selection of flags to check for
-    for flag in [
-        "parenb", "parmrk", "ixany", "iuclc", "onlcr", "ofdel", "icanon", "noflsh",
-    ] {
-        res.stdout_contains(flag);
+    res.stdout_contains("rows 30; columns 60;");
+
+    #[cfg(unix)]
+    {
+        // Random selection of flags to check for
+        let mut test_flags = Vec::new();
+        test_flags.extend_from_slice(&[
+            "parenb", "parmrk", "ixany", "onlcr", "icanon", "noflsh", "echo",
+        ]);
+        #[cfg(not(target_os = "freebsd"))]
+        test_flags.push("ofdel");
+        for flag in test_flags {
+            res.stdout_contains(flag);
+        }
     }
 }
 

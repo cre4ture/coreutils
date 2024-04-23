@@ -41,10 +41,12 @@ fn test_nohup_multiple_args_and_flags() {
     target_vendor = "apple"
 ))]
 fn test_nohup_with_pseudo_terminal_emulation_on_stdin_stdout_stderr_get_replaced() {
+    use crate::common::util::TerminalSimulation;
+
     let ts = TestScenario::new(util_name!());
     let result = ts
         .ucmd()
-        .terminal_simulation(true)
+        .terminal_sim_stdio(TerminalSimulation::full().stderr(false))
         .args(&["sh", "is_atty.sh"])
         .succeeds();
 

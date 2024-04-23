@@ -110,6 +110,7 @@ PROGS       := \
 	sleep \
 	sort \
 	split \
+	stty \
 	sum \
 	sync \
 	tac \
@@ -150,6 +151,7 @@ UNIX_PROGS := \
 	sleep \
 	stat \
 	stdbuf \
+	stty \
 	timeout \
 	touch \
 	tty \
@@ -227,6 +229,7 @@ TEST_PROGS  := \
 	split \
 	stat \
 	stdbuf \
+	stty \
 	sum \
 	tac \
 	tail \
@@ -236,6 +239,7 @@ TEST_PROGS  := \
 	true \
 	truncate \
 	tsort \
+	tty \
 	uname \
 	unexpand \
 	uniq \
