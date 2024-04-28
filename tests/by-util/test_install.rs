@@ -2,7 +2,7 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-// spell-checker:ignore (words) helloworld nodir objdump n'source
+// spell-checker:ignore (words) helloworld nodir objdump n'source dtruss
 
 use crate::common::util::{is_ci, run_ucmd_as_root, TestScenario};
 use filetime::FileTime;
@@ -629,18 +629,27 @@ fn strip_source_file() -> &'static str {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
+const STRACE_TOOL: &str = "strace";
+#[cfg(target_os = "macos")]
+const STRACE_TOOL: &str = "dtruss";
+
 #[test]
 #[cfg(not(windows))]
 fn test_install_and_strip() {
     let scene = TestScenario::new(util_name!());
     let at = &scene.fixtures;
     scene
-        .ucmd()
+        .cmd("sudo")
+        .arg(STRACE_TOOL)
+        .arg(&scene.bin_path)
+        .arg("install")
         .arg("-s")
         .arg(strip_source_file())
         .arg(STRIP_TARGET_FILE)
-        .succeeds()
-        .no_stderr();
+        .request_print_outputs()
+        .succeeds();
+//        .no_stderr();
 
     let output = Command::new(SYMBOL_DUMP_PROGRAM)
         .arg("-t")
@@ -658,14 +667,18 @@ fn test_install_and_strip_with_program() {
     let scene = TestScenario::new(util_name!());
     let at = &scene.fixtures;
     scene
-        .ucmd()
+        .cmd("sudo")
+        .arg(STRACE_TOOL)
+        .arg(&scene.bin_path)
+        .arg("install")
         .arg("-s")
         .arg("--strip-program")
         .arg("/usr/bin/strip")
         .arg(strip_source_file())
         .arg(STRIP_TARGET_FILE)
-        .succeeds()
-        .no_stderr();
+        .request_print_outputs()
+        .succeeds();
+//        .no_stderr();
 
     let output = Command::new(SYMBOL_DUMP_PROGRAM)
         .arg("-t")
@@ -691,27 +704,35 @@ fn test_install_and_strip_with_program_hyphen() {
 
     at.touch("src");
     scene
-        .ucmd()
+        .cmd("sudo")
+        .arg(STRACE_TOOL)
+        .arg(&scene.bin_path)
+        .arg("install")
         .arg("-s")
         .arg("--strip-program")
         .arg("./no-hyphen")
         .arg("--")
         .arg("src")
         .arg("-dest")
+        .request_print_outputs()
         .succeeds()
-        .no_stderr()
+//        .no_stderr()
         .stdout_is("./-dest\n");
 
     scene
-        .ucmd()
+        .cmd("sudo")
+        .arg(STRACE_TOOL)
+        .arg(&scene.bin_path)
+        .arg("install")
         .arg("-s")
         .arg("--strip-program")
         .arg("./no-hyphen")
         .arg("--")
         .arg("src")
         .arg("./-dest")
+        .request_print_outputs()
         .succeeds()
-        .no_stderr()
+//        .no_stderr()
         .stdout_is("./-dest\n");
 }
 
