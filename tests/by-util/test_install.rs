@@ -649,7 +649,7 @@ fn test_install_and_strip() {
         .arg(STRIP_TARGET_FILE)
         .request_print_outputs()
         .succeeds();
-//        .no_stderr();
+    //        .no_stderr();
 
     let output = Command::new(SYMBOL_DUMP_PROGRAM)
         .arg("-t")
@@ -678,7 +678,7 @@ fn test_install_and_strip_with_program() {
         .arg(STRIP_TARGET_FILE)
         .request_print_outputs()
         .succeeds();
-//        .no_stderr();
+    //        .no_stderr();
 
     let output = Command::new(SYMBOL_DUMP_PROGRAM)
         .arg("-t")
@@ -716,7 +716,7 @@ fn test_install_and_strip_with_program_hyphen() {
         .arg("-dest")
         .request_print_outputs()
         .succeeds()
-//        .no_stderr()
+        //        .no_stderr()
         .stdout_is("./-dest\n");
 
     scene
@@ -732,7 +732,7 @@ fn test_install_and_strip_with_program_hyphen() {
         .arg("./-dest")
         .request_print_outputs()
         .succeeds()
-//        .no_stderr()
+        //        .no_stderr()
         .stdout_is("./-dest\n");
 }
 
