@@ -632,7 +632,7 @@ fn strip_source_file() -> &'static str {
 #[cfg(not(target_os = "macos"))]
 const STRACE_TOOL: &str = "strace";
 #[cfg(target_os = "macos")]
-const STRACE_TOOL: &str = "dtrace";
+const STRACE_TOOL: &str = "/usr/bin/dtruss";
 
 #[test]
 #[cfg(not(windows))]
