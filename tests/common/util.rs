@@ -746,6 +746,16 @@ impl CmdResult {
         );
         self
     }
+
+    /// Print process output information for debugging purposes.
+    pub fn print_outputs(&self) {
+        println!("command exit status: {:?}", self.exit_status);
+        println!(
+            "child-stdout:\n{}\nchild-stderr:\n{}",
+            String::from_utf8_lossy(self.stdout()),
+            String::from_utf8_lossy(self.stderr()),
+        );
+    }
 }
 
 pub fn log_info<T: AsRef<str>, U: AsRef<str>>(msg: T, par: U) {
@@ -1988,6 +1998,7 @@ pub struct UChild {
     stdin_pty: Option<File>,
     ignore_stdin_write_error: bool,
     stderr_to_stdout: bool,
+    print_outputs: bool,
     join_handle: Option<JoinHandle<io::Result<()>>>,
     timeout: Option<Duration>,
     tmpd: Option<Rc<TempDir>>, // drop last
@@ -2010,6 +2021,7 @@ impl UChild {
             stdin_pty,
             ignore_stdin_write_error: ucommand.ignore_stdin_write_error,
             stderr_to_stdout: ucommand.stderr_to_stdout,
+            print_outputs: false,
             join_handle: None,
             timeout: ucommand.timeout,
             tmpd: ucommand.tmpd.clone(),
