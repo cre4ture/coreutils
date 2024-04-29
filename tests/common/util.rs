@@ -749,8 +749,8 @@ impl CmdResult {
 
     /// Print process output information for debugging purposes.
     pub fn print_outputs(&self) {
-        println!("command exit status: {:?}", self.exit_status);
-        println!(
+        eprintln!("command exit status: {:?}", self.exit_status);
+        eprintln!(
             "child-stdout:\n{}\nchild-stderr:\n{}",
             String::from_utf8_lossy(self.stdout()),
             String::from_utf8_lossy(self.stderr()),

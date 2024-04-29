@@ -709,6 +709,9 @@ jobs:
         ${{ matrix.job.cargo-options }} ${{ steps.dep_vars.outputs.CARGO_UTILITY_LIST_OPTIONS }}
       env:
         RUST_BACKTRACE: "1"
+    - name: Setup tmate session
+      if: failure()
+      uses: mxschmitt/action-tmate@v3
     - name: Archive executable artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -1027,9 +1030,6 @@ jobs:
         RUSTDOCFLAGS: "-Cpanic=abort"
         RUST_BACKTRACE: "1"
         # RUSTUP_TOOLCHAIN: ${{ steps.vars.outputs.TOOLCHAIN }}
-    - name: Setup tmate session
-      if: failure()
-      uses: mxschmitt/action-tmate@v3
     - name: Generate coverage data (via `grcov`)
       id: coverage
       shell: bash
