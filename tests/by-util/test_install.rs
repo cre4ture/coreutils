@@ -694,13 +694,7 @@ fn test_install_and_strip_with_program() {
 #[test]
 fn test_install_and_strip_with_program_hyphen() {
     let scene = TestScenario::new(util_name!());
-
     let at = &scene.fixtures;
-    let content = r#"#!/bin/sh
-    printf -- '%s\n' "$1" | grep '^[^-]'
-    "#;
-    at.write("no-hyphen", content);
-    scene.ccmd("chmod").arg("+x").arg("no-hyphen").succeeds();
 
     at.touch("src");
     scene
@@ -710,7 +704,7 @@ fn test_install_and_strip_with_program_hyphen() {
         .arg("install")
         .arg("-s")
         .arg("--strip-program")
-        .arg("./no-hyphen")
+        .arg("echo")
         .arg("--")
         .arg("src")
         .arg("-dest")
@@ -726,7 +720,7 @@ fn test_install_and_strip_with_program_hyphen() {
         .arg("install")
         .arg("-s")
         .arg("--strip-program")
-        .arg("./no-hyphen")
+        .arg("echo")
         .arg("--")
         .arg("src")
         .arg("./-dest")
