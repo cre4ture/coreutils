@@ -746,6 +746,16 @@ impl CmdResult {
         );
         self
     }
+
+    /// Print process output information for debugging purposes.
+    pub fn print_outputs(&self) {
+        eprintln!("command exit status: {:?}", self.exit_status);
+        eprintln!(
+            "child-stdout:\n{}\nchild-stderr:\n{}",
+            String::from_utf8_lossy(self.stdout()),
+            String::from_utf8_lossy(self.stderr()),
+        );
+    }
 }
 
 pub fn log_info<T: AsRef<str>, U: AsRef<str>>(msg: T, par: U) {
@@ -1240,6 +1250,7 @@ pub struct UCommand {
     #[cfg(unix)]
     limits: Vec<(rlimit::Resource, u64, u64)>,
     stderr_to_stdout: bool,
+    print_outputs: bool,
     timeout: Option<Duration>,
     #[cfg(unix)]
     terminal_simulation: bool,
@@ -1294,6 +1305,11 @@ impl UCommand {
         T: Into<PathBuf>,
     {
         self.bin_path = Some(bin_path.into());
+        self
+    }
+
+    pub fn request_print_outputs(&mut self) -> &mut Self {
+        self.print_outputs = true;
         self
     }
 
@@ -1694,6 +1710,8 @@ impl UCommand {
 
         let mut child = UChild::from(self, child, captured_stdout, captured_stderr, stdin_pty);
 
+        child.print_outputs = self.print_outputs;
+
         if let Some(input) = self.bytes_into_stdin.take() {
             child.pipe_in(input);
         }
@@ -1980,6 +1998,7 @@ pub struct UChild {
     stdin_pty: Option<File>,
     ignore_stdin_write_error: bool,
     stderr_to_stdout: bool,
+    print_outputs: bool,
     join_handle: Option<JoinHandle<io::Result<()>>>,
     timeout: Option<Duration>,
     tmpd: Option<Rc<TempDir>>, // drop last
@@ -2002,6 +2021,7 @@ impl UChild {
             stdin_pty,
             ignore_stdin_write_error: ucommand.ignore_stdin_write_error,
             stderr_to_stdout: ucommand.stderr_to_stdout,
+            print_outputs: false,
             join_handle: None,
             timeout: ucommand.timeout,
             tmpd: ucommand.tmpd.clone(),
@@ -2115,17 +2135,25 @@ impl UChild {
             self.tmpd.clone(),
         );
 
+        let print_outputs = self.print_outputs;
+
         #[allow(deprecated)]
         let output = self.wait_with_output()?;
 
-        Ok(CmdResult {
+        let result = CmdResult {
             bin_path,
             util_name,
             tmpd,
             exit_status: Some(output.status),
             stdout: output.stdout,
             stderr: output.stderr,
-        })
+        };
+
+        if print_outputs {
+            result.print_outputs();
+        }
+
+        Ok(result)
     }
 
     /// Wait for the child process to terminate and return an instance of [`Output`].
