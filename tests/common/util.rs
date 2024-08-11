@@ -3185,7 +3185,7 @@ mod tests {
     fn test_parse_coreutil_version() {
         use std::assert_eq;
         assert_eq!(
-            parse_coreutil_version("id (GNU coreutils) 9.0.123-0123").to_string(),
+            parse_coreutil_version("id  (GNU coreutils) 9.0.123-0123").to_string(),
             "9"
         );
         assert_eq!(
