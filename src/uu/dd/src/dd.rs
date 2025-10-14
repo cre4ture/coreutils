@@ -479,7 +479,7 @@ impl Read for Input<'_> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut base_idx = 0;
         let target_len = buf.len();
-        log::debug!("Read: @{}, size: {}", buf.as_ptr() as usize, buf.len());
+        // log::debug!("Read: @{}, size: {}", buf.as_ptr() as usize, buf.len());
         loop {
             if self.settings.iflags.direct {
                 let remaining = target_len - base_idx;
@@ -492,21 +492,21 @@ impl Read for Input<'_> {
                     // we can do that by disabling direct read.
                     // Thats also what GNU is doing.
                     let result = self.src.unset_direct();
-                    log::debug!(
-                        "{:?} - unset_direct, @{} - remaining: {remaining}",
-                        result,
-                        (buf.as_ptr() as usize % self.settings.ibs)
-                    );
+                    //log::debug!(
+                    //    "{:?} - unset_direct, @{} - remaining: {remaining}",
+                    //    result,
+                    //    (buf.as_ptr() as usize % self.settings.ibs)
+                    //);
                     result?
                 }
             }
 
             let dest = &mut buf[base_idx..];
-            log::debug!(
-                "Read - iter: @{}, size: {}",
-                dest.as_ptr() as usize,
-                dest.len()
-            );
+            //log::debug!(
+            //    "Read - iter: @{}, size: {}",
+            //    dest.as_ptr() as usize,
+            //    dest.len()
+            //);
             match self.src.read(dest) {
                 Ok(0) => return Ok(base_idx),
                 Ok(rlen) if self.settings.iflags.fullblock => {
@@ -761,9 +761,9 @@ impl Dest {
 fn unset_direct(_f: &mut File) -> io::Result<()> {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
-        let mut mode = OFlag::from_bits_retain(fcntl(_f.as_raw_fd(), FcntlArg::F_GETFL)?);
+        let mut mode = OFlag::from_bits_retain(fcntl(_f.as_fd(), FcntlArg::F_GETFL)?);
         mode.remove(OFlag::O_DIRECT);
-        nix::fcntl::fcntl(_f.as_raw_fd(), FcntlArg::F_SETFL(mode))?;
+        nix::fcntl::fcntl(_f.as_fd(), FcntlArg::F_SETFL(mode))?;
     }
     Ok(())
 }

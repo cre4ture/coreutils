@@ -1537,8 +1537,7 @@ fn test_nocache_stdin_pipe_error() {
 #[cfg(target_os = "linux")]
 fn test_nocache_stdin_success() {
     let ts = TestScenario::new(util_name!());
-    let at = ts.fixtures;
-    let infile = at.make_file("stdin.txt");
+    let infile = ts.fixtures.make_file("stdin.txt");
     new_ucmd!()
         .args(&["iflag=nocache", "count=0", "status=noxfer"])
         .set_stdin(infile)
