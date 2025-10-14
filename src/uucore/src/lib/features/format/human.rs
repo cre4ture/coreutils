@@ -11,7 +11,7 @@
 
 use number_prefix::NumberPrefix;
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq)]
 pub enum SizeFormat {
     Bytes,
     Binary,  // Powers of 1024, --human-readable, -h

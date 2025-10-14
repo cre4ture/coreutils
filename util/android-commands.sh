@@ -119,26 +119,6 @@ take_screen_shot() {
     adb exec-out screencap -p > "$filename"
 }
 
-# shellcheck disable=SC2317  # Don't warn about unreachable commands in this function
-check_if_termux_is_active() {
-    dumsys=$(adb shell "dumpsys window windows")
-    echo "dumpsys: $dumsys"
-    echo "$dumsys" | grep -E "(imeInputTarget|mInputMethodTarget) in display# 0 Window{[^}]+com.termux\/com\.termux\.HomeActivity}"
-}
-
-# shellcheck disable=SC2317  # Don't warn about unreachable commands in this function
-adb_shell_start_termux_activity() {
-    if ! adb shell 'am start -n com.termux/.HomeActivity'; then
-        echo "failed to launch termux"
-        return 1
-    fi
-
-    take_screen_shot "launch_termux_after_start_activity"
-
-    # the emulator can sometimes be a little slow to launch the app
-    run_with_retry 20 check_if_termux_is_active
-}
-
 launch_termux() {
     echo "launching termux"
     take_screen_shot "launch_termux_enter"
@@ -147,13 +127,29 @@ launch_termux() {
                                  # should not cause side effects when dialog is not there as there are
                                  # no relevant GUI elements at this position otherwise.
 
-    run_with_retry 6 adb_shell_start_termux_activity || exit 1
+    if ! adb shell 'am start -n com.termux/.HomeActivity'; then
+        echo "failed to launch termux"
+        exit 1
+    fi
+
+    take_screen_shot "launch_termux_after_start_activity"
+
+    # the emulator can sometimes be a little slow to launch the app
+    loop_count=0
+    while ! adb shell "dumpsys window windows" | \
+            grep -E "imeInputTarget in display# 0 Window{[^}]+com.termux\/com\.termux\.HomeActivity}"
+    do
+        sleep 1
+        loop_count=$((loop_count + 1))
+        if [[ loop_count -ge 20 ]]; then
+            break
+        fi
+    done
 
     take_screen_shot "launch_termux_after_wait_activity"
 
     touch_cmd() {
-        adb_input_text_long "    echo clear leftovers" && hit_enter
-        adb_input_text_long "touch $dev_probe_dir/launch.probe" && hit_enter
+        adb shell input text "\"touch $dev_probe_dir/launch.probe\"" && hit_enter
         sleep 1
     }
 
@@ -166,8 +162,6 @@ launch_termux() {
         take_screen_shot "launch_termux_touch_probe"
         sleep 4
         touch_cmd
-
-        echo "active window dump: " && adb shell "dumpsys window windows"
 
         timeout=$((timeout - 4))
         if [[ timeout -le 0 ]]; then
@@ -361,17 +355,16 @@ setup_ssh_forwarding() {
 }
 
 copy_file_or_dir_to_device_via_ssh() {
-    scp -vr "$1" "scp://termux@127.0.0.1:9022/$2"
+    scp -r "$1" "scp://termux@127.0.0.1:9022/$2"
 }
 
 copy_file_or_dir_from_device_via_ssh() {
-    scp -vr "scp://termux@127.0.0.1:9022/$1" "$2"
+    scp -r "scp://termux@127.0.0.1:9022/$1" "$2"
 }
 
 # runs the in args provided command on android side via ssh. forwards return code.
 # adds a timestamp to every line to be able to see where delays are
 run_command_via_ssh() {
-    echo "run command via ssh: $*"
     ssh -p 9022 termux:@127.0.0.1 -o StrictHostKeyChecking=accept-new "$@" 2>&1 | add_timestamp_to_lines
     return "${PIPESTATUS[0]}"
 }
@@ -421,15 +414,18 @@ install_rsa_pub() {
     echo "$rsa_pub_key"
     echo "====================================="
 
-    adb_input_text_long "echo \"$rsa_pub_key\" >> ~/.ssh/authorized_keys" && hit_enter
+    adb shell input text \"echo \"
 
+    adb_input_text_long "$rsa_pub_key"
+
+    adb shell input text "\" >> ~/.ssh/authorized_keys\"" && hit_enter
     sleep 1
 }
 
 install_packages_via_adb_shell() {
     install_package_list="$*"
 
-    install_packages_via_adb_shell_using_pkg "$install_package_list"
+    install_packages_via_adb_shell_using_apt "$install_package_list"
     if [[ $? -ne 0 ]]; then
         echo "apt failed. Now try install with pkg as fallback."
         probe="$dev_probe_dir/pkg.probe"
@@ -440,32 +436,17 @@ install_packages_via_adb_shell() {
     return 0
 }
 
-set_apt_and_pkg_package_mirrors() {
+# We use apt to install the packages as pkg doesn't respect any pre-defined mirror list.
+# Its important to have a defined mirror list to avoid issues with broken mirrors.
+install_packages_via_adb_shell_using_apt() {
+    install_package_list="$*"
+
     repo_url=$(get_current_repo_url)
     move_to_next_repo_url
     echo "set apt repository url: $repo_url"
     probe="$dev_probe_dir/sourceslist.probe"
     command="'echo $repo_url | dd of=\$PREFIX/etc/apt/sources.list; echo \$? > $probe'"
     run_termux_command "$command" "$probe"
-}
-
-install_packages_via_adb_shell_using_pkg() {
-    install_package_list="$*"
-
-    set_apt_and_pkg_package_mirrors
-
-    # as of https://github.com/termux/termux-tools/blob/5b30fbf3b0306c9f3dcd67b68755d990e83f1263/packages/termux-tools/pkg there is one
-    # broken mirror, which is not properly detected. thus skipping mirror detection altogether
-    command="'mkdir -vp ~/.cargo/bin; export TERMUX_PKG_NO_MIRROR_SELECT=y; yes | pkg install $install_package_list -y; echo \$? > $probe'"
-    run_termux_command "$command" "$probe"
-}
-
-# We use apt to install the packages as pkg doesn't respect any pre-defined mirror list.
-# Its important to have a defined mirror list to avoid issues with broken mirrors.
-install_packages_via_adb_shell_using_apt() {
-    install_package_list="$*"
-
-    set_apt_and_pkg_package_mirrors
 
     probe="$dev_probe_dir/adb_install.probe"
     command="'mkdir -vp ~/.cargo/bin; apt update; yes | apt install $install_package_list -y; echo \$? > $probe'"
@@ -474,23 +455,13 @@ install_packages_via_adb_shell_using_apt() {
 
 install_packages_via_ssh_using_apt() {
     install_package_list="$*"
-    run_command_via_ssh "apt update; yes | apt install $install_package_list -y"
-}
-
-install_packages_via_ssh_using_pkg() {
-    install_package_list="$*"
-    run_command_via_ssh "export TERMUX_PKG_NO_MIRROR_SELECT=y; pkg update; yes | pkg install $install_package_list -y"
-}
-
-install_packages_via_ssh() {
-    install_package_list=("$@")
 
     repo_url=$(get_current_repo_url)
     move_to_next_repo_url
     echo "set apt repository url: $repo_url"
     run_command_via_ssh "echo $repo_url | dd of=\$PREFIX/etc/apt/sources.list"
 
-    install_packages_via_ssh_using_pkg "${install_package_list[@]}"
+    run_command_via_ssh "apt update; yes | apt install $install_package_list -y"
 }
 
 apt_upgrade_all_packages() {
@@ -521,7 +492,7 @@ run_with_retry() {
 
     exit_code=$?
 
-    echo "Still failing after $tries tries. Code: $exit_code"
+    echo "Still failing after $tries. Code: $exit_code"
 
     return $exit_code
 }
@@ -537,7 +508,7 @@ snapshot() {
 
     apt_upgrade_all_packages
 
-    install_packages_via_ssh "rust binutils openssl tar mount-utils"
+    install_packages_via_ssh_using_apt "rust binutils openssl tar mount-utils"
 
     echo "Read /proc/cpuinfo"
     run_command_via_ssh "cat /proc/cpuinfo"
@@ -548,7 +519,7 @@ snapshot() {
     # which prevents incremental build for the retries.
     command="export CARGO_TERM_COLOR=always && export CARGO_TARGET_DIR=\"cargo_install_target_dir\" && cargo install cargo-nextest"
 
-    run_with_retry 6 run_command_via_ssh "$command"
+    run_with_retry 3 run_command_via_ssh "$command"
     return_code=$?
 
     echo "Info about cargo and rust - via SSH Script"
