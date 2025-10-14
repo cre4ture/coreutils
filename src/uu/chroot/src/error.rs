@@ -4,84 +4,78 @@
 // file that was distributed with this source code.
 // spell-checker:ignore NEWROOT Userspec userspec
 //! Errors returned by chroot.
-use std::fmt::Display;
 use std::io::Error;
+use thiserror::Error;
 use uucore::display::Quotable;
 use uucore::error::UError;
+use uucore::libc;
+use uucore::translate;
 
 /// Errors that can happen while executing chroot.
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum ChrootError {
     /// Failed to enter the specified directory.
-    CannotEnter(String, Error),
+    #[error("{}", translate!("chroot-error-cannot-enter", "dir" => _0.quote(), "err" => _1))]
+    CannotEnter(String, #[source] Error),
 
     /// Failed to execute the specified command.
-    CommandFailed(String, Error),
+    #[error("{}", translate!("chroot-error-command-failed", "cmd" => _0.quote(), "err" => _1))]
+    CommandFailed(String, #[source] Error),
 
     /// Failed to find the specified command.
-    CommandNotFound(String, Error),
+    #[error("{}", translate!("chroot-error-command-not-found", "cmd" => _0.quote(), "err" => _1))]
+    CommandNotFound(String, #[source] Error),
 
-    /// The given user and group specification was invalid.
-    InvalidUserspec(String),
+    #[error("{}", translate!("chroot-error-groups-parsing-failed"))]
+    GroupsParsingFailed,
+
+    #[error("{}", translate!("chroot-error-invalid-group", "group" => _0.quote()))]
+    InvalidGroup(String),
+
+    #[error("{}", translate!("chroot-error-invalid-group-list", "list" => _0.quote()))]
+    InvalidGroupList(String),
 
     /// The new root directory was not given.
+    #[error("{}", translate!("chroot-error-missing-newroot", "util_name" => uucore::execution_phrase()))]
     MissingNewRoot,
 
+    #[error("{}", translate!("chroot-error-no-group-specified", "uid" => _0))]
+    NoGroupSpecified(libc::uid_t),
+
+    /// Failed to find the specified user.
+    #[error("{}", translate!("chroot-error-no-such-user"))]
+    NoSuchUser,
+
     /// Failed to find the specified group.
-    NoSuchGroup(String),
+    #[error("{}", translate!("chroot-error-no-such-group"))]
+    NoSuchGroup,
 
     /// The given directory does not exist.
+    #[error("{}", translate!("chroot-error-no-such-directory", "dir" => _0.quote()))]
     NoSuchDirectory(String),
 
     /// The call to `setgid()` failed.
-    SetGidFailed(String, Error),
+    #[error("{}", translate!("chroot-error-set-gid-failed", "gid" => _0, "err" => _1))]
+    SetGidFailed(String, #[source] Error),
 
     /// The call to `setgroups()` failed.
+    #[error("{}", translate!("chroot-error-set-groups-failed", "err" => _0))]
     SetGroupsFailed(Error),
 
     /// The call to `setuid()` failed.
-    SetUserFailed(String, Error),
+    #[error("{}", translate!("chroot-error-set-user-failed", "user" => _0.maybe_quote(), "err" => _1))]
+    SetUserFailed(String, #[source] Error),
 }
 
-impl std::error::Error for ChrootError {}
-
 impl UError for ChrootError {
-    // 125 if chroot itself fails
-    // 126 if command is found but cannot be invoked
-    // 127 if command cannot be found
+    /// 125 if chroot itself fails
+    /// 126 if command is found but cannot be invoked
+    /// 127 if command cannot be found
     fn code(&self) -> i32 {
         match self {
             Self::CommandFailed(_, _) => 126,
             Self::CommandNotFound(_, _) => 127,
             _ => 125,
-        }
-    }
-}
-
-impl Display for ChrootError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Self::CannotEnter(s, e) => write!(f, "cannot chroot to {}: {}", s.quote(), e,),
-            Self::CommandFailed(s, e) | Self::CommandNotFound(s, e) => {
-                write!(f, "failed to run command {}: {}", s.to_string().quote(), e,)
-            }
-            Self::InvalidUserspec(s) => write!(f, "invalid userspec: {}", s.quote(),),
-            Self::MissingNewRoot => write!(
-                f,
-                "Missing operand: NEWROOT\nTry '{} --help' for more information.",
-                uucore::execution_phrase(),
-            ),
-            Self::NoSuchGroup(s) => write!(f, "no such group: {}", s.maybe_quote(),),
-            Self::NoSuchDirectory(s) => write!(
-                f,
-                "cannot change root directory to {}: no such directory",
-                s.quote(),
-            ),
-            Self::SetGidFailed(s, e) => write!(f, "cannot set gid to {s}: {e}"),
-            Self::SetGroupsFailed(e) => write!(f, "cannot set groups: {e}"),
-            Self::SetUserFailed(s, e) => {
-                write!(f, "cannot set user to {}: {}", s.maybe_quote(), e)
-            }
         }
     }
 }

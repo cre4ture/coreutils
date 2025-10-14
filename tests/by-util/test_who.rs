@@ -5,11 +5,13 @@
 
 // spell-checker:ignore (flags) runlevel mesg
 
-use crate::common::util::{expected_result, TestScenario};
-
+use uutests::new_ucmd;
+use uutests::unwrap_or_return;
+use uutests::util::{TestScenario, expected_result, gnu_cmd_result};
+use uutests::util_name;
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 
 #[cfg(unix)]
@@ -26,6 +28,10 @@ fn test_count() {
 #[cfg(unix)]
 #[test]
 #[cfg(not(target_os = "openbsd"))]
+#[cfg_attr(
+    all(target_arch = "aarch64", target_os = "linux"),
+    ignore = "Issue #7174 - Test not supported on ARM64 Linux"
+)]
 fn test_boot() {
     let ts = TestScenario::new(util_name!());
     for opt in ["-b", "--boot", "--b"] {
@@ -243,4 +249,29 @@ fn test_all() {
         let expected_stdout = unwrap_or_return!(expected_result(&ts, &[opt])).stdout_move_str();
         ts.ucmd().arg(opt).succeeds().stdout_is(expected_stdout);
     }
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "issue #3219"]
+fn test_locale() {
+    let ts = TestScenario::new(util_name!());
+
+    let expected_stdout =
+        unwrap_or_return!(gnu_cmd_result(&ts, &[], &[("LC_ALL", "C")])).stdout_move_str();
+    ts.ucmd()
+        .env("LC_ALL", "C")
+        .succeeds()
+        .stdout_is(&expected_stdout);
+
+    let expected_stdout =
+        unwrap_or_return!(gnu_cmd_result(&ts, &[], &[("LC_ALL", "en_US.UTF-8")])).stdout_move_str();
+    ts.ucmd()
+        .env("LC_ALL", "C")
+        .succeeds()
+        .stdout_str_check(|s| s != expected_stdout);
+    ts.ucmd()
+        .env("LC_ALL", "en_US.UTF-8")
+        .succeeds()
+        .stdout_is(&expected_stdout);
 }

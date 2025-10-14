@@ -2,17 +2,19 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
+#![allow(clippy::stable_sort_primitive)]
+
 use std::process::Stdio;
 
-use crate::common::util::TestScenario;
+use uutests::{at_and_ucmd, new_ucmd, util::TestScenario, util_name};
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 
 #[test]
-fn test_rm_one_file() {
+fn test_one_file() {
     let (at, mut ucmd) = at_and_ucmd!();
     let file = "test_rm_one_file";
 
@@ -24,17 +26,17 @@ fn test_rm_one_file() {
 }
 
 #[test]
-fn test_rm_failed() {
-    let (_at, mut ucmd) = at_and_ucmd!();
+fn test_failed() {
     let file = "test_rm_one_file"; // Doesn't exist
 
-    ucmd.arg(file).fails().stderr_contains(&format!(
-        "cannot remove '{file}': No such file or directory"
-    ));
+    new_ucmd!()
+        .arg(file)
+        .fails()
+        .stderr_contains(format!("cannot remove '{file}': No such file or directory"));
 }
 
 #[test]
-fn test_rm_multiple_files() {
+fn test_multiple_files() {
     let (at, mut ucmd) = at_and_ucmd!();
     let file_a = "test_rm_multiple_file_a";
     let file_b = "test_rm_multiple_file_b";
@@ -49,7 +51,7 @@ fn test_rm_multiple_files() {
 }
 
 #[test]
-fn test_rm_interactive() {
+fn test_interactive() {
     let scene = TestScenario::new(util_name!());
     let at = &scene.fixtures;
 
@@ -85,7 +87,7 @@ fn test_rm_interactive() {
 }
 
 #[test]
-fn test_rm_force() {
+fn test_force() {
     let (at, mut ucmd) = at_and_ucmd!();
     let file_a = "test_rm_force_a";
     let file_b = "test_rm_force_b";
@@ -106,7 +108,7 @@ fn test_rm_force() {
 }
 
 #[test]
-fn test_rm_force_multiple() {
+fn test_force_multiple() {
     let (at, mut ucmd) = at_and_ucmd!();
     let file_a = "test_rm_force_a";
     let file_b = "test_rm_force_b";
@@ -129,7 +131,7 @@ fn test_rm_force_multiple() {
 }
 
 #[test]
-fn test_rm_empty_directory() {
+fn test_empty_directory() {
     let (at, mut ucmd) = at_and_ucmd!();
     let dir = "test_rm_empty_directory";
 
@@ -141,7 +143,7 @@ fn test_rm_empty_directory() {
 }
 
 #[test]
-fn test_rm_empty_directory_verbose() {
+fn test_empty_directory_verbose() {
     let (at, mut ucmd) = at_and_ucmd!();
     let dir = "test_rm_empty_directory_verbose";
 
@@ -157,7 +159,7 @@ fn test_rm_empty_directory_verbose() {
 }
 
 #[test]
-fn test_rm_non_empty_directory() {
+fn test_non_empty_directory() {
     let (at, mut ucmd) = at_and_ucmd!();
     let dir = "test_rm_non_empty_dir";
     let file_a = &format!("{dir}/test_rm_non_empty_file_a");
@@ -165,16 +167,17 @@ fn test_rm_non_empty_directory() {
     at.mkdir(dir);
     at.touch(file_a);
 
-    ucmd.arg("-d")
-        .arg(dir)
-        .fails()
-        .stderr_contains(&format!("cannot remove '{dir}': Directory not empty"));
+    #[cfg(windows)]
+    let expected = "rm: cannot remove 'test_rm_non_empty_dir': The directory is not empty.\n";
+    #[cfg(not(windows))]
+    let expected = "rm: cannot remove 'test_rm_non_empty_dir': Directory not empty\n";
+    ucmd.arg("-d").arg(dir).fails().stderr_only(expected);
     assert!(at.file_exists(file_a));
     assert!(at.dir_exists(dir));
 }
 
 #[test]
-fn test_rm_recursive() {
+fn test_recursive() {
     let (at, mut ucmd) = at_and_ucmd!();
     let dir = "test_rm_recursive_directory";
     let file_a = "test_rm_recursive_directory/test_rm_recursive_file_a";
@@ -192,7 +195,7 @@ fn test_rm_recursive() {
 }
 
 #[test]
-fn test_rm_recursive_multiple() {
+fn test_recursive_multiple() {
     let (at, mut ucmd) = at_and_ucmd!();
     let dir = "test_rm_recursive_directory";
     let file_a = "test_rm_recursive_directory/test_rm_recursive_file_a";
@@ -214,8 +217,26 @@ fn test_rm_recursive_multiple() {
     assert!(!at.file_exists(file_b));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
-fn test_rm_directory_without_flag() {
+fn test_recursive_long_filepath() {
+    let (at, mut ucmd) = at_and_ucmd!();
+    let dir = "test_rm_recursive_directory";
+    let mkdir = "test_rm_recursive_directory/".repeat(35);
+    let file_a = mkdir.clone() + "test_rm_recursive_file_a";
+    assert!(file_a.len() > 1000);
+
+    at.mkdir_all(&mkdir);
+    at.touch(&file_a);
+
+    ucmd.arg("-r").arg(dir).succeeds().no_stderr();
+
+    assert!(!at.dir_exists(dir));
+    assert!(!at.file_exists(file_a));
+}
+
+#[test]
+fn test_directory_without_flag() {
     let (at, mut ucmd) = at_and_ucmd!();
     let dir = "test_rm_directory_without_flag_dir";
 
@@ -223,13 +244,13 @@ fn test_rm_directory_without_flag() {
 
     ucmd.arg(dir)
         .fails()
-        .stderr_contains(&format!("cannot remove '{dir}': Is a directory"));
+        .stderr_contains(format!("cannot remove '{dir}': Is a directory"));
 }
 
 #[test]
 #[cfg(windows)]
 // https://github.com/uutils/coreutils/issues/3200
-fn test_rm_directory_with_trailing_backslash() {
+fn test_directory_with_trailing_backslash() {
     let (at, mut ucmd) = at_and_ucmd!();
     let dir = "dir";
 
@@ -240,7 +261,7 @@ fn test_rm_directory_with_trailing_backslash() {
 }
 
 #[test]
-fn test_rm_verbose() {
+fn test_verbose() {
     let (at, mut ucmd) = at_and_ucmd!();
     let file_a = "test_rm_verbose_file_a";
     let file_b = "test_rm_verbose_file_b";
@@ -258,7 +279,7 @@ fn test_rm_verbose() {
 #[test]
 #[cfg(not(windows))]
 // on unix symlink_dir is a file
-fn test_rm_symlink_dir() {
+fn test_symlink_dir() {
     let (at, mut ucmd) = at_and_ucmd!();
 
     let dir = "test_rm_symlink_dir_directory";
@@ -273,7 +294,7 @@ fn test_rm_symlink_dir() {
 #[test]
 #[cfg(windows)]
 // on windows removing symlink_dir requires "-r" or "-d"
-fn test_rm_symlink_dir() {
+fn test_symlink_dir() {
     let scene = TestScenario::new(util_name!());
     let at = &scene.fixtures;
 
@@ -287,7 +308,7 @@ fn test_rm_symlink_dir() {
         .ucmd()
         .arg(link)
         .fails()
-        .stderr_contains(&format!("cannot remove '{link}': Is a directory"));
+        .stderr_contains(format!("cannot remove '{link}': Is a directory"));
 
     assert!(at.dir_exists(link));
 
@@ -295,7 +316,7 @@ fn test_rm_symlink_dir() {
 }
 
 #[test]
-fn test_rm_invalid_symlink() {
+fn test_invalid_symlink() {
     let (at, mut ucmd) = at_and_ucmd!();
     let link = "test_rm_invalid_symlink";
 
@@ -305,20 +326,17 @@ fn test_rm_invalid_symlink() {
 }
 
 #[test]
-fn test_rm_force_no_operand() {
-    let mut ucmd = new_ucmd!();
-
-    ucmd.arg("-f").succeeds().no_stderr();
+fn test_force_no_operand() {
+    new_ucmd!().arg("-f").succeeds().no_stderr();
 }
 
 #[test]
-fn test_rm_no_operand() {
-    let ts = TestScenario::new(util_name!());
-    ts.ucmd().fails().usage_error("missing operand");
+fn test_no_operand() {
+    new_ucmd!().fails().usage_error("missing operand");
 }
 
 #[test]
-fn test_rm_verbose_slash() {
+fn test_verbose_slash() {
     let (at, mut ucmd) = at_and_ucmd!();
     let dir = "test_rm_verbose_slash_directory";
     let file_a = &format!("{dir}/test_rm_verbose_slash_file_a");
@@ -327,15 +345,14 @@ fn test_rm_verbose_slash() {
     at.touch(file_a);
 
     let file_a_normalized = &format!(
-        "{}{}test_rm_verbose_slash_file_a",
-        dir,
+        "{dir}{}test_rm_verbose_slash_file_a",
         std::path::MAIN_SEPARATOR
     );
 
     ucmd.arg("-r")
         .arg("-f")
         .arg("-v")
-        .arg(&format!("{dir}///"))
+        .arg(format!("{dir}///"))
         .succeeds()
         .stdout_only(format!(
             "removed '{file_a_normalized}'\nremoved directory '{dir}'\n"
@@ -346,7 +363,7 @@ fn test_rm_verbose_slash() {
 }
 
 #[test]
-fn test_rm_silently_accepts_presume_input_tty2() {
+fn test_silently_accepts_presume_input_tty2() {
     let (at, mut ucmd) = at_and_ucmd!();
     let file_2 = "test_rm_silently_accepts_presume_input_tty2";
 
@@ -358,49 +375,60 @@ fn test_rm_silently_accepts_presume_input_tty2() {
 }
 
 #[test]
-fn test_rm_interactive_never() {
+fn test_interactive_never() {
+    let scene = TestScenario::new(util_name!());
+    let at = &scene.fixtures;
+    let file = "a";
+
+    for arg in ["never", "no", "none"] {
+        at.touch(file);
+        #[cfg(feature = "chmod")]
+        scene.ccmd("chmod").arg("0").arg(file).succeeds();
+
+        scene
+            .ucmd()
+            .arg(format!("--interactive={arg}"))
+            .arg(file)
+            .succeeds()
+            .no_output();
+
+        assert!(!at.file_exists(file));
+    }
+}
+
+#[test]
+fn test_interactive_always() {
     let scene = TestScenario::new(util_name!());
     let at = &scene.fixtures;
 
-    let file_2 = "test_rm_interactive";
+    let file_a = "a";
+    let file_b = "b";
 
-    at.touch(file_2);
-    #[cfg(feature = "chmod")]
-    scene.ccmd("chmod").arg("0").arg(file_2).succeeds();
+    for arg in [
+        "-i",
+        "--interactive",
+        "--interactive=always",
+        "--interactive=yes",
+    ] {
+        at.touch(file_a);
+        at.touch(file_b);
 
-    scene
-        .ucmd()
-        .arg("--interactive=never")
-        .arg(file_2)
-        .succeeds()
-        .stdout_is("");
+        scene
+            .ucmd()
+            .arg(arg)
+            .arg(file_a)
+            .arg(file_b)
+            .pipe_in("y\ny")
+            .succeeds()
+            .no_stdout();
 
-    assert!(!at.file_exists(file_2));
+        assert!(!at.file_exists(file_a));
+        assert!(!at.file_exists(file_b));
+    }
 }
 
 #[test]
-fn test_rm_interactive_missing_value() {
-    // `--interactive` is equivalent to `--interactive=always` or `-i`
-    let (at, mut ucmd) = at_and_ucmd!();
-
-    let file1 = "test_rm_interactive_missing_value_file1";
-    let file2 = "test_rm_interactive_missing_value_file2";
-
-    at.touch(file1);
-    at.touch(file2);
-
-    ucmd.arg("--interactive")
-        .arg(file1)
-        .arg(file2)
-        .pipe_in("y\ny")
-        .succeeds();
-
-    assert!(!at.file_exists(file1));
-    assert!(!at.file_exists(file2));
-}
-
-#[test]
-fn test_rm_interactive_once_prompt() {
+fn test_interactive_once_prompt() {
     let (at, mut ucmd) = at_and_ucmd!();
 
     let file1 = "test_rm_interactive_once_recursive_prompt_file1";
@@ -429,7 +457,7 @@ fn test_rm_interactive_once_prompt() {
 }
 
 #[test]
-fn test_rm_interactive_once_recursive_prompt() {
+fn test_interactive_once_recursive_prompt() {
     let (at, mut ucmd) = at_and_ucmd!();
 
     let file1 = "test_rm_interactive_once_recursive_prompt_file1";
@@ -447,7 +475,7 @@ fn test_rm_interactive_once_recursive_prompt() {
 }
 
 #[test]
-fn test_rm_descend_directory() {
+fn test_descend_directory() {
     // This test descends into each directory and deletes the files and folders inside of them
     // This test will have the rm process asks 6 question and us answering Y to them will delete all the files and folders
 
@@ -489,7 +517,7 @@ fn test_rm_descend_directory() {
 
 #[cfg(feature = "chmod")]
 #[test]
-fn test_rm_prompts() {
+fn test_prompts() {
     use std::io::Write;
 
     // Needed for talking with stdin on platforms where CRLF or LF matters
@@ -574,8 +602,52 @@ fn test_rm_prompts() {
     assert!(!at.dir_exists("a"));
 }
 
+#[cfg(feature = "chmod")]
 #[test]
-fn test_rm_force_prompts_order() {
+fn test_prompts_no_tty() {
+    // This test ensures InteractiveMode.PromptProtected proceeds silently with non-interactive stdin
+
+    use std::io::Write;
+
+    let scene = TestScenario::new(util_name!());
+    let at = &scene.fixtures;
+
+    at.mkdir("a/");
+
+    let file_1 = "a/empty";
+    let file_2 = "a/empty-no-write";
+    let file_3 = "a/f-no-write";
+
+    at.touch(file_1);
+    at.touch(file_2);
+    at.make_file(file_3)
+        .write_all(b"not-empty")
+        .expect("Couldn't write to a/f-no-write");
+
+    at.symlink_dir("a/empty-f", "a/slink");
+    at.symlink_dir(".", "a/slink-dot");
+
+    let dir_1 = "a/b/";
+    let dir_2 = "a/b-no-write/";
+
+    at.mkdir(dir_1);
+    at.mkdir(dir_2);
+
+    scene
+        .ccmd("chmod")
+        .arg("u-w")
+        .arg(file_3)
+        .arg(dir_2)
+        .arg(file_2)
+        .succeeds();
+
+    scene.ucmd().arg("-r").arg("a").succeeds().no_output();
+
+    assert!(!at.dir_exists("a"));
+}
+
+#[test]
+fn test_force_prompts_order() {
     // Needed for talking with stdin on platforms where CRLF or LF matters
     const END_OF_LINE: &str = if cfg!(windows) { "\r\n" } else { "\n" };
 
@@ -616,7 +688,7 @@ fn test_rm_force_prompts_order() {
 
 #[test]
 #[ignore = "issue #3722"]
-fn test_rm_directory_rights_rm1() {
+fn test_directory_rights_rm1() {
     let (at, mut ucmd) = at_and_ucmd!();
     at.mkdir_all("b/a/p");
     at.mkdir_all("b/c");
@@ -641,7 +713,13 @@ fn test_prompt_write_protected_yes() {
 
     scene.ccmd("chmod").arg("0").arg(file_1).succeeds();
 
-    scene.ucmd().arg(file_1).pipe_in("y").succeeds();
+    scene
+        .ucmd()
+        .arg("---presume-input-tty")
+        .arg(file_1)
+        .pipe_in("y")
+        .succeeds()
+        .stderr_contains("rm: remove write-protected regular empty file");
     assert!(!at.file_exists(file_1));
 }
 
@@ -656,7 +734,13 @@ fn test_prompt_write_protected_no() {
 
     scene.ccmd("chmod").arg("0").arg(file_2).succeeds();
 
-    scene.ucmd().arg(file_2).pipe_in("n").succeeds();
+    scene
+        .ucmd()
+        .arg("---presume-input-tty")
+        .arg(file_2)
+        .pipe_in("n")
+        .succeeds()
+        .stderr_contains("rm: remove write-protected regular empty file");
     assert!(at.file_exists(file_2));
 }
 
@@ -677,6 +761,68 @@ fn test_remove_inaccessible_dir() {
 
 #[test]
 #[cfg(not(windows))]
+fn test_current_or_parent_dir_rm4() {
+    let ts = TestScenario::new(util_name!());
+    let at = &ts.fixtures;
+
+    at.mkdir("d");
+
+    let answers = [
+        "rm: refusing to remove '.' or '..' directory: skipping 'd/.'",
+        "rm: refusing to remove '.' or '..' directory: skipping 'd/./'",
+        "rm: refusing to remove '.' or '..' directory: skipping 'd/./'",
+        "rm: refusing to remove '.' or '..' directory: skipping 'd/..'",
+        "rm: refusing to remove '.' or '..' directory: skipping 'd/../'",
+    ];
+    let std_err_str = ts
+        .ucmd()
+        .arg("-rf")
+        .arg("d/.")
+        .arg("d/./")
+        .arg("d/.////")
+        .arg("d/..")
+        .arg("d/../")
+        .fails()
+        .stderr_move_str();
+
+    for (idx, line) in std_err_str.lines().enumerate() {
+        assert_eq!(line, answers[idx]);
+    }
+}
+
+#[test]
+#[cfg(windows)]
+fn test_current_or_parent_dir_rm4_windows() {
+    let ts = TestScenario::new(util_name!());
+    let at = &ts.fixtures;
+
+    at.mkdir("d");
+
+    let answers = [
+        "rm: refusing to remove '.' or '..' directory: skipping 'd\\.'",
+        "rm: refusing to remove '.' or '..' directory: skipping 'd\\.\\'",
+        "rm: refusing to remove '.' or '..' directory: skipping 'd\\.\\'",
+        "rm: refusing to remove '.' or '..' directory: skipping 'd\\..'",
+        "rm: refusing to remove '.' or '..' directory: skipping 'd\\..\\'",
+    ];
+    let std_err_str = ts
+        .ucmd()
+        .arg("-rf")
+        .arg("d\\.")
+        .arg("d\\.\\")
+        .arg("d\\.\\\\\\\\")
+        .arg("d\\..")
+        .arg("d\\..\\")
+        .fails()
+        .stderr_move_str();
+
+    for (idx, line) in std_err_str.lines().enumerate() {
+        assert_eq!(line, answers[idx]);
+    }
+}
+
+#[test]
+#[cfg(not(windows))]
 fn test_fifo_removal() {
     use std::time::Duration;
 
@@ -692,22 +838,314 @@ fn test_fifo_removal() {
 }
 
 #[test]
-#[cfg(any(unix, target_os = "wasi"))]
-#[cfg(not(target_os = "macos"))]
-fn test_non_utf8() {
-    use std::ffi::OsStr;
+fn test_uchild_when_run_no_wait_with_a_blocking_command() {
+    let ts = TestScenario::new("rm");
+    let at = &ts.fixtures;
+
+    at.mkdir("a");
+    at.touch("a/empty");
+
+    #[cfg(target_vendor = "apple")]
+    let delay: u64 = 2000;
+    #[cfg(not(target_vendor = "apple"))]
+    let delay: u64 = 1000;
+
+    let yes = if cfg!(windows) { "y\r\n" } else { "y\n" };
+
+    let mut child = ts
+        .ucmd()
+        .set_stdin(Stdio::piped())
+        .stderr_to_stdout()
+        .args(&["-riv", "a"])
+        .run_no_wait();
+    child
+        .make_assertion_with_delay(delay)
+        .is_alive()
+        .with_current_output()
+        .stdout_is("rm: descend into directory 'a'? ");
+
+    #[cfg(windows)]
+    let expected = "rm: descend into directory 'a'? \
+                    rm: remove regular empty file 'a\\empty'? ";
     #[cfg(unix)]
+    let expected = "rm: descend into directory 'a'? \
+                    rm: remove regular empty file 'a/empty'? ";
+    child.write_in(yes);
+    child
+        .make_assertion_with_delay(delay)
+        .is_alive()
+        .with_all_output()
+        .stdout_is(expected);
+
+    #[cfg(windows)]
+    let expected = "removed 'a\\empty'\nrm: remove directory 'a'? ";
+    #[cfg(unix)]
+    let expected = "removed 'a/empty'\nrm: remove directory 'a'? ";
+
+    child
+        .write_in(yes)
+        .make_assertion_with_delay(delay)
+        .is_alive()
+        .with_exact_output(44, 0)
+        .stdout_only(expected);
+
+    let expected = "removed directory 'a'\n";
+
+    child.write_in(yes);
+    child.wait().unwrap().stdout_only(expected).success();
+}
+
+#[test]
+fn test_recursive_interactive() {
+    let (at, mut ucmd) = at_and_ucmd!();
+    at.mkdir("a");
+    at.mkdir("a/b");
+    #[cfg(windows)]
+    let expected =
+        "rm: descend into directory 'a'? rm: remove directory 'a\\b'? rm: remove directory 'a'? ";
+    #[cfg(not(windows))]
+    let expected =
+        "rm: descend into directory 'a'? rm: remove directory 'a/b'? rm: remove directory 'a'? ";
+    ucmd.args(&["-i", "-r", "a"])
+        .pipe_in("y\ny\ny\n")
+        .succeeds()
+        .stderr_only(expected);
+    assert!(!at.dir_exists("a/b"));
+    assert!(!at.dir_exists("a"));
+}
+
+// Avoid an infinite recursion due to a symbolic link to the current directory.
+#[test]
+fn test_recursive_symlink_loop() {
+    let (at, mut ucmd) = at_and_ucmd!();
+    at.mkdir("d");
+    at.relative_symlink_file(".", "d/link");
+    #[cfg(windows)]
+    let expected = "rm: descend into directory 'd'? rm: remove symbolic link 'd\\link'? rm: remove directory 'd'? ";
+    #[cfg(not(windows))]
+    let expected = "rm: descend into directory 'd'? rm: remove symbolic link 'd/link'? rm: remove directory 'd'? ";
+    ucmd.args(&["-i", "-r", "d"])
+        .pipe_in("y\ny\ny\n")
+        .succeeds()
+        .stderr_only(expected);
+    assert!(!at.symlink_exists("d/link"));
+    assert!(!at.dir_exists("d"));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_only_first_error_recursive() {
+    let (at, mut ucmd) = at_and_ucmd!();
+    at.mkdir("a");
+    at.mkdir("a/b");
+    at.touch("a/b/file");
+    // Make the inner directory not writable.
+    at.set_mode("a/b", 0o0555);
+
+    // To match the behavior of GNU `rm`, print an error message for
+    // the file in the non-writable directory, but don't print the
+    // error messages that would have appeared when trying to remove
+    // the directories containing the file.
+    ucmd.args(&["-r", "-f", "a"])
+        .fails()
+        .stderr_only("rm: cannot remove 'a/b/file': Permission denied\n");
+    assert!(at.file_exists("a/b/file"));
+    assert!(at.dir_exists("a/b"));
+    assert!(at.dir_exists("a"));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_unreadable_and_nonempty_dir() {
+    let (at, mut ucmd) = at_and_ucmd!();
+    at.mkdir_all("a/b");
+    at.set_mode("a", 0o0333);
+
+    ucmd.args(&["-r", "-f", "a"])
+        .fails()
+        .stderr_only("rm: cannot remove 'a': Permission denied\n");
+    assert!(at.dir_exists("a/b"));
+    assert!(at.dir_exists("a"));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_inaccessible_dir() {
+    let (at, mut ucmd) = at_and_ucmd!();
+    at.mkdir("dir");
+    at.set_mode("dir", 0o0333);
+    ucmd.args(&["-d", "dir"]).succeeds().no_output();
+    assert!(!at.dir_exists("dir"));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_inaccessible_dir_nonempty() {
+    let (at, mut ucmd) = at_and_ucmd!();
+    at.mkdir("dir");
+    at.touch("dir/f");
+    at.set_mode("dir", 0o0333);
+    ucmd.args(&["-d", "dir"])
+        .fails()
+        .stderr_only("rm: cannot remove 'dir': Directory not empty\n");
+    assert!(at.file_exists("dir/f"));
+    assert!(at.dir_exists("dir"));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_inaccessible_dir_interactive() {
+    let (at, mut ucmd) = at_and_ucmd!();
+    at.mkdir("dir");
+    at.set_mode("dir", 0);
+    ucmd.args(&["-i", "-d", "dir"])
+        .pipe_in("y\n")
+        .succeeds()
+        .stderr_only("rm: attempt removal of inaccessible directory 'dir'? ");
+    assert!(!at.dir_exists("dir"));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_inaccessible_dir_recursive() {
+    let (at, mut ucmd) = at_and_ucmd!();
+    at.mkdir("a");
+    at.mkdir("a/unreadable");
+    at.set_mode("a/unreadable", 0o0333);
+    ucmd.args(&["-r", "-f", "a"]).succeeds().no_output();
+    assert!(!at.dir_exists("a/unreadable"));
+    assert!(!at.dir_exists("a"));
+}
+
+#[test]
+#[cfg(any(target_os = "linux", target_os = "wasi"))]
+fn test_non_utf8_paths() {
+    use std::ffi::OsStr;
+    #[cfg(target_os = "linux")]
     use std::os::unix::ffi::OsStrExt;
     #[cfg(target_os = "wasi")]
     use std::os::wasi::ffi::OsStrExt;
 
-    let file = OsStr::from_bytes(b"not\xffutf8"); // spell-checker:disable-line
+    let scene = TestScenario::new(util_name!());
+    let at = &scene.fixtures;
 
-    let (at, mut ucmd) = at_and_ucmd!();
+    // Create a test file with non-UTF-8 bytes in the name
+    let non_utf8_bytes = b"test_\xFF\xFE.txt";
+    let non_utf8_name = OsStr::from_bytes(non_utf8_bytes);
 
-    at.touch(file);
-    assert!(at.file_exists(file));
+    // Create the actual file
+    at.touch(non_utf8_name);
+    assert!(at.file_exists(non_utf8_name));
 
-    ucmd.arg(file).succeeds();
-    assert!(!at.file_exists(file));
+    // Test that rm handles non-UTF-8 file names without crashing
+    scene.ucmd().arg(non_utf8_name).succeeds();
+
+    // The file should be removed
+    assert!(!at.file_exists(non_utf8_name));
+
+    // Test with directory
+    let non_utf8_dir_bytes = b"test_dir_\xFF\xFE";
+    let non_utf8_dir_name = OsStr::from_bytes(non_utf8_dir_bytes);
+
+    at.mkdir(non_utf8_dir_name);
+    assert!(at.dir_exists(non_utf8_dir_name));
+
+    scene.ucmd().args(&["-r"]).arg(non_utf8_dir_name).succeeds();
+
+    assert!(!at.dir_exists(non_utf8_dir_name));
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn test_rm_recursive_long_path_safe_traversal() {
+    let ts = TestScenario::new(util_name!());
+    let at = &ts.fixtures;
+
+    let mut deep_path = String::from("rm_deep");
+    at.mkdir(&deep_path);
+
+    for i in 0..12 {
+        let long_dir_name = format!("{}{}", "z".repeat(80), i);
+        deep_path = format!("{deep_path}/{long_dir_name}");
+        at.mkdir_all(&deep_path);
+    }
+
+    at.write("rm_deep/test1.txt", "content1");
+    at.write(&format!("{deep_path}/test2.txt"), "content2");
+
+    ts.ucmd().arg("-rf").arg("rm_deep").succeeds();
+
+    // Verify the directory is completely removed
+    assert!(!at.dir_exists("rm_deep"));
+}
+
+#[cfg(all(not(windows), feature = "chmod"))]
+#[test]
+fn test_rm_directory_not_executable() {
+    // Test from GNU rm/rm2.sh
+    // Exercise code paths when directories have no execute permission
+    let scene = TestScenario::new(util_name!());
+    let at = &scene.fixtures;
+
+    // Create directory structure: a/0, a/1/2, a/2, a/3, b/3
+    at.mkdir_all("a/0");
+    at.mkdir_all("a/1/2");
+    at.mkdir("a/2");
+    at.mkdir("a/3");
+    at.mkdir_all("b/3");
+
+    // Remove execute permission from a/1 and b
+    scene.ccmd("chmod").arg("u-x").arg("a/1").succeeds();
+    scene.ccmd("chmod").arg("u-x").arg("b").succeeds();
+
+    // Try to remove both directories recursively - this should fail
+    let result = scene.ucmd().args(&["-rf", "a", "b"]).fails();
+
+    // Check for expected error messages
+    // When directories don't have execute permission, we get "Permission denied"
+    // when trying to access subdirectories
+    let stderr = result.stderr_str();
+    assert!(stderr.contains("rm: cannot remove 'a/1/2': Permission denied"));
+    assert!(stderr.contains("rm: cannot remove 'b/3': Permission denied"));
+
+    // Check which directories still exist
+    assert!(!at.dir_exists("a/0")); // Should be removed
+    assert!(at.dir_exists("a/1")); // Should still exist (no execute permission)
+    assert!(!at.dir_exists("a/2")); // Should be removed
+    assert!(!at.dir_exists("a/3")); // Should be removed
+
+    // Restore execute permission to check b/3
+    scene.ccmd("chmod").arg("u+x").arg("b").succeeds();
+    assert!(at.dir_exists("b/3")); // Should still exist
+}
+
+#[cfg(all(not(windows), feature = "chmod"))]
+#[test]
+fn test_rm_directory_not_writable() {
+    // Test from GNU rm/rm1.sh
+    // Exercise code paths when directories have no write permission
+    let scene = TestScenario::new(util_name!());
+    let at = &scene.fixtures;
+
+    // Create directory structure: b/a/p, b/c, b/d
+    at.mkdir_all("b/a/p");
+    at.mkdir("b/c");
+    at.mkdir("b/d");
+
+    // Remove write permission from b/a
+    scene.ccmd("chmod").arg("ug-w").arg("b/a").succeeds();
+
+    // Try to remove b recursively - this should fail
+    let result = scene.ucmd().args(&["-rf", "b"]).fails();
+
+    // Check for expected error message
+    // When the parent directory (b/a) doesn't have write permission,
+    // we get "Permission denied" when trying to remove the subdirectory
+    let stderr = result.stderr_str();
+    assert!(stderr.contains("rm: cannot remove 'b/a/p': Permission denied"));
+
+    // Check which directories still exist
+    assert!(at.dir_exists("b/a/p")); // Should still exist (parent not writable)
+    assert!(!at.dir_exists("b/c")); // Should be removed
+    assert!(!at.dir_exists("b/d")); // Should be removed
 }

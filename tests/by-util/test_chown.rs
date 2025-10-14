@@ -4,10 +4,11 @@
 // file that was distributed with this source code.
 // spell-checker:ignore (words) agroupthatdoesntexist auserthatdoesntexist cuuser groupname notexisting passgrp
 
-use crate::common::util::{is_ci, run_ucmd_as_root, CmdResult, TestScenario};
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use uucore::process::geteuid;
-
+use uutests::util::{CmdResult, TestScenario, is_ci, run_ucmd_as_root};
+use uutests::util_name;
+use uutests::{at_and_ucmd, new_ucmd};
 // Apparently some CI environments have configuration issues, e.g. with 'whoami' and 'id'.
 // If we are running inside the CI and "needle" is in "stderr" skipping this test is
 // considered okay. If we are not inside the CI this calls assert!(result.success).
@@ -29,9 +30,8 @@ fn skipping_test_is_okay(result: &CmdResult, needle: &str) -> bool {
         if is_ci() && result.stderr_str().contains(needle) {
             println!("test skipped:");
             return true;
-        } else {
-            result.success();
         }
+        result.success();
     }
     false
 }
@@ -82,7 +82,7 @@ fn test_invalid_option() {
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 
 #[test]
@@ -103,13 +103,13 @@ fn test_chown_only_owner() {
     at.touch(file1);
 
     // since only superuser can change owner, we have to change from ourself to ourself
-    let result = scene
+    scene
         .ucmd()
         .arg(user_name)
         .arg("--verbose")
         .arg(file1)
-        .run();
-    result.stderr_contains("retained as");
+        .succeeds()
+        .stderr_contains("retained as");
 
     // try to change to another existing user, e.g. 'root'
     scene
@@ -219,7 +219,7 @@ fn test_chown_failed_stdout() {
 
 #[test]
 // FixME: Fails on freebsd because of chown: invalid group: 'root:root'
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(all(not(target_os = "freebsd"), not(target_os = "openbsd")))]
 fn test_chown_owner_group() {
     // test chown username:group file.txt
 
@@ -284,7 +284,7 @@ fn test_chown_owner_group() {
 
 #[test]
 // FixME: Fails on freebsd because of chown: invalid group: 'root:root'
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(all(not(target_os = "freebsd"), not(target_os = "openbsd")))]
 fn test_chown_various_input() {
     // test chown username:group file.txt
 
@@ -347,7 +347,10 @@ fn test_chown_various_input() {
 // FixME: on macos & freebsd group name is not recognized correctly: "chown: invalid group: ':groupname'
 #[cfg(any(
     windows,
-    all(unix, not(any(target_os = "macos", target_os = "freebsd")))
+    all(
+        unix,
+        not(any(target_os = "macos", target_os = "freebsd", target_os = "openbsd"))
+    )
 ))]
 fn test_chown_only_group() {
     // test chown :group file.txt
@@ -482,7 +485,7 @@ fn test_chown_only_user_id_nonexistent_user() {
 
 #[test]
 // FixME: stderr = chown: ownership of 'test_chown_file1' retained as cuuser:wheel
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(all(not(target_os = "freebsd"), not(target_os = "openbsd")))]
 fn test_chown_only_group_id() {
     // test chown :1111 file.txt
 
@@ -547,6 +550,7 @@ fn test_chown_only_group_id_nonexistent_group() {
 }
 
 #[test]
+#[cfg(not(target_os = "openbsd"))]
 fn test_chown_owner_group_id() {
     // test chown 1111:1111 file.txt
 
@@ -607,7 +611,7 @@ fn test_chown_owner_group_id() {
 
 #[test]
 // FixME: Fails on freebsd because of chown: invalid group: '0:root'
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(all(not(target_os = "freebsd"), not(target_os = "openbsd")))]
 fn test_chown_owner_group_mix() {
     // test chown 1111:group file.txt
 
@@ -669,16 +673,16 @@ fn test_chown_recursive() {
     at.touch(at.plus_as_string("a/b/c/c"));
     at.touch(at.plus_as_string("z/y"));
 
-    let result = scene
+    scene
         .ucmd()
         .arg("-R")
         .arg("--verbose")
         .arg(user_name)
         .arg("a")
         .arg("z")
-        .run();
-    result.stderr_contains("ownership of 'a/a' retained as");
-    result.stderr_contains("ownership of 'z/y' retained as");
+        .succeeds()
+        .stderr_contains("ownership of 'a/a' retained as")
+        .stderr_contains("ownership of 'z/y' retained as");
 }
 
 #[test]
@@ -774,6 +778,7 @@ fn test_chown_no_change_to_user() {
 }
 
 #[test]
+#[cfg(not(target_os = "openbsd"))]
 fn test_chown_no_change_to_group() {
     let scene = TestScenario::new(util_name!());
     let at = &scene.fixtures;
@@ -806,6 +811,7 @@ fn test_chown_no_change_to_group() {
 }
 
 #[test]
+#[cfg(not(target_os = "openbsd"))]
 fn test_chown_no_change_to_user_group() {
     let scene = TestScenario::new(util_name!());
     let at = &scene.fixtures;
@@ -837,4 +843,18 @@ fn test_chown_no_change_to_user_group() {
                 "ownership of '{file}' retained as {user_name}:{group_name}\n"
             ));
     }
+}
+
+#[test]
+fn test_chown_reference_file() {
+    let (at, mut ucmd) = at_and_ucmd!();
+    at.touch("a");
+    at.touch("b");
+    ucmd.arg("--verbose")
+        .arg("--reference")
+        .arg("a")
+        .arg("b")
+        .succeeds()
+        .stderr_contains("ownership of 'b' retained as")
+        .no_stdout();
 }

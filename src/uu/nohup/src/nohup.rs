@@ -5,23 +5,21 @@
 
 // spell-checker:ignore (ToDO) execvp SIGHUP cproc vprocmgr cstrs homeout
 
-use clap::{crate_version, Arg, ArgAction, Command};
+use clap::{Arg, ArgAction, Command};
+use libc::{SIG_IGN, SIGHUP};
 use libc::{c_char, dup2, execvp, signal};
-use libc::{SIGHUP, SIG_IGN};
 use std::env;
 use std::ffi::CString;
-use std::fmt::{Display, Formatter};
 use std::fs::{File, OpenOptions};
 use std::io::{Error, IsTerminal};
 use std::os::unix::prelude::*;
 use std::path::{Path, PathBuf};
+use thiserror::Error;
 use uucore::display::Quotable;
-use uucore::error::{set_exit_code, UClapError, UError, UResult};
-use uucore::{format_usage, help_about, help_section, help_usage, show_error};
+use uucore::error::{UError, UResult, set_exit_code};
+use uucore::translate;
+use uucore::{format_usage, show_error};
 
-const ABOUT: &str = help_about!("nohup.md");
-const AFTER_HELP: &str = help_section!("after help", "nohup.md");
-const USAGE: &str = help_usage!("nohup.md");
 static NOHUP_OUT: &str = "nohup.out";
 // exit codes that match the GNU implementation
 static EXIT_CANCELED: i32 = 125;
@@ -33,15 +31,20 @@ mod options {
     pub const CMD: &str = "cmd";
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 enum NohupError {
+    #[error("{}", translate!("nohup-error-cannot-detach"))]
     CannotDetach,
-    CannotReplace(&'static str, std::io::Error),
-    OpenFailed(i32, std::io::Error),
-    OpenFailed2(i32, std::io::Error, String, std::io::Error),
-}
 
-impl std::error::Error for NohupError {}
+    #[error("{}", translate!("nohup-error-cannot-replace", "name" => (*_0), "err" => _1))]
+    CannotReplace(&'static str, #[source] Error),
+
+    #[error("{}", translate!("nohup-error-open-failed", "path" => NOHUP_OUT.quote(), "err" => _1))]
+    OpenFailed(i32, #[source] Error),
+
+    #[error("{}", translate!("nohup-error-open-failed-both", "first_path" => NOHUP_OUT.quote(), "first_err" => _1, "second_path" => _2.quote(), "second_err" => _3))]
+    OpenFailed2(i32, #[source] Error, String, Error),
+}
 
 impl UError for NohupError {
     fn code(&self) -> i32 {
@@ -52,29 +55,10 @@ impl UError for NohupError {
     }
 }
 
-impl Display for NohupError {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        match self {
-            Self::CannotDetach => write!(f, "Cannot detach from console"),
-            Self::CannotReplace(s, e) => write!(f, "Cannot replace {s}: {e}"),
-            Self::OpenFailed(_, e) => {
-                write!(f, "failed to open {}: {}", NOHUP_OUT.quote(), e)
-            }
-            Self::OpenFailed2(_, e1, s, e2) => write!(
-                f,
-                "failed to open {}: {}\nfailed to open {}: {}",
-                NOHUP_OUT.quote(),
-                e1,
-                s.quote(),
-                e2
-            ),
-        }
-    }
-}
-
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-    let matches = uu_app().try_get_matches_from(args).with_exit_code(125)?;
+    let matches =
+        uucore::clap_localization::handle_clap_result_with_exit_code(uu_app(), args, 125)?;
 
     replace_fds()?;
 
@@ -82,7 +66,7 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
 
     if unsafe { !_vprocmgr_detach_from_console(0).is_null() } {
         return Err(NohupError::CannotDetach.into());
-    };
+    }
 
     let cstrs: Vec<CString> = matches
         .get_many::<String>(options::CMD)
@@ -102,10 +86,11 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
 
 pub fn uu_app() -> Command {
     Command::new(uucore::util_name())
-        .version(crate_version!())
-        .about(ABOUT)
-        .after_help(AFTER_HELP)
-        .override_usage(format_usage(USAGE))
+        .version(uucore::crate_version!())
+        .help_template(uucore::localized_help_template(uucore::util_name()))
+        .about(translate!("nohup-about"))
+        .after_help(translate!("nohup-after-help"))
+        .override_usage(format_usage(&translate!("nohup-usage")))
         .arg(
             Arg::new(options::CMD)
                 .hide(true)
@@ -142,7 +127,7 @@ fn replace_fds() -> UResult<()> {
 }
 
 fn find_stdout() -> UResult<File> {
-    let internal_failure_code = match std::env::var("POSIXLY_CORRECT") {
+    let internal_failure_code = match env::var("POSIXLY_CORRECT") {
         Ok(_) => POSIX_NOHUP_FAILURE,
         Err(_) => EXIT_CANCELED,
     };
@@ -154,15 +139,14 @@ fn find_stdout() -> UResult<File> {
     {
         Ok(t) => {
             show_error!(
-                "ignoring input and appending output to {}",
-                NOHUP_OUT.quote()
+                "{}",
+                translate!("nohup-ignoring-input-appending-output", "path" => NOHUP_OUT.quote())
             );
             Ok(t)
         }
         Err(e1) => {
-            let home = match env::var("HOME") {
-                Err(_) => return Err(NohupError::OpenFailed(internal_failure_code, e1).into()),
-                Ok(h) => h,
+            let Ok(home) = env::var("HOME") else {
+                return Err(NohupError::OpenFailed(internal_failure_code, e1).into());
             };
             let mut homeout = PathBuf::from(home);
             homeout.push(NOHUP_OUT);
@@ -170,8 +154,8 @@ fn find_stdout() -> UResult<File> {
             match OpenOptions::new().create(true).append(true).open(&homeout) {
                 Ok(t) => {
                     show_error!(
-                        "ignoring input and appending output to {}",
-                        homeout_str.quote()
+                        "{}",
+                        translate!("nohup-ignoring-input-appending-output", "path" => homeout_str.quote())
                     );
                     Ok(t)
                 }
@@ -188,7 +172,7 @@ fn find_stdout() -> UResult<File> {
 }
 
 #[cfg(target_vendor = "apple")]
-extern "C" {
+unsafe extern "C" {
     fn _vprocmgr_detach_from_console(flags: u32) -> *const libc::c_int;
 }
 
@@ -198,6 +182,8 @@ extern "C" {
     target_os = "freebsd",
     target_os = "openbsd"
 ))]
+/// # Safety
+/// This function is unsafe because it dereferences a raw pointer.
 unsafe fn _vprocmgr_detach_from_console(_: u32) -> *const libc::c_int {
     std::ptr::null()
 }

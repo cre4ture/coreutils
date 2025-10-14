@@ -2,11 +2,9 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-// spell-checker:ignore (words) reallylongexecutable
+// spell-checker:ignore (words) reallylongexecutable nbaz
 
-use crate::common::util::TestScenario;
-#[cfg(any(unix, target_os = "redox"))]
-use std::ffi::OsStr;
+use uutests::new_ucmd;
 
 #[test]
 fn test_help() {
@@ -22,12 +20,14 @@ fn test_help() {
 #[test]
 fn test_version() {
     for version_flg in ["-V", "--version"] {
-        assert!(new_ucmd!()
-            .arg(version_flg)
-            .succeeds()
-            .no_stderr()
-            .stdout_str()
-            .starts_with("basename"));
+        assert!(
+            new_ucmd!()
+                .arg(version_flg)
+                .succeeds()
+                .no_stderr()
+                .stdout_str()
+                .starts_with("basename")
+        );
     }
 }
 
@@ -97,12 +97,14 @@ fn test_zero_param() {
 }
 
 fn expect_error(input: &[&str]) {
-    assert!(!new_ucmd!()
-        .args(input)
-        .fails()
-        .no_stdout()
-        .stderr_str()
-        .is_empty());
+    assert!(
+        !new_ucmd!()
+            .args(input)
+            .fails()
+            .no_stdout()
+            .stderr_str()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -135,19 +137,24 @@ fn test_too_many_args_output() {
 }
 
 #[cfg(any(unix, target_os = "redox"))]
-fn test_invalid_utf8_args(os_str: &OsStr) {
-    let test_vec = vec![os_str.to_os_string()];
-    new_ucmd!().args(&test_vec).succeeds().stdout_is("fo�o\n");
-}
-
-#[cfg(any(unix, target_os = "redox"))]
 #[test]
-fn invalid_utf8_args_unix() {
-    use std::os::unix::ffi::OsStrExt;
+fn test_invalid_utf8_args() {
+    let param = uucore::os_str_from_bytes(b"/tmp/some-\xc0-file.k\xf3")
+        .expect("Only unix platforms can test non-unicode names");
 
-    let source = [0x66, 0x6f, 0x80, 0x6f];
-    let os_str = OsStr::from_bytes(&source[..]);
-    test_invalid_utf8_args(os_str);
+    new_ucmd!()
+        .arg(&param)
+        .succeeds()
+        .stdout_is_bytes(b"some-\xc0-file.k\xf3\n");
+
+    let suffix = uucore::os_str_from_bytes(b".k\xf3")
+        .expect("Only unix platforms can test non-unicode names");
+
+    new_ucmd!()
+        .arg(&param)
+        .arg(&suffix)
+        .succeeds()
+        .stdout_is_bytes(b"some-\xc0-file\n");
 }
 
 #[test]
@@ -180,6 +187,13 @@ fn test_triple_slash() {
 }
 
 #[test]
+fn test_trailing_dot() {
+    new_ucmd!().arg("/.").succeeds().stdout_is(".\n");
+    new_ucmd!().arg("hello/.").succeeds().stdout_is(".\n");
+    new_ucmd!().arg("/foo/bar/.").succeeds().stdout_is(".\n");
+}
+
+#[test]
 fn test_simple_format() {
     new_ucmd!().args(&["a-a", "-a"]).succeeds().stdout_is("a\n");
     new_ucmd!()
@@ -192,14 +206,13 @@ fn test_simple_format() {
     new_ucmd!().args(&["a-z", "-z"]).succeeds().stdout_is("a\n");
     new_ucmd!()
         .args(&["a", "b", "c"])
-        .fails()
-        .code_is(1)
+        .fails_with_code(1)
         .stderr_contains("extra operand 'c'");
 }
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 
 #[test]
@@ -264,4 +277,22 @@ fn test_suffix_implies_multiple() {
         .args(&["-s", ".c", "foo.c", "o.c"])
         .succeeds()
         .stdout_is("foo\no\n");
+}
+
+#[test]
+fn test_emoji_handling() {
+    new_ucmd!()
+        .arg("/path/to/🦀.txt")
+        .succeeds()
+        .stdout_only("🦀.txt\n");
+
+    new_ucmd!()
+        .arg("/🌍/path/to/🚀.exe")
+        .succeeds()
+        .stdout_only("🚀.exe\n");
+
+    new_ucmd!()
+        .args(&["/path/to/file🎯.emoji", ".emoji"])
+        .succeeds()
+        .stdout_only("file🎯\n");
 }

@@ -2,47 +2,64 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-use crate::common::util::TestScenario;
+
+// spell-checker:ignore bindgen testtest
+
+#![allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+
 #[cfg(not(windows))]
-use libc::{mode_t, umask};
-use once_cell::sync::Lazy;
+use libc::mode_t;
 #[cfg(not(windows))]
 use std::os::unix::fs::PermissionsExt;
-use std::sync::Mutex;
-
-// tests in `test_mkdir.rs` cannot run in parallel since some tests alter the umask. This may cause
-// other tests to run under a wrong set of permissions
-//
-// when writing a test case, acquire this mutex before proceeding with the main logic of the test
-static TEST_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+#[cfg(feature = "feat_selinux")]
+use uucore::selinux::get_getfattr_output;
+#[cfg(not(windows))]
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
+use uutests::util::TestScenario;
+use uutests::util_name;
 
 #[test]
 fn test_invalid_arg() {
-    let _guard = TEST_MUTEX.lock();
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
+}
+
+#[test]
+fn test_no_arg() {
+    new_ucmd!()
+        .fails_with_code(1)
+        .stderr_contains("error: the following required arguments were not provided:");
 }
 
 #[test]
 fn test_mkdir_mkdir() {
-    let _guard = TEST_MUTEX.lock();
     new_ucmd!().arg("test_dir").succeeds();
+}
+
+#[cfg(feature = "test_risky_names")]
+#[test]
+fn test_mkdir_non_unicode() {
+    let (at, mut ucmd) = at_and_ucmd!();
+
+    let target = uucore::os_str_from_bytes(b"some-\xc0-dir-\xf3")
+        .expect("Only unix platforms can test non-unicode names");
+    ucmd.arg(&target).succeeds();
+
+    assert!(at.dir_exists(target));
 }
 
 #[test]
 fn test_mkdir_verbose() {
-    let _guard = TEST_MUTEX.lock();
     let expected = "mkdir: created directory 'test_dir'\n";
     new_ucmd!()
         .arg("test_dir")
         .arg("-v")
-        .run()
+        .succeeds()
         .stdout_is(expected);
 }
 
 #[test]
 fn test_mkdir_dup_dir() {
-    let _guard = TEST_MUTEX.lock();
-
     let scene = TestScenario::new(util_name!());
     let test_dir = "test_dir";
 
@@ -52,32 +69,39 @@ fn test_mkdir_dup_dir() {
 
 #[test]
 fn test_mkdir_mode() {
-    let _guard = TEST_MUTEX.lock();
     new_ucmd!().arg("-m").arg("755").arg("test_dir").succeeds();
 }
 
 #[test]
 fn test_mkdir_parent() {
-    let _guard = TEST_MUTEX.lock();
     let scene = TestScenario::new(util_name!());
     let test_dir = "parent_dir/child_dir";
 
     scene.ucmd().arg("-p").arg(test_dir).succeeds();
-    scene.ucmd().arg("-p").arg(test_dir).succeeds();
+    scene.ucmd().arg("-p").arg("-p").arg(test_dir).succeeds();
     scene.ucmd().arg("--parent").arg(test_dir).succeeds();
+    scene
+        .ucmd()
+        .arg("--parent")
+        .arg("--parent")
+        .arg(test_dir)
+        .succeeds();
     scene.ucmd().arg("--parents").arg(test_dir).succeeds();
+    scene
+        .ucmd()
+        .arg("--parents")
+        .arg("--parents")
+        .arg(test_dir)
+        .succeeds();
 }
 
 #[test]
 fn test_mkdir_no_parent() {
-    let _guard = TEST_MUTEX.lock();
     new_ucmd!().arg("parent_dir/child_dir").fails();
 }
 
 #[test]
 fn test_mkdir_dup_dir_parent() {
-    let _guard = TEST_MUTEX.lock();
-
     let scene = TestScenario::new(util_name!());
     let test_dir = "test_dir";
 
@@ -88,13 +112,16 @@ fn test_mkdir_dup_dir_parent() {
 #[cfg(not(windows))]
 #[test]
 fn test_mkdir_parent_mode() {
-    let _guard = TEST_MUTEX.lock();
     let (at, mut ucmd) = at_and_ucmd!();
 
     let default_umask: mode_t = 0o160;
-    let original_umask = unsafe { umask(default_umask) };
 
-    ucmd.arg("-p").arg("a/b").succeeds().no_stderr().no_stdout();
+    ucmd.arg("-p")
+        .arg("a/b")
+        .umask(default_umask)
+        .succeeds()
+        .no_stderr()
+        .no_stdout();
 
     assert!(at.dir_exists("a"));
     // parents created by -p have permissions set to "=rwx,u+wx"
@@ -108,35 +135,28 @@ fn test_mkdir_parent_mode() {
         at.metadata("a/b").permissions().mode() as mode_t,
         (!default_umask & 0o777) + 0o40000
     );
-
-    unsafe {
-        umask(original_umask);
-    }
 }
 
 #[cfg(not(windows))]
 #[test]
 fn test_mkdir_parent_mode_check_existing_parent() {
-    let _guard = TEST_MUTEX.lock();
     let (at, mut ucmd) = at_and_ucmd!();
 
     at.mkdir("a");
+    let parent_a_perms = at.metadata("a").permissions().mode();
 
     let default_umask: mode_t = 0o160;
-    let original_umask = unsafe { umask(default_umask) };
 
     ucmd.arg("-p")
         .arg("a/b/c")
+        .umask(default_umask)
         .succeeds()
         .no_stderr()
         .no_stdout();
 
     assert!(at.dir_exists("a"));
     // parent dirs that already exist do not get their permissions modified
-    assert_eq!(
-        at.metadata("a").permissions().mode() as mode_t,
-        (!original_umask & 0o777) + 0o40000
-    );
+    assert_eq!(at.metadata("a").permissions().mode(), parent_a_perms);
     assert!(at.dir_exists("a/b"));
     assert_eq!(
         at.metadata("a/b").permissions().mode() as mode_t,
@@ -147,16 +167,31 @@ fn test_mkdir_parent_mode_check_existing_parent() {
         at.metadata("a/b/c").permissions().mode() as mode_t,
         (!default_umask & 0o777) + 0o40000
     );
+}
 
-    unsafe {
-        umask(original_umask);
-    }
+#[cfg(not(windows))]
+#[test]
+fn test_mkdir_parent_mode_skip_existing_last_component_chmod() {
+    let (at, mut ucmd) = at_and_ucmd!();
+
+    at.mkdir("a");
+    at.mkdir("a/b");
+    at.set_mode("a/b", 0);
+
+    let default_umask: mode_t = 0o160;
+
+    ucmd.arg("-p")
+        .arg("a/b")
+        .umask(default_umask)
+        .succeeds()
+        .no_stderr()
+        .no_stdout();
+
+    assert_eq!(at.metadata("a/b").permissions().mode() as mode_t, 0o40000);
 }
 
 #[test]
 fn test_mkdir_dup_file() {
-    let _guard = TEST_MUTEX.lock();
-
     let scene = TestScenario::new(util_name!());
     let test_file = "test_file.txt";
 
@@ -171,7 +206,6 @@ fn test_mkdir_dup_file() {
 #[test]
 #[cfg(not(windows))]
 fn test_symbolic_mode() {
-    let _guard = TEST_MUTEX.lock();
     let (at, mut ucmd) = at_and_ucmd!();
     let test_dir = "test_dir";
 
@@ -183,24 +217,23 @@ fn test_symbolic_mode() {
 #[test]
 #[cfg(not(windows))]
 fn test_symbolic_alteration() {
-    let _guard = TEST_MUTEX.lock();
     let (at, mut ucmd) = at_and_ucmd!();
     let test_dir = "test_dir";
 
     let default_umask = 0o022;
-    let original_umask = unsafe { umask(default_umask) };
 
-    ucmd.arg("-m").arg("-w").arg(test_dir).succeeds();
+    ucmd.arg("-m")
+        .arg("-w")
+        .arg(test_dir)
+        .umask(default_umask)
+        .succeeds();
     let perms = at.metadata(test_dir).permissions().mode();
     assert_eq!(perms, 0o40577);
-
-    unsafe { umask(original_umask) };
 }
 
 #[test]
 #[cfg(not(windows))]
 fn test_multi_symbolic() {
-    let _guard = TEST_MUTEX.lock();
     let (at, mut ucmd) = at_and_ucmd!();
     let test_dir = "test_dir";
 
@@ -211,7 +244,6 @@ fn test_multi_symbolic() {
 
 #[test]
 fn test_recursive_reporting() {
-    let _guard = TEST_MUTEX.lock();
     let test_dir = "test_dir/test_dir_a/test_dir_b";
 
     new_ucmd!()
@@ -237,9 +269,62 @@ fn test_recursive_reporting() {
 }
 
 #[test]
-fn test_mkdir_trailing_dot() {
-    let _guard = TEST_MUTEX.lock();
+// Windows don't have acl entries
+// TODO Enable and modify this for macos when xattr processing for macos is added.
+// TODO Enable and modify this for freebsd when xattr processing for freebsd is enabled.
+#[cfg(target_os = "linux")]
+fn test_mkdir_acl() {
+    use std::{collections::HashMap, ffi::OsString};
 
+    let (at, mut ucmd) = at_and_ucmd!();
+
+    at.mkdir("a");
+
+    let mut map: HashMap<OsString, Vec<u8>> = HashMap::new();
+    // posix_acl entries are in the form of
+    // struct posix_acl_entry{
+    //  tag: u16,
+    //  perm: u16,
+    //  id: u32,
+    // }
+    // the fields are serialized in little endian.
+    // The entries are preceded by a header of value of 0x0002
+    // Reference: `<https://github.com/torvalds/linux/blob/master/include/uapi/linux/posix_acl_xattr.h>`
+    // The id is undefined i.e. -1 which in u32 is 0xFFFFFFFF and tag and perm bits as given in the
+    // header file.
+    // Reference: `<https://github.com/torvalds/linux/blob/master/include/uapi/linux/posix_acl.h>`
+    //
+    //
+    // There is a bindgen bug which generates the ACL_OTHER constant whose value is 0x20 into 32.
+    // which when the bug is fixed will need to be changed back to 20 from 32 in the vec 'xattr_val'.
+    //
+    // Reference `<https://github.com/rust-lang/rust-bindgen/issues/2926>`
+    //
+    // The xattr_val vector is the header 0x0002 followed by tag and permissions for user_obj , tag
+    // and permissions and for group_obj and finally the tag and permissions for ACL_OTHER. Each
+    // entry has undefined id as mentioned above.
+    //
+    //
+
+    let xattr_val: Vec<u8> = vec![
+        2, 0, 0, 0, 1, 0, 7, 0, 255, 255, 255, 255, 4, 0, 7, 0, 255, 255, 255, 255, 32, 0, 5, 0,
+        255, 255, 255, 255,
+    ];
+
+    map.insert(OsString::from("system.posix_acl_default"), xattr_val);
+
+    uucore::fsxattr::apply_xattrs(at.plus("a"), map).unwrap();
+
+    ucmd.arg("-p").arg("a/b").umask(0x077).succeeds();
+
+    let perms = at.metadata("a/b").permissions().mode();
+
+    // 0x770 would be user:rwx,group:rwx permissions
+    assert_eq!(perms, 16893);
+}
+
+#[test]
+fn test_mkdir_trailing_dot() {
     new_ucmd!().arg("-p").arg("-v").arg("test_dir").succeeds();
 
     new_ucmd!()
@@ -262,27 +347,86 @@ fn test_mkdir_trailing_dot() {
 }
 
 #[test]
+fn test_mkdir_trailing_dot_and_slash() {
+    new_ucmd!().arg("-p").arg("-v").arg("test_dir").succeeds();
+
+    new_ucmd!()
+        .arg("-p")
+        .arg("-v")
+        .arg("test_dir_a/./")
+        .succeeds()
+        .stdout_contains("created directory 'test_dir_a'");
+
+    let scene = TestScenario::new("ls");
+    let result = scene.ucmd().arg("-al").run();
+    println!("ls dest {}", result.stdout_str());
+}
+
+#[test]
 #[cfg(not(windows))]
 fn test_umask_compliance() {
     fn test_single_case(umask_set: mode_t) {
-        let _guard = TEST_MUTEX.lock();
-
         let test_dir = "test_dir";
         let (at, mut ucmd) = at_and_ucmd!();
 
-        let original_umask = unsafe { umask(umask_set) };
-
-        ucmd.arg(test_dir).succeeds();
+        ucmd.arg(test_dir).umask(umask_set).succeeds();
         let perms = at.metadata(test_dir).permissions().mode() as mode_t;
 
         assert_eq!(perms, (!umask_set & 0o0777) + 0o40000); // before compare, add the set GUID, UID bits
-        unsafe {
-            umask(original_umask);
-        } // set umask back to original
     }
 
     for i in 0o0..0o027 {
         // tests all permission combinations
         test_single_case(i as mode_t);
     }
+}
+
+#[test]
+fn test_empty_argument() {
+    new_ucmd!()
+        .arg("")
+        .fails()
+        .stderr_only("mkdir: cannot create directory '': No such file or directory\n");
+}
+
+#[test]
+#[cfg(feature = "feat_selinux")]
+fn test_selinux() {
+    let scene = TestScenario::new(util_name!());
+    let at = &scene.fixtures;
+    let dest = "test_dir_a";
+    let args = ["-Z", "--context=unconfined_u:object_r:user_tmp_t:s0"];
+    for arg in args {
+        new_ucmd!()
+            .arg(arg)
+            .arg("-v")
+            .arg(at.plus_as_string(dest))
+            .succeeds()
+            .stdout_contains("created directory");
+
+        let context_value = get_getfattr_output(&at.plus_as_string(dest));
+        assert!(
+            context_value.contains("unconfined_u"),
+            "Expected '{}' not found in getfattr output:\n{}",
+            "unconfined_u",
+            context_value
+        );
+        at.rmdir(dest);
+    }
+}
+
+#[test]
+#[cfg(feature = "feat_selinux")]
+fn test_selinux_invalid() {
+    let scene = TestScenario::new(util_name!());
+    let at = &scene.fixtures;
+    let dest = "test_dir_a";
+    new_ucmd!()
+        .arg("--context=testtest")
+        .arg(at.plus_as_string(dest))
+        .fails()
+        .no_stdout()
+        .stderr_contains("failed to set default file creation context to 'testtest':");
+    // invalid context, so, no directory
+    assert!(!at.dir_exists(dest));
 }

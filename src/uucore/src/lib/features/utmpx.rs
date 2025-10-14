@@ -3,6 +3,8 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 //
+// spell-checker:ignore logind
+
 //! Aims to provide platform-independent methods to obtain login records
 //!
 //! **ONLY** support linux, macos and freebsd for the time being
@@ -39,12 +41,23 @@ use std::path::Path;
 use std::ptr;
 use std::sync::{Mutex, MutexGuard};
 
+#[cfg(feature = "feat_systemd_logind")]
+use crate::features::systemd_logind;
+
 pub use self::ut::*;
+
+// See the FAQ at https://wiki.musl-libc.org/faq#Q:-Why-is-the-utmp/wtmp-functionality-only-implemented-as-stubs?
+// Musl implements only stubs for the utmp functions, and the libc crate issues a deprecation warning about this.
+// However, calling these stubs is the correct approach to maintain consistent behavior with GNU coreutils.
+#[cfg_attr(target_env = "musl", allow(deprecated))]
 pub use libc::endutxent;
+#[cfg_attr(target_env = "musl", allow(deprecated))]
 pub use libc::getutxent;
+#[cfg_attr(target_env = "musl", allow(deprecated))]
 pub use libc::setutxent;
 use libc::utmpx;
 #[cfg(any(target_vendor = "apple", target_os = "linux", target_os = "netbsd"))]
+#[cfg_attr(target_env = "musl", allow(deprecated))]
 pub use libc::utmpxname;
 
 /// # Safety
@@ -70,9 +83,21 @@ macro_rules! chars2string {
 mod ut {
     pub static DEFAULT_FILE: &str = "/var/run/utmp";
 
+    #[cfg(not(target_env = "musl"))]
     pub use libc::__UT_HOSTSIZE as UT_HOSTSIZE;
+    #[cfg(target_env = "musl")]
+    pub use libc::UT_HOSTSIZE;
+
+    #[cfg(not(target_env = "musl"))]
     pub use libc::__UT_LINESIZE as UT_LINESIZE;
+    #[cfg(target_env = "musl")]
+    pub use libc::UT_LINESIZE;
+
+    #[cfg(not(target_env = "musl"))]
     pub use libc::__UT_NAMESIZE as UT_NAMESIZE;
+    #[cfg(target_env = "musl")]
+    pub use libc::UT_NAMESIZE;
+
     pub const UT_IDSIZE: usize = 4;
 
     pub use libc::ACCOUNTING;
@@ -154,6 +179,7 @@ mod ut {
     pub use libc::USER_PROCESS;
 }
 
+/// A login record
 pub struct Utmpx {
     inner: utmpx,
 }
@@ -189,7 +215,8 @@ impl Utmpx {
         let ts_nanos: i128 = (1_000_000_000_i64 * self.inner.ut_tv.tv_sec as i64
             + 1_000_i64 * self.inner.ut_tv.tv_usec as i64)
             .into();
-        let local_offset = time::OffsetDateTime::now_local().unwrap().offset();
+        let local_offset =
+            time::OffsetDateTime::now_local().map_or_else(|_| time::UtcOffset::UTC, |v| v.offset());
         time::OffsetDateTime::from_unix_timestamp_nanos(ts_nanos)
             .unwrap()
             .to_offset(local_offset)
@@ -212,6 +239,7 @@ impl Utmpx {
     pub fn into_inner(self) -> utmpx {
         self.inner
     }
+    /// check if the record is a user process
     pub fn is_user_process(&self) -> bool {
         !self.user().is_empty() && self.record_type() == USER_PROCESS
     }
@@ -223,7 +251,7 @@ impl Utmpx {
         let (hostname, display) = host.split_once(':').unwrap_or((&host, ""));
 
         if !hostname.is_empty() {
-            use dns_lookup::{getaddrinfo, AddrInfoHints};
+            use dns_lookup::{AddrInfoHints, getaddrinfo};
 
             const AI_CANONNAME: i32 = 0x2;
             let hints = AddrInfoHints {
@@ -255,17 +283,30 @@ impl Utmpx {
     /// This will use the default location, or the path [`Utmpx::iter_all_records_from`]
     /// was most recently called with.
     ///
+    /// On systems with systemd-logind feature enabled at compile time,
+    /// this will use systemd-logind instead of traditional utmp files.
+    ///
     /// Only one instance of [`UtmpxIter`] may be active at a time. This
     /// function will block as long as one is still active. Beware!
     pub fn iter_all_records() -> UtmpxIter {
-        let iter = UtmpxIter::new();
-        unsafe {
-            // This can technically fail, and it would be nice to detect that,
-            // but it doesn't return anything so we'd have to do nasty things
-            // with errno.
-            setutxent();
+        #[cfg(feature = "feat_systemd_logind")]
+        {
+            // Use systemd-logind instead of traditional utmp when feature is enabled
+            UtmpxIter::new_systemd()
         }
-        iter
+
+        #[cfg(not(feature = "feat_systemd_logind"))]
+        {
+            let iter = UtmpxIter::new();
+            unsafe {
+                // This can technically fail, and it would be nice to detect that,
+                // but it doesn't return anything so we'd have to do nasty things
+                // with errno.
+                #[cfg_attr(target_env = "musl", allow(deprecated))]
+                setutxent();
+            }
+            iter
+        }
     }
 
     /// Iterate through all the utmp records from a specific file.
@@ -274,8 +315,20 @@ impl Utmpx {
     ///
     /// This function affects subsequent calls to [`Utmpx::iter_all_records`].
     ///
+    /// On systems with systemd-logind feature enabled at compile time,
+    /// if the path matches the default utmp file, this will use systemd-logind
+    /// instead of traditional utmp files.
+    ///
     /// The same caveats as for [`Utmpx::iter_all_records`] apply.
     pub fn iter_all_records_from<P: AsRef<Path>>(path: P) -> UtmpxIter {
+        #[cfg(feature = "feat_systemd_logind")]
+        {
+            // Use systemd-logind for default utmp file when feature is enabled
+            if path.as_ref() == Path::new(DEFAULT_FILE) {
+                return UtmpxIter::new_systemd();
+            }
+        }
+
         let iter = UtmpxIter::new();
         let path = CString::new(path.as_ref().as_os_str().as_bytes()).unwrap();
         unsafe {
@@ -287,7 +340,9 @@ impl Utmpx {
             // is specified, no warning or anything.
             // So this function is pretty crazy and we don't try to detect errors.
             // Not much we can do besides pray.
+            #[cfg_attr(target_env = "musl", allow(deprecated))]
             utmpxname(path.as_ptr());
+            #[cfg_attr(target_env = "musl", allow(deprecated))]
             setutxent();
         }
         iter
@@ -301,7 +356,7 @@ impl Utmpx {
 // I believe the only technical memory unsafety that could happen is a data
 // race while copying the data out of the pointer returned by getutxent(), but
 // ordinary race conditions are also very much possible.
-static LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+static LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 /// Iterator of login records
 pub struct UtmpxIter {
@@ -310,6 +365,8 @@ pub struct UtmpxIter {
     /// Ensure UtmpxIter is !Send. Technically redundant because MutexGuard
     /// is also !Send.
     phantom: PhantomData<std::rc::Rc<()>>,
+    #[cfg(feature = "feat_systemd_logind")]
+    systemd_iter: Option<systemd_logind::SystemdUtmpxIter>,
 }
 
 impl UtmpxIter {
@@ -319,14 +376,146 @@ impl UtmpxIter {
         Self {
             guard,
             phantom: PhantomData,
+            #[cfg(feature = "feat_systemd_logind")]
+            systemd_iter: None,
+        }
+    }
+
+    #[cfg(feature = "feat_systemd_logind")]
+    fn new_systemd() -> Self {
+        // PoisonErrors can safely be ignored
+        let guard = LOCK.lock().unwrap_or_else(|err| err.into_inner());
+        let systemd_iter = match systemd_logind::SystemdUtmpxIter::new() {
+            Ok(iter) => iter,
+            Err(_) => {
+                // Like GNU coreutils: graceful degradation, not fallback to traditional utmp
+                // Return empty iterator rather than falling back  (GNU coreutils also returns 0 when /var/run/utmp is not present, so we don't need to propagate the error here)
+                systemd_logind::SystemdUtmpxIter::empty()
+            }
+        };
+        Self {
+            guard,
+            phantom: PhantomData,
+            systemd_iter: Some(systemd_iter),
+        }
+    }
+}
+
+/// Wrapper type that can hold either traditional utmpx records or systemd records
+pub enum UtmpxRecord {
+    Traditional(Box<Utmpx>),
+    #[cfg(feature = "feat_systemd_logind")]
+    Systemd(systemd_logind::SystemdUtmpxCompat),
+}
+
+impl UtmpxRecord {
+    /// A.K.A. ut.ut_type
+    pub fn record_type(&self) -> i16 {
+        match self {
+            Self::Traditional(utmpx) => utmpx.record_type(),
+            #[cfg(feature = "feat_systemd_logind")]
+            Self::Systemd(systemd) => systemd.record_type(),
+        }
+    }
+
+    /// A.K.A. ut.ut_pid
+    pub fn pid(&self) -> i32 {
+        match self {
+            Self::Traditional(utmpx) => utmpx.pid(),
+            #[cfg(feature = "feat_systemd_logind")]
+            Self::Systemd(systemd) => systemd.pid(),
+        }
+    }
+
+    /// A.K.A. ut.ut_id
+    pub fn terminal_suffix(&self) -> String {
+        match self {
+            Self::Traditional(utmpx) => utmpx.terminal_suffix(),
+            #[cfg(feature = "feat_systemd_logind")]
+            Self::Systemd(systemd) => systemd.terminal_suffix(),
+        }
+    }
+
+    /// A.K.A. ut.ut_user
+    pub fn user(&self) -> String {
+        match self {
+            Self::Traditional(utmpx) => utmpx.user(),
+            #[cfg(feature = "feat_systemd_logind")]
+            Self::Systemd(systemd) => systemd.user(),
+        }
+    }
+
+    /// A.K.A. ut.ut_host
+    pub fn host(&self) -> String {
+        match self {
+            Self::Traditional(utmpx) => utmpx.host(),
+            #[cfg(feature = "feat_systemd_logind")]
+            Self::Systemd(systemd) => systemd.host(),
+        }
+    }
+
+    /// A.K.A. ut.ut_line
+    pub fn tty_device(&self) -> String {
+        match self {
+            Self::Traditional(utmpx) => utmpx.tty_device(),
+            #[cfg(feature = "feat_systemd_logind")]
+            Self::Systemd(systemd) => systemd.tty_device(),
+        }
+    }
+
+    /// A.K.A. ut.ut_tv
+    pub fn login_time(&self) -> time::OffsetDateTime {
+        match self {
+            Self::Traditional(utmpx) => utmpx.login_time(),
+            #[cfg(feature = "feat_systemd_logind")]
+            Self::Systemd(systemd) => systemd.login_time(),
+        }
+    }
+
+    /// A.K.A. ut.ut_exit
+    ///
+    /// Return (e_termination, e_exit)
+    pub fn exit_status(&self) -> (i16, i16) {
+        match self {
+            Self::Traditional(utmpx) => utmpx.exit_status(),
+            #[cfg(feature = "feat_systemd_logind")]
+            Self::Systemd(systemd) => systemd.exit_status(),
+        }
+    }
+
+    /// check if the record is a user process
+    pub fn is_user_process(&self) -> bool {
+        match self {
+            Self::Traditional(utmpx) => utmpx.is_user_process(),
+            #[cfg(feature = "feat_systemd_logind")]
+            Self::Systemd(systemd) => systemd.is_user_process(),
+        }
+    }
+
+    /// Canonicalize host name using DNS
+    pub fn canon_host(&self) -> IOResult<String> {
+        match self {
+            Self::Traditional(utmpx) => utmpx.canon_host(),
+            #[cfg(feature = "feat_systemd_logind")]
+            Self::Systemd(systemd) => systemd.canon_host(),
         }
     }
 }
 
 impl Iterator for UtmpxIter {
-    type Item = Utmpx;
+    type Item = UtmpxRecord;
     fn next(&mut self) -> Option<Self::Item> {
+        #[cfg(feature = "feat_systemd_logind")]
+        {
+            if let Some(ref mut systemd_iter) = self.systemd_iter {
+                // We have a systemd iterator - use it exclusively (never fall back to traditional utmp)
+                return systemd_iter.next().map(UtmpxRecord::Systemd);
+            }
+        }
+
+        // Traditional utmp path
         unsafe {
+            #[cfg_attr(target_env = "musl", allow(deprecated))]
             let res = getutxent();
             if res.is_null() {
                 None
@@ -335,9 +524,9 @@ impl Iterator for UtmpxIter {
                 // call to getutxent(), so we have to read it now.
                 // All the strings live inline in the struct as arrays, which
                 // makes things easier.
-                Some(Utmpx {
+                Some(UtmpxRecord::Traditional(Box::new(Utmpx {
                     inner: ptr::read(res as *const _),
-                })
+                })))
             }
         }
     }
@@ -346,6 +535,7 @@ impl Iterator for UtmpxIter {
 impl Drop for UtmpxIter {
     fn drop(&mut self) {
         unsafe {
+            #[cfg_attr(target_env = "musl", allow(deprecated))]
             endutxent();
         }
     }

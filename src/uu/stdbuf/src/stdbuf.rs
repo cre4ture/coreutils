@@ -3,23 +3,20 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-// spell-checker:ignore (ToDO) tempdir dyld dylib dragonflybsd optgrps libstdbuf
+// spell-checker:ignore (ToDO) tempdir dyld dylib optgrps libstdbuf
 
-use clap::{crate_version, Arg, ArgAction, ArgMatches, Command};
-use std::fs::File;
-use std::io::Write;
+use clap::{Arg, ArgAction, ArgMatches, Command};
+use std::ffi::OsString;
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 use std::process;
-use tempfile::tempdir;
 use tempfile::TempDir;
+use tempfile::tempdir;
+use thiserror::Error;
 use uucore::error::{FromIo, UResult, USimpleError, UUsageError};
-use uucore::parse_size::parse_size_u64;
-use uucore::{format_usage, help_about, help_section, help_usage};
-
-const ABOUT: &str = help_about!("stdbuf.md");
-const USAGE: &str = help_usage!("stdbuf.md");
-const LONG_HELP: &str = help_section!("after help", "stdbuf.md");
+use uucore::format_usage;
+use uucore::parser::parse_size::parse_size_u64;
+use uucore::translate;
 
 mod options {
     pub const INPUT: &str = "input";
@@ -31,7 +28,20 @@ mod options {
     pub const COMMAND: &str = "command";
 }
 
+#[cfg(all(
+    not(feature = "feat_external_libstdbuf"),
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    )
+))]
 const STDBUF_INJECT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/libstdbuf.so"));
+
+#[cfg(all(not(feature = "feat_external_libstdbuf"), target_vendor = "apple"))]
+const STDBUF_INJECT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/libstdbuf.dylib"));
 
 enum BufferType {
     Default,
@@ -57,14 +67,22 @@ impl TryFrom<&ArgMatches> for ProgramOptions {
     }
 }
 
-struct ProgramOptionsError(String);
+#[derive(Debug, Error)]
+enum ProgramOptionsError {
+    #[error("{}", translate!("stdbuf-error-line-buffering-stdin-meaningless"))]
+    LineBufferingStdinMeaningless,
+    #[error("{}", translate!("stdbuf-error-invalid-mode", "error" => _0.clone()))]
+    InvalidMode(String),
+    #[error("{}", translate!("stdbuf-error-value-too-large", "value" => _0.clone()))]
+    ValueTooLarge(String),
+}
 
 #[cfg(any(
     target_os = "linux",
     target_os = "android",
     target_os = "freebsd",
     target_os = "netbsd",
-    target_os = "dragonflybsd"
+    target_os = "dragonfly"
 ))]
 fn preload_strings() -> UResult<(&'static str, &'static str)> {
     Ok(("LD_PRELOAD", "so"))
@@ -80,13 +98,13 @@ fn preload_strings() -> UResult<(&'static str, &'static str)> {
     target_os = "android",
     target_os = "freebsd",
     target_os = "netbsd",
-    target_os = "dragonflybsd",
+    target_os = "dragonfly",
     target_vendor = "apple"
 )))]
 fn preload_strings() -> UResult<(&'static str, &'static str)> {
     Err(USimpleError::new(
         1,
-        "Command not supported for this operating system!",
+        translate!("stdbuf-error-command-not-supported"),
     ))
 }
 
@@ -95,20 +113,16 @@ fn check_option(matches: &ArgMatches, name: &str) -> Result<BufferType, ProgramO
         Some(value) => match value.as_str() {
             "L" => {
                 if name == options::INPUT {
-                    Err(ProgramOptionsError(
-                        "line buffering stdin is meaningless".to_string(),
-                    ))
+                    Err(ProgramOptionsError::LineBufferingStdinMeaningless)
                 } else {
                     Ok(BufferType::Line)
                 }
             }
             x => parse_size_u64(x).map_or_else(
-                |e| Err(ProgramOptionsError(format!("invalid mode {e}"))),
+                |e| Err(ProgramOptionsError::InvalidMode(e.to_string())),
                 |m| {
                     Ok(BufferType::Size(m.try_into().map_err(|_| {
-                        ProgramOptionsError(format!(
-                            "invalid mode '{x}': Value too large for defined data type"
-                        ))
+                        ProgramOptionsError::ValueTooLarge(x.to_string())
                     })?))
                 },
             ),
@@ -129,7 +143,11 @@ fn set_command_env(command: &mut process::Command, buffer_name: &str, buffer_typ
     }
 }
 
+#[cfg(not(feature = "feat_external_libstdbuf"))]
 fn get_preload_env(tmp_dir: &TempDir) -> UResult<(String, PathBuf)> {
+    use std::fs::File;
+    use std::io::Write;
+
     let (preload, extension) = preload_strings()?;
     let inject_path = tmp_dir.path().join("libstdbuf").with_extension(extension);
 
@@ -139,15 +157,37 @@ fn get_preload_env(tmp_dir: &TempDir) -> UResult<(String, PathBuf)> {
     Ok((preload.to_owned(), inject_path))
 }
 
+#[cfg(feature = "feat_external_libstdbuf")]
+fn get_preload_env(_tmp_dir: &TempDir) -> UResult<(String, PathBuf)> {
+    let (preload, extension) = preload_strings()?;
+
+    // Use the directory provided at compile time via LIBSTDBUF_DIR environment variable
+    // This will fail to compile if LIBSTDBUF_DIR is not set, which is the desired behavior
+    const LIBSTDBUF_DIR: &str = env!("LIBSTDBUF_DIR");
+    let path_buf = PathBuf::from(LIBSTDBUF_DIR)
+        .join("libstdbuf")
+        .with_extension(extension);
+    if path_buf.exists() {
+        return Ok((preload.to_owned(), path_buf));
+    }
+
+    Err(USimpleError::new(
+        1,
+        translate!("stdbuf-error-external-libstdbuf-not-found", "path" => path_buf.display()),
+    ))
+}
+
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-    let matches = uu_app().try_get_matches_from(args)?;
+    let matches =
+        uucore::clap_localization::handle_clap_result_with_exit_code(uu_app(), args, 125)?;
 
-    let options = ProgramOptions::try_from(&matches).map_err(|e| UUsageError::new(125, e.0))?;
+    let options =
+        ProgramOptions::try_from(&matches).map_err(|e| UUsageError::new(125, e.to_string()))?;
 
-    let mut command_values = matches.get_many::<String>(options::COMMAND).unwrap();
+    let mut command_values = matches.get_many::<OsString>(options::COMMAND).unwrap();
     let mut command = process::Command::new(command_values.next().unwrap());
-    let command_params: Vec<&str> = command_values.map(|s| s.as_ref()).collect();
+    let command_params: Vec<&OsString> = command_values.collect();
 
     let tmp_dir = tempdir().unwrap();
     let (preload_env, libstdbuf) = get_preload_env(&tmp_dir)?;
@@ -157,9 +197,26 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
     set_command_env(&mut command, "_STDBUF_E", &options.stderr);
     command.args(command_params);
 
-    let mut process = command
-        .spawn()
-        .map_err_context(|| "failed to execute process".to_string())?;
+    let mut process = match command.spawn() {
+        Ok(p) => p,
+        Err(e) => {
+            return match e.kind() {
+                std::io::ErrorKind::PermissionDenied => Err(USimpleError::new(
+                    126,
+                    translate!("stdbuf-error-permission-denied"),
+                )),
+                std::io::ErrorKind::NotFound => Err(USimpleError::new(
+                    127,
+                    translate!("stdbuf-error-no-such-file"),
+                )),
+                _ => Err(USimpleError::new(
+                    1,
+                    translate!("stdbuf-error-failed-to-execute", "error" => e),
+                )),
+            };
+        }
+    };
+
     let status = process.wait().map_err_context(String::new)?;
     match status.code() {
         Some(i) => {
@@ -171,24 +228,25 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
         }
         None => Err(USimpleError::new(
             1,
-            format!("process killed by signal {}", status.signal().unwrap()),
+            translate!("stdbuf-error-killed-by-signal", "signal" => status.signal().unwrap()),
         )),
     }
 }
 
 pub fn uu_app() -> Command {
     Command::new(uucore::util_name())
-        .version(crate_version!())
-        .about(ABOUT)
-        .after_help(LONG_HELP)
-        .override_usage(format_usage(USAGE))
+        .version(uucore::crate_version!())
+        .help_template(uucore::localized_help_template(uucore::util_name()))
+        .about(translate!("stdbuf-about"))
+        .after_help(translate!("stdbuf-after-help"))
+        .override_usage(format_usage(&translate!("stdbuf-usage")))
         .trailing_var_arg(true)
         .infer_long_args(true)
         .arg(
             Arg::new(options::INPUT)
                 .long(options::INPUT)
                 .short(options::INPUT_SHORT)
-                .help("adjust standard input stream buffering")
+                .help(translate!("stdbuf-help-input"))
                 .value_name("MODE")
                 .required_unless_present_any([options::OUTPUT, options::ERROR]),
         )
@@ -196,7 +254,7 @@ pub fn uu_app() -> Command {
             Arg::new(options::OUTPUT)
                 .long(options::OUTPUT)
                 .short(options::OUTPUT_SHORT)
-                .help("adjust standard output stream buffering")
+                .help(translate!("stdbuf-help-output"))
                 .value_name("MODE")
                 .required_unless_present_any([options::INPUT, options::ERROR]),
         )
@@ -204,7 +262,7 @@ pub fn uu_app() -> Command {
             Arg::new(options::ERROR)
                 .long(options::ERROR)
                 .short(options::ERROR_SHORT)
-                .help("adjust standard error stream buffering")
+                .help(translate!("stdbuf-help-error"))
                 .value_name("MODE")
                 .required_unless_present_any([options::INPUT, options::OUTPUT]),
         )
@@ -213,6 +271,7 @@ pub fn uu_app() -> Command {
                 .action(ArgAction::Append)
                 .hide(true)
                 .required(true)
-                .value_hint(clap::ValueHint::CommandName),
+                .value_hint(clap::ValueHint::CommandName)
+                .value_parser(clap::value_parser!(OsString)),
         )
 }

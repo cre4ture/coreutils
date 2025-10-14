@@ -3,8 +3,6 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-// TODO fix broken links
-#![allow(rustdoc::broken_intra_doc_links)]
 //! Macros for the uucore utilities.
 //!
 //! This module bundles all macros used across the uucore utilities. These
@@ -22,18 +20,16 @@
 //! fully qualified name like this:
 //!
 //! ```no_run
-//! use uucore::{show, crash};
+//! use uucore::show;
 //! ```
 //!
 //! Here's an overview of the macros sorted by purpose
 //!
 //! - Print errors
-//!   - From types implementing [`crate::error::UError`]: [`show!`],
-//!     [`show_if_err!`]
-//!   - From custom messages: [`show_error!`]
-//! - Print warnings: [`show_warning!`]
-//! - Terminate util execution
-//!   - Crash program: [`crash!`], [`crash_if_err!`]
+//!   - From types implementing [`crate::error::UError`]: [`crate::show!`],
+//!     [`crate::show_if_err!`]
+//!   - From custom messages: [`crate::show_error!`]
+//! - Print warnings: [`crate::show_warning!`]
 
 // spell-checker:ignore sourcepath targetpath rustdoc
 
@@ -91,17 +87,18 @@ pub static UTILITY_IS_SECOND_ARG: AtomicBool = AtomicBool::new(false);
 #[macro_export]
 macro_rules! show(
     ($err:expr) => ({
+        #[allow(unused_imports)]
         use $crate::error::UError;
         let e = $err;
         $crate::error::set_exit_code(e.code());
-        eprintln!("{}: {}", $crate::util_name(), e);
+        eprintln!("{}: {e}", $crate::util_name());
     })
 );
 
 /// Display an error and set global exit code in error case.
 ///
-/// Wraps around [`show!`] and takes a [`crate::error::UResult`] instead of a
-/// [`crate::error::UError`] type. This macro invokes [`show!`] if the
+/// Wraps around [`crate::show!`] and takes a [`crate::error::UResult`] instead of a
+/// [`crate::error::UError`] type. This macro invokes [`crate::show!`] if the
 /// [`crate::error::UResult`] is an `Err`-variant. This can be invoked directly
 /// on the result of a function call, like in the `install` utility:
 ///
@@ -182,64 +179,11 @@ macro_rules! show_warning(
     })
 );
 
+/// Print a warning message to stderr, prepending the utility name.
 #[macro_export]
 macro_rules! show_warning_caps(
     ($($args:tt)+) => ({
         eprint!("{}: WARNING: ", $crate::util_name());
         eprintln!($($args)+);
     })
-);
-
-/// Display an error and [`std::process::exit`]
-///
-/// Displays the provided error message using [`show_error!`], then invokes
-/// [`std::process::exit`] with the provided exit code.
-///
-/// # Examples
-///
-/// ```should_panic
-/// # #[macro_use]
-/// # extern crate uucore;
-/// # fn main() {
-/// // outputs <name>: Couldn't apply foo to bar
-/// // and terminates execution
-/// crash!(1, "Couldn't apply {} to {}", "foo", "bar");
-/// # }
-/// ```
-#[macro_export]
-macro_rules! crash(
-    ($exit_code:expr, $($args:tt)+) => ({
-        $crate::show_error!($($args)+);
-        std::process::exit($exit_code);
-    })
-);
-
-/// Unwrap a [`std::result::Result`], crashing instead of panicking.
-///
-/// If the result is an `Ok`-variant, returns the value contained inside. If it
-/// is an `Err`-variant, invokes [`crash!`] with the formatted error instead.
-///
-/// # Examples
-///
-/// ```should_panic
-/// # #[macro_use]
-/// # extern crate uucore;
-/// # fn main() {
-/// let is_ok: Result<u32, &str> = Ok(1);
-/// // Does nothing
-/// crash_if_err!(1, is_ok);
-///
-/// let is_err: Result<u32, &str> = Err("This didn't work...");
-/// // Calls `crash!`
-/// crash_if_err!(1, is_err);
-/// # }
-/// ```
-#[macro_export]
-macro_rules! crash_if_err(
-    ($exit_code:expr, $exp:expr) => (
-        match $exp {
-            Ok(m) => m,
-            Err(f) => $crate::crash!($exit_code, "{}", f),
-        }
-    )
 );

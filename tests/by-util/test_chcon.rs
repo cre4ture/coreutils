@@ -3,14 +3,15 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 // spell-checker:ignore (jargon) xattributes
-
+#![allow(clippy::missing_errors_doc, clippy::similar_names)]
 #![cfg(feature = "feat_selinux")]
 
 use std::ffi::CString;
 use std::path::Path;
 use std::{io, iter, str};
 
-use crate::common::util::*;
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
 
 #[test]
 fn version() {
@@ -527,6 +528,7 @@ fn valid_reference_repeat_flags() {
 }
 
 #[test]
+#[ignore = "issue #7443"]
 fn valid_reference_repeated_reference() {
     let (dir, mut cmd) = at_and_ucmd!();
 
@@ -592,7 +594,7 @@ fn get_file_context(path: impl AsRef<Path>) -> Result<Option<String>, selinux::e
     let path = path.as_ref();
     match selinux::SecurityContext::of_path(path, false, false) {
         Err(r) => {
-            println!("get_file_context failed: '{}': {}.", path.display(), &r);
+            println!("get_file_context failed: '{}': {r}.", path.display());
             Err(r)
         }
 
@@ -611,7 +613,7 @@ fn get_file_context(path: impl AsRef<Path>) -> Result<Option<String>, selinux::e
                 .next()
                 .unwrap_or_default();
             let context = String::from_utf8(bytes.into()).unwrap_or_default();
-            println!("get_file_context: '{}' => '{}'.", context, path.display());
+            println!("get_file_context: '{context}' => '{}'.", path.display());
             Ok(Some(context))
         }
     }
@@ -628,13 +630,11 @@ fn set_file_context(path: impl AsRef<Path>, context: &str) -> Result<(), selinux
         selinux::SecurityContext::from_c_str(&c_context, false).set_for_path(path, false, false);
     if let Err(r) = &r {
         println!(
-            "set_file_context failed: '{}' => '{}': {}.",
-            context,
+            "set_file_context failed: '{context}' => '{}': {r}.",
             path.display(),
-            r
         );
     } else {
-        println!("set_file_context: '{}' => '{}'.", context, path.display());
+        println!("set_file_context: '{context}' => '{}'.", path.display());
     }
     r
 }

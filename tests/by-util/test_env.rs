@@ -2,17 +2,123 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-// spell-checker:ignore (words) bamf chdir rlimit prlimit COMSPEC cout cerr FFFD
+// spell-checker:ignore (words) bamf chdir rlimit prlimit COMSPEC cout cerr FFFD winsize xpixel ypixel
+#![allow(clippy::missing_errors_doc)]
 
-use crate::common::util::TestScenario;
+#[cfg(unix)]
+use nix::sys::signal::Signal;
+#[cfg(feature = "echo")]
 use regex::Regex;
 use std::env;
 use std::path::Path;
+#[cfg(unix)]
+use std::process::Command;
 use tempfile::tempdir;
+use uutests::new_ucmd;
+#[cfg(unix)]
+use uutests::util::TerminalSimulation;
+use uutests::util::TestScenario;
+#[cfg(unix)]
+use uutests::util::UChild;
+use uutests::util_name;
+
+#[cfg(unix)]
+struct Target {
+    child: UChild,
+}
+#[cfg(unix)]
+impl Target {
+    fn new(signals: &[&str]) -> Self {
+        let mut child = new_ucmd!()
+            .args(&[
+                format!("--ignore-signal={}", signals.join(",")).as_str(),
+                "sleep",
+                "1000",
+            ])
+            .run_no_wait();
+        child.delay(500);
+        Self { child }
+    }
+    fn send_signal(&mut self, signal: Signal) {
+        let _ = Command::new("kill")
+            .args(&[
+                format!("-{}", signal as i32),
+                format!("{}", self.child.id()),
+            ])
+            .spawn()
+            .expect("failed to send signal")
+            .wait();
+        self.child.delay(100);
+    }
+    fn is_alive(&mut self) -> bool {
+        self.child.is_alive()
+    }
+}
+#[cfg(unix)]
+impl Drop for Target {
+    fn drop(&mut self) {
+        self.child.kill();
+    }
+}
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(125);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(125);
+}
+
+#[test]
+#[cfg(not(target_os = "windows"))]
+fn test_flags_after_command() {
+    new_ucmd!()
+        // This would cause an error if -u=v were processed because it's malformed
+        .args(&["echo", "-u=v"])
+        .succeeds()
+        .no_stderr()
+        .stdout_is("-u=v\n");
+
+    new_ucmd!()
+        // Ensure the string isn't split
+        // cSpell:disable
+        .args(&["printf", "%s-%s", "-Sfoo bar"])
+        .succeeds()
+        .no_stderr()
+        .stdout_is("-Sfoo bar-");
+    // cSpell:enable
+
+    new_ucmd!()
+        // Ensure -- is recognized
+        .args(&["-i", "--", "-u=v"])
+        .succeeds()
+        .no_stderr()
+        .stdout_is("-u=v\n");
+
+    new_ucmd!()
+        // Recognize echo as the command after a flag that takes a value
+        .args(&["-C", "..", "echo", "-u=v"])
+        .succeeds()
+        .no_stderr()
+        .stdout_is("-u=v\n");
+
+    new_ucmd!()
+        // Recognize echo as the command after a flag that takes an inline value
+        .args(&["-C..", "echo", "-u=v"])
+        .succeeds()
+        .no_stderr()
+        .stdout_is("-u=v\n");
+
+    new_ucmd!()
+        // Recognize echo as the command after a flag that takes a value after another flag
+        .args(&["-iC", "..", "echo", "-u=v"])
+        .succeeds()
+        .no_stderr()
+        .stdout_is("-u=v\n");
+
+    new_ucmd!()
+        // Similar to the last two combined
+        .args(&["-iC..", "echo", "-u=v"])
+        .succeeds()
+        .no_stderr()
+        .stdout_is("-u=v\n");
 }
 
 #[test]
@@ -31,6 +137,16 @@ fn test_env_version() {
         .succeeds()
         .no_stderr()
         .stdout_contains(util_name!());
+}
+
+#[test]
+#[cfg(unix)]
+fn test_env_permissions() {
+    // Try to execute `empty` in test fixture, that does not have exec permission.
+    new_ucmd!()
+        .arg("./empty")
+        .fails_with_code(126)
+        .stderr_is("env: './empty': Permission denied\n");
 }
 
 #[test]
@@ -53,6 +169,7 @@ fn test_if_windows_batch_files_can_be_executed() {
     assert!(result.stdout_str().contains("Hello Windows World!"));
 }
 
+#[cfg(feature = "echo")]
 #[test]
 fn test_debug_1() {
     let ts = TestScenario::new(util_name!());
@@ -73,13 +190,14 @@ fn test_debug_1() {
     );
 }
 
+#[cfg(feature = "echo")]
 #[test]
 fn test_debug_2() {
     let ts = TestScenario::new(util_name!());
     let result = ts
         .ucmd()
         .arg("-vv")
-        .arg(ts.bin_path)
+        .arg(&ts.bin_path)
         .args(&["echo", "hello2"])
         .succeeds();
     result.stderr_matches(
@@ -99,6 +217,7 @@ fn test_debug_2() {
     );
 }
 
+#[cfg(feature = "echo")]
 #[test]
 fn test_debug1_part_of_string_arg() {
     let ts = TestScenario::new(util_name!());
@@ -106,7 +225,7 @@ fn test_debug1_part_of_string_arg() {
     let result = ts
         .ucmd()
         .arg("-vS FOO=BAR")
-        .arg(ts.bin_path)
+        .arg(&ts.bin_path)
         .args(&["echo", "hello1"])
         .succeeds();
     result.stderr_matches(
@@ -120,13 +239,14 @@ fn test_debug1_part_of_string_arg() {
     );
 }
 
+#[cfg(feature = "echo")]
 #[test]
 fn test_debug2_part_of_string_arg() {
     let ts = TestScenario::new(util_name!());
     let result = ts
         .ucmd()
         .arg("-vvS FOO=BAR")
-        .arg(ts.bin_path)
+        .arg(&ts.bin_path)
         .args(&["echo", "hello2"])
         .succeeds();
     result.stderr_matches(
@@ -151,7 +271,7 @@ fn test_file_option() {
     let out = new_ucmd!()
         .arg("-f")
         .arg("vars.conf.txt")
-        .run()
+        .succeeds()
         .stdout_move_str();
 
     assert_eq!(
@@ -168,7 +288,7 @@ fn test_combined_file_set() {
         .arg("-f")
         .arg("vars.conf.txt")
         .arg("FOO=bar.alt")
-        .run()
+        .succeeds()
         .stdout_move_str();
 
     assert_eq!(out.lines().filter(|&line| line == "FOO=bar.alt").count(), 1);
@@ -200,7 +320,7 @@ fn test_unset_invalid_variables() {
     // Cannot test input with \0 in it, since output will also contain \0. rlimit::prlimit fails
     // with this error: Error { kind: InvalidInput, message: "nul byte found in provided data" }
     for var in ["", "a=b"] {
-        new_ucmd!().arg("-u").arg(var).run().stderr_only(format!(
+        new_ucmd!().arg("-u").arg(var).fails().stderr_only(format!(
             "env: cannot unset {}: Invalid argument\n",
             var.quote()
         ));
@@ -209,14 +329,17 @@ fn test_unset_invalid_variables() {
 
 #[test]
 fn test_single_name_value_pair() {
-    let out = new_ucmd!().arg("FOO=bar").run();
-
-    assert!(out.stdout_str().lines().any(|line| line == "FOO=bar"));
+    new_ucmd!()
+        .arg("FOO=bar")
+        .succeeds()
+        .stdout_str()
+        .lines()
+        .any(|line| line == "FOO=bar");
 }
 
 #[test]
 fn test_multiple_name_value_pairs() {
-    let out = new_ucmd!().arg("FOO=bar").arg("ABC=xyz").run();
+    let out = new_ucmd!().arg("FOO=bar").arg("ABC=xyz").succeeds();
 
     assert_eq!(
         out.stdout_str()
@@ -240,7 +363,7 @@ fn test_empty_name() {
     new_ucmd!()
         .arg("-i")
         .arg("=xyz")
-        .run()
+        .succeeds()
         .stderr_only("env: warning: no name specified for value 'xyz'\n");
 }
 
@@ -399,7 +522,7 @@ fn test_split_string_into_args_s_escaped_c_not_allowed() {
     let out = scene.ucmd().args(&[r#"-S"\c""#]).fails().stderr_move_str();
     assert_eq!(
         out,
-        "env: '\\c' must not appear in double-quoted -S string\n"
+        "env: '\\c' must not appear in double-quoted -S string at position 2\n"
     );
 }
 
@@ -456,15 +579,21 @@ fn test_split_string_into_args_debug_output_whitespace_handling() {
 fn test_gnu_e20() {
     let scene = TestScenario::new(util_name!());
 
-    let env_bin = String::from(crate::common::util::TESTS_BINARY) + " " + util_name!();
+    let env_bin = String::from(uutests::util::get_tests_binary()) + " " + util_name!();
+    let input = [
+        String::from("-i"),
+        String::from(r#"-SA="B\_C=D" "#) + env_bin.escape_default().to_string().as_str() + "",
+    ];
 
-    let (input, output) = (
-        [
-            String::from("-i"),
-            String::from(r#"-SA="B\_C=D" "#) + env_bin.escape_default().to_string().as_str() + "",
-        ],
-        "A=B C=D\n",
-    );
+    let mut output = "A=B C=D\n".to_string();
+
+    // Workaround for the test to pass when coverage is being run.
+    // If enabled, the binary called by env_bin will most probably be
+    // instrumented for coverage, and thus will set the
+    // __LLVM_PROFILE_RT_INIT_ONCE
+    if env::var("__LLVM_PROFILE_RT_INIT_ONCE").is_ok() {
+        output.push_str("__LLVM_PROFILE_RT_INIT_ONCE=__LLVM_PROFILE_RT_INIT_ONCE\n");
+    }
 
     let out = scene.ucmd().args(&input).succeeds();
     assert_eq!(out.stdout_str(), output);
@@ -477,108 +606,93 @@ fn test_env_parsing_errors() {
 
     ts.ucmd()
         .arg("-S\\|echo hallo") // no quotes, invalid escape sequence |
-        .fails()
-        .code_is(125)
+        .fails_with_code(125)
         .no_stdout()
-        .stderr_is("env: invalid sequence '\\|' in -S\n");
+        .stderr_is("env: invalid sequence '\\|' in -S at position 1\n");
 
     ts.ucmd()
         .arg("-S\\a") // no quotes, invalid escape sequence a
-        .fails()
-        .code_is(125)
+        .fails_with_code(125)
         .no_stdout()
-        .stderr_is("env: invalid sequence '\\a' in -S\n");
+        .stderr_is("env: invalid sequence '\\a' in -S at position 1\n");
 
     ts.ucmd()
         .arg("-S\"\\a\"") // double quotes, invalid escape sequence a
-        .fails()
-        .code_is(125)
+        .fails_with_code(125)
         .no_stdout()
-        .stderr_is("env: invalid sequence '\\a' in -S\n");
+        .stderr_is("env: invalid sequence '\\a' in -S at position 2\n");
 
     ts.ucmd()
         .arg(r#"-S"\a""#) // same as before, just using r#""#
-        .fails()
-        .code_is(125)
+        .fails_with_code(125)
         .no_stdout()
-        .stderr_is("env: invalid sequence '\\a' in -S\n");
+        .stderr_is("env: invalid sequence '\\a' in -S at position 2\n");
 
     ts.ucmd()
         .arg("-S'\\a'") // single quotes, invalid escape sequence a
-        .fails()
-        .code_is(125)
+        .fails_with_code(125)
         .no_stdout()
-        .stderr_is("env: invalid sequence '\\a' in -S\n");
+        .stderr_is("env: invalid sequence '\\a' in -S at position 2\n");
 
     ts.ucmd()
-        .arg(r#"-S\|\&\;"#) // no quotes, invalid escape sequence |
-        .fails()
-        .code_is(125)
+        .arg(r"-S\|\&\;") // no quotes, invalid escape sequence |
+        .fails_with_code(125)
         .no_stdout()
-        .stderr_is("env: invalid sequence '\\|' in -S\n");
+        .stderr_is("env: invalid sequence '\\|' in -S at position 1\n");
 
     ts.ucmd()
-        .arg(r#"-S\<\&\;"#) // no quotes, invalid escape sequence <
-        .fails()
-        .code_is(125)
+        .arg(r"-S\<\&\;") // no quotes, invalid escape sequence <
+        .fails_with_code(125)
         .no_stdout()
-        .stderr_is("env: invalid sequence '\\<' in -S\n");
+        .stderr_is("env: invalid sequence '\\<' in -S at position 1\n");
 
     ts.ucmd()
-        .arg(r#"-S\>\&\;"#) // no quotes, invalid escape sequence >
-        .fails()
-        .code_is(125)
+        .arg(r"-S\>\&\;") // no quotes, invalid escape sequence >
+        .fails_with_code(125)
         .no_stdout()
-        .stderr_is("env: invalid sequence '\\>' in -S\n");
+        .stderr_is("env: invalid sequence '\\>' in -S at position 1\n");
 
     ts.ucmd()
-        .arg(r#"-S\`\&\;"#) // no quotes, invalid escape sequence `
-        .fails()
-        .code_is(125)
+        .arg(r"-S\`\&\;") // no quotes, invalid escape sequence `
+        .fails_with_code(125)
         .no_stdout()
-        .stderr_is("env: invalid sequence '\\`' in -S\n");
+        .stderr_is("env: invalid sequence '\\`' in -S at position 1\n");
 
     ts.ucmd()
         .arg(r#"-S"\`\&\;""#) // double quotes, invalid escape sequence `
-        .fails()
-        .code_is(125)
+        .fails_with_code(125)
         .no_stdout()
-        .stderr_is("env: invalid sequence '\\`' in -S\n");
+        .stderr_is("env: invalid sequence '\\`' in -S at position 2\n");
 
     ts.ucmd()
-        .arg(r#"-S'\`\&\;'"#) // single quotes, invalid escape sequence `
-        .fails()
-        .code_is(125)
+        .arg(r"-S'\`\&\;'") // single quotes, invalid escape sequence `
+        .fails_with_code(125)
         .no_stdout()
-        .stderr_is("env: invalid sequence '\\`' in -S\n");
+        .stderr_is("env: invalid sequence '\\`' in -S at position 2\n");
 
     ts.ucmd()
-        .arg(r#"-S\`"#) // ` escaped without quotes
-        .fails()
-        .code_is(125)
+        .arg(r"-S\`") // ` escaped without quotes
+        .fails_with_code(125)
         .no_stdout()
-        .stderr_is("env: invalid sequence '\\`' in -S\n");
+        .stderr_is("env: invalid sequence '\\`' in -S at position 1\n");
 
     ts.ucmd()
         .arg(r#"-S"\`""#) // ` escaped in double quotes
-        .fails()
-        .code_is(125)
+        .fails_with_code(125)
         .no_stdout()
-        .stderr_is("env: invalid sequence '\\`' in -S\n");
+        .stderr_is("env: invalid sequence '\\`' in -S at position 2\n");
 
     ts.ucmd()
-        .arg(r#"-S'\`'"#) // ` escaped in single quotes
-        .fails()
-        .code_is(125)
+        .arg(r"-S'\`'") // ` escaped in single quotes
+        .fails_with_code(125)
         .no_stdout()
-        .stderr_is("env: invalid sequence '\\`' in -S\n");
+        .stderr_is("env: invalid sequence '\\`' in -S at position 2\n");
 
     ts.ucmd()
-        .args(&[r#"-S\🦉"#]) // ` escaped in single quotes
-        .fails()
-        .code_is(125)
+        .args(&[r"-S\🦉"]) // ` escaped in single quotes
+        .fails_with_code(125)
         .no_stdout()
-        .stderr_is("env: invalid sequence '\\\u{FFFD}' in -S\n"); // gnu doesn't show the owl. Instead a invalid unicode ?
+        .stderr_is("env: invalid sequence '\\\u{FFFD}' in -S at position 1\n"); // gnu doesn't show the owl. Instead a invalid unicode ?
 }
 
 #[test]
@@ -587,8 +701,7 @@ fn test_env_with_empty_executable_single_quotes() {
 
     ts.ucmd()
         .args(&["-S''"]) // empty single quotes, considered as program name
-        .fails()
-        .code_is(127)
+        .fails_with_code(127)
         .no_stdout()
         .stderr_is("env: '': No such file or directory\n"); // gnu version again adds escaping here
 }
@@ -599,14 +712,13 @@ fn test_env_with_empty_executable_double_quotes() {
 
     ts.ucmd()
         .args(&["-S\"\""]) // empty double quotes, considered as program name
-        .fails()
-        .code_is(127)
+        .fails_with_code(127)
         .no_stdout()
         .stderr_is("env: '': No such file or directory\n");
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(all(unix, feature = "dirname", feature = "echo"))]
 fn test_env_overwrite_arg0() {
     let ts = TestScenario::new(util_name!());
 
@@ -630,7 +742,7 @@ fn test_env_overwrite_arg0() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(all(unix, feature = "echo"))]
 fn test_env_arg_argv0_overwrite() {
     let ts = TestScenario::new(util_name!());
 
@@ -678,7 +790,7 @@ fn test_env_arg_argv0_overwrite() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(all(unix, feature = "echo"))]
 fn test_env_arg_argv0_overwrite_mixed_with_string_args() {
     let ts = TestScenario::new(util_name!());
 
@@ -735,6 +847,114 @@ fn test_env_arg_argv0_overwrite_mixed_with_string_args() {
         .stderr_is("");
 }
 
+#[test]
+#[cfg(unix)]
+fn test_env_arg_ignore_signal_invalid_signals() {
+    let ts = TestScenario::new(util_name!());
+    ts.ucmd()
+        .args(&["--ignore-signal=banana"])
+        .fails_with_code(125)
+        .stderr_contains("env: 'banana': invalid signal");
+    ts.ucmd()
+        .args(&["--ignore-signal=SIGbanana"])
+        .fails_with_code(125)
+        .stderr_contains("env: 'SIGbanana': invalid signal");
+    ts.ucmd()
+        .args(&["--ignore-signal=exit"])
+        .fails_with_code(125)
+        .stderr_contains("env: 'exit': invalid signal");
+    ts.ucmd()
+        .args(&["--ignore-signal=SIGexit"])
+        .fails_with_code(125)
+        .stderr_contains("env: 'SIGexit': invalid signal");
+}
+
+#[test]
+#[cfg(unix)]
+fn test_env_arg_ignore_signal_special_signals() {
+    let ts = TestScenario::new(util_name!());
+    let signal_stop = nix::sys::signal::SIGSTOP;
+    let signal_kill = nix::sys::signal::SIGKILL;
+    ts.ucmd()
+        .args(&["--ignore-signal=stop", "echo", "hello"])
+        .fails_with_code(125)
+        .stderr_contains(format!(
+            "env: failed to set signal action for signal {}: Invalid argument",
+            signal_stop as i32
+        ));
+    ts.ucmd()
+        .args(&["--ignore-signal=kill", "echo", "hello"])
+        .fails_with_code(125)
+        .stderr_contains(format!(
+            "env: failed to set signal action for signal {}: Invalid argument",
+            signal_kill as i32
+        ));
+    ts.ucmd()
+        .args(&["--ignore-signal=SToP", "echo", "hello"])
+        .fails_with_code(125)
+        .stderr_contains(format!(
+            "env: failed to set signal action for signal {}: Invalid argument",
+            signal_stop as i32
+        ));
+    ts.ucmd()
+        .args(&["--ignore-signal=SIGKILL", "echo", "hello"])
+        .fails_with_code(125)
+        .stderr_contains(format!(
+            "env: failed to set signal action for signal {}: Invalid argument",
+            signal_kill as i32
+        ));
+}
+
+#[test]
+#[cfg(unix)]
+fn test_env_arg_ignore_signal_valid_signals() {
+    {
+        let mut target = Target::new(&["int"]);
+        target.send_signal(Signal::SIGINT);
+        assert!(target.is_alive());
+    }
+    {
+        let mut target = Target::new(&["usr2"]);
+        target.send_signal(Signal::SIGUSR2);
+        assert!(target.is_alive());
+    }
+    {
+        let mut target = Target::new(&["int", "usr2"]);
+        target.send_signal(Signal::SIGUSR1);
+        assert!(!target.is_alive());
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn test_env_arg_ignore_signal_empty() {
+    let ts = TestScenario::new(util_name!());
+    ts.ucmd()
+        .args(&["--ignore-signal=", "echo", "hello"])
+        .succeeds()
+        .no_stderr()
+        .stdout_contains("hello");
+}
+
+#[test]
+fn disallow_equals_sign_on_short_unset_option() {
+    let ts = TestScenario::new(util_name!());
+
+    ts.ucmd()
+        .arg("-u=")
+        .fails_with_code(125)
+        .stderr_contains("env: cannot unset '=': Invalid argument");
+    ts.ucmd()
+        .arg("-u=A1B2C3")
+        .fails_with_code(125)
+        .stderr_contains("env: cannot unset '=A1B2C3': Invalid argument");
+    ts.ucmd().arg("--split-string=A1B=2C3=").succeeds();
+    ts.ucmd()
+        .arg("--unset=")
+        .fails_with_code(125)
+        .stderr_contains("env: cannot unset '': Invalid argument");
+}
+
 #[cfg(test)]
 mod tests_split_iterator {
 
@@ -771,7 +991,7 @@ mod tests_split_iterator {
                 | '*' | '?' | '[' | '#' | '˜' | '=' | '%' => {
                     special = true;
                 }
-                _ => continue,
+                _ => (),
             }
         }
 
@@ -789,12 +1009,12 @@ mod tests_split_iterator {
     ///
     /// It tries to avoid introducing any unnecessary quotes or escape characters,
     /// but specifics regarding quoting style are left unspecified.
-    pub fn quote(s: &str) -> std::borrow::Cow<str> {
+    pub fn quote(s: &str) -> std::borrow::Cow<'_, str> {
         // We are going somewhat out of the way to provide
         // minimal amount of quoting in typical cases.
         match escape_style(s) {
             EscapeStyle::None => s.into(),
-            EscapeStyle::SingleQuoted => format!("'{}'", s).into(),
+            EscapeStyle::SingleQuoted => format!("'{s}'").into(),
             EscapeStyle::Mixed => {
                 let mut quoted = String::new();
                 quoted.push('\'');
@@ -858,10 +1078,12 @@ mod tests_split_iterator {
 
     use std::ffi::OsString;
 
-    use env::native_int_str::{from_native_int_representation_owned, Convert, NCvt};
-    use env::parse_error::ParseError;
+    use env::{
+        EnvError,
+        native_int_str::{Convert, NCvt, from_native_int_representation_owned},
+    };
 
-    fn split(input: &str) -> Result<Vec<OsString>, ParseError> {
+    fn split(input: &str) -> Result<Vec<OsString>, EnvError> {
         ::env::split_iterator::split(&NCvt::convert(input)).map(|vec| {
             vec.into_iter()
                 .map(from_native_int_representation_owned)
@@ -874,17 +1096,14 @@ mod tests_split_iterator {
             match split(input) {
                 Err(actual) => {
                     panic!(
-                        "[{i}] calling split({:?}):\nexpected: Ok({:?})\n  actual: Err({:?})\n",
-                        input, expected, actual
+                        "[{i}] calling split({input:?}):\nexpected: Ok({expected:?})\n  actual: Err({actual:?})\n"
                     );
                 }
                 Ok(actual) => {
-                    assert!(
-                        expected == actual.as_slice(),
-                        "[{i}] After split({:?}).unwrap()\nexpected: {:?}\n  actual: {:?}\n",
-                        input,
+                    assert_eq!(
                         expected,
-                        actual
+                        actual.as_slice(),
+                        "[{i}] After split({input:?}).unwrap()\nexpected: {expected:?}\n  actual: {actual:?}\n"
                     );
                 }
             }
@@ -928,11 +1147,11 @@ mod tests_split_iterator {
     #[test]
     fn split_single_quotes() {
         split_ok(&[
-            (r#"''"#, &[r#""#]),
-            (r#"'a'"#, &[r#"a"#]),
-            (r#"'\\'"#, &[r#"\"#]),
-            (r#"' \\ '"#, &[r#" \ "#]),
-            (r#"'#'"#, &[r#"#"#]),
+            (r"''", &[r""]),
+            (r"'a'", &[r"a"]),
+            (r"'\\'", &[r"\"]),
+            (r"' \\ '", &[r" \ "]),
+            (r"'#'", &[r"#"]),
         ]);
     }
 
@@ -954,12 +1173,12 @@ mod tests_split_iterator {
     #[test]
     fn split_unquoted() {
         split_ok(&[
-            (r#"\\|\\&\\;"#, &[r#"\|\&\;"#]),
-            (r#"\\<\\>"#, &[r#"\<\>"#]),
-            (r#"\\(\\)"#, &[r#"\(\)"#]),
-            (r#"\$"#, &[r#"$"#]),
+            (r"\\|\\&\\;", &[r"\|\&\;"]),
+            (r"\\<\\>", &[r"\<\>"]),
+            (r"\\(\\)", &[r"\(\)"]),
+            (r"\$", &[r"$"]),
             (r#"\""#, &[r#"""#]),
-            (r#"\'"#, &[r#"'"#]),
+            (r"\'", &[r"'"]),
             ("\\\n", &[]),
             (" \\\n \n", &[]),
             ("a\nb\nc", &["a", "b", "c"]),
@@ -972,24 +1191,24 @@ mod tests_split_iterator {
     fn split_trailing_backslash() {
         assert_eq!(
             split("\\"),
-            Err(ParseError::InvalidBackslashAtEndOfStringInMinusS {
-                pos: 1,
-                quoting: "Delimiter".into()
-            })
+            Err(EnvError::EnvInvalidBackslashAtEndOfStringInMinusS(
+                1,
+                "Delimiter".into()
+            ))
         );
         assert_eq!(
             split(" \\"),
-            Err(ParseError::InvalidBackslashAtEndOfStringInMinusS {
-                pos: 2,
-                quoting: "Delimiter".into()
-            })
+            Err(EnvError::EnvInvalidBackslashAtEndOfStringInMinusS(
+                2,
+                "Delimiter".into()
+            ))
         );
         assert_eq!(
             split("a\\"),
-            Err(ParseError::InvalidBackslashAtEndOfStringInMinusS {
-                pos: 2,
-                quoting: "Unquoted".into()
-            })
+            Err(EnvError::EnvInvalidBackslashAtEndOfStringInMinusS(
+                2,
+                "Unquoted".into()
+            ))
         );
     }
 
@@ -997,26 +1216,14 @@ mod tests_split_iterator {
     fn split_errors() {
         assert_eq!(
             split("'abc"),
-            Err(ParseError::MissingClosingQuote { pos: 4, c: '\'' })
+            Err(EnvError::EnvMissingClosingQuote(4, '\''))
         );
-        assert_eq!(
-            split("\""),
-            Err(ParseError::MissingClosingQuote { pos: 1, c: '"' })
-        );
-        assert_eq!(
-            split("'\\"),
-            Err(ParseError::MissingClosingQuote { pos: 2, c: '\'' })
-        );
-        assert_eq!(
-            split("'\\"),
-            Err(ParseError::MissingClosingQuote { pos: 2, c: '\'' })
-        );
+        assert_eq!(split("\""), Err(EnvError::EnvMissingClosingQuote(1, '"')));
+        assert_eq!(split("'\\"), Err(EnvError::EnvMissingClosingQuote(2, '\'')));
+        assert_eq!(split("'\\"), Err(EnvError::EnvMissingClosingQuote(2, '\'')));
         assert_eq!(
             split(r#""$""#),
-            Err(ParseError::ParsingOfVariableNameFailed {
-                pos: 2,
-                msg: "Missing variable name".into()
-            }),
+            Err(EnvError::EnvParsingOfMissingVariable(2)),
         );
     }
 
@@ -1024,35 +1231,34 @@ mod tests_split_iterator {
     fn split_error_fail_with_unknown_escape_sequences() {
         assert_eq!(
             split("\\a"),
-            Err(ParseError::InvalidSequenceBackslashXInMinusS { pos: 1, c: 'a' })
+            Err(EnvError::EnvInvalidSequenceBackslashXInMinusS(1, 'a'))
         );
         assert_eq!(
             split("\"\\a\""),
-            Err(ParseError::InvalidSequenceBackslashXInMinusS { pos: 2, c: 'a' })
+            Err(EnvError::EnvInvalidSequenceBackslashXInMinusS(2, 'a'))
         );
         assert_eq!(
             split("'\\a'"),
-            Err(ParseError::InvalidSequenceBackslashXInMinusS { pos: 2, c: 'a' })
+            Err(EnvError::EnvInvalidSequenceBackslashXInMinusS(2, 'a'))
         );
         assert_eq!(
             split(r#""\a""#),
-            Err(ParseError::InvalidSequenceBackslashXInMinusS { pos: 2, c: 'a' })
+            Err(EnvError::EnvInvalidSequenceBackslashXInMinusS(2, 'a'))
         );
         assert_eq!(
-            split(r#"\🦉"#),
-            Err(ParseError::InvalidSequenceBackslashXInMinusS {
-                pos: 1,
-                c: '\u{FFFD}'
-            })
+            split(r"\🦉"),
+            Err(EnvError::EnvInvalidSequenceBackslashXInMinusS(
+                1, '\u{FFFD}'
+            ))
         );
     }
 
     #[test]
     fn split_comments() {
         split_ok(&[
-            (r#" x # comment "#, &["x"]),
-            (r#" w1#w2 "#, &["w1#w2"]),
-            (r#"'not really a # comment'"#, &["not really a # comment"]),
+            (r" x # comment ", &["x"]),
+            (r" w1#w2 ", &["w1#w2"]),
+            (r"'not really a # comment'", &["not really a # comment"]),
             (" a # very long comment \n b # another comment", &["a", "b"]),
         ]);
     }
@@ -1099,8 +1305,8 @@ mod test_raw_string_parser {
 
     use env::{
         native_int_str::{
-            from_native_int_representation, from_native_int_representation_owned,
-            to_native_int_representation, NativeStr,
+            NativeStr, from_native_int_representation, from_native_int_representation_owned,
+            to_native_int_representation,
         },
         string_expander::StringExpander,
         string_parser,
@@ -1364,4 +1570,234 @@ mod test_raw_string_parser {
             NativeStr::new(&input_str).split_at(2).0
         );
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn test_simulation_of_terminal_false() {
+    let scene = TestScenario::new("util");
+
+    let out = scene.ccmd("env").arg("sh").arg("is_a_tty.sh").succeeds();
+    std::assert_eq!(
+        String::from_utf8_lossy(out.stdout()),
+        "stdin is not a tty\nstdout is not a tty\nstderr is not a tty\n"
+    );
+    std::assert_eq!(
+        String::from_utf8_lossy(out.stderr()),
+        "This is an error message.\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_simulation_of_terminal_true() {
+    let scene = TestScenario::new("util");
+
+    let out = scene
+        .ccmd("env")
+        .arg("sh")
+        .arg("is_a_tty.sh")
+        .terminal_simulation(true)
+        .succeeds();
+    std::assert_eq!(
+        String::from_utf8_lossy(out.stdout()),
+        "stdin is a tty\r\nterminal size: 30 80\r\nstdout is a tty\r\nstderr is a tty\r\n"
+    );
+    std::assert_eq!(
+        String::from_utf8_lossy(out.stderr()),
+        "This is an error message.\r\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_simulation_of_terminal_for_stdin_only() {
+    let scene = TestScenario::new("util");
+
+    let out = scene
+        .ccmd("env")
+        .arg("sh")
+        .arg("is_a_tty.sh")
+        .terminal_sim_stdio(TerminalSimulation {
+            stdin: true,
+            stdout: false,
+            stderr: false,
+            ..Default::default()
+        })
+        .succeeds();
+    std::assert_eq!(
+        String::from_utf8_lossy(out.stdout()),
+        "stdin is a tty\nterminal size: 30 80\nstdout is not a tty\nstderr is not a tty\n"
+    );
+    std::assert_eq!(
+        String::from_utf8_lossy(out.stderr()),
+        "This is an error message.\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_simulation_of_terminal_for_stdout_only() {
+    let scene = TestScenario::new("util");
+
+    let out = scene
+        .ccmd("env")
+        .arg("sh")
+        .arg("is_a_tty.sh")
+        .terminal_sim_stdio(TerminalSimulation {
+            stdin: false,
+            stdout: true,
+            stderr: false,
+            ..Default::default()
+        })
+        .succeeds();
+    std::assert_eq!(
+        String::from_utf8_lossy(out.stdout()),
+        "stdin is not a tty\r\nstdout is a tty\r\nstderr is not a tty\r\n"
+    );
+    std::assert_eq!(
+        String::from_utf8_lossy(out.stderr()),
+        "This is an error message.\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_simulation_of_terminal_for_stderr_only() {
+    let scene = TestScenario::new("util");
+
+    let out = scene
+        .ccmd("env")
+        .arg("sh")
+        .arg("is_a_tty.sh")
+        .terminal_sim_stdio(TerminalSimulation {
+            stdin: false,
+            stdout: false,
+            stderr: true,
+            ..Default::default()
+        })
+        .succeeds();
+    std::assert_eq!(
+        String::from_utf8_lossy(out.stdout()),
+        "stdin is not a tty\nstdout is not a tty\nstderr is a tty\n"
+    );
+    std::assert_eq!(
+        String::from_utf8_lossy(out.stderr()),
+        "This is an error message.\r\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_simulation_of_terminal_size_information() {
+    let scene = TestScenario::new("util");
+
+    let out = scene
+        .ccmd("env")
+        .arg("sh")
+        .arg("is_a_tty.sh")
+        .terminal_sim_stdio(TerminalSimulation {
+            size: Some(libc::winsize {
+                ws_col: 40,
+                ws_row: 10,
+                ws_xpixel: 40 * 8,
+                ws_ypixel: 10 * 10,
+            }),
+            stdout: true,
+            stdin: true,
+            stderr: true,
+        })
+        .succeeds();
+    std::assert_eq!(
+        String::from_utf8_lossy(out.stdout()),
+        "stdin is a tty\r\nterminal size: 10 40\r\nstdout is a tty\r\nstderr is a tty\r\n"
+    );
+    std::assert_eq!(
+        String::from_utf8_lossy(out.stderr()),
+        "This is an error message.\r\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_simulation_of_terminal_pty_sends_eot_automatically() {
+    let scene = TestScenario::new("util");
+
+    let mut cmd = scene.ccmd("env");
+    cmd.timeout(std::time::Duration::from_secs(10));
+    cmd.args(&["cat", "-"]);
+    cmd.terminal_simulation(true);
+    let child = cmd.run_no_wait();
+    let out = child.wait().unwrap(); // cat would block if there is no eot
+
+    std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
+    std::assert_eq!(String::from_utf8_lossy(out.stdout()), "\r\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_simulation_of_terminal_pty_pipes_into_data_and_sends_eot_automatically() {
+    let scene = TestScenario::new("util");
+
+    let message = "Hello stdin forwarding!";
+
+    let mut cmd = scene.ccmd("env");
+    cmd.args(&["cat", "-"]);
+    cmd.terminal_simulation(true);
+    cmd.pipe_in(message);
+    let child = cmd.run_no_wait();
+    let out = child.wait().unwrap();
+
+    std::assert_eq!(
+        String::from_utf8_lossy(out.stdout()),
+        format!("{message}\r\n")
+    );
+    std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
+}
+
+#[test]
+#[cfg(not(windows))]
+fn test_emoji_env_vars() {
+    new_ucmd!()
+        .arg("🎯_VAR=Hello 🌍")
+        .arg("printenv")
+        .arg("🎯_VAR")
+        .succeeds()
+        .stdout_contains("Hello 🌍");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_simulation_of_terminal_pty_write_in_data_and_sends_eot_automatically() {
+    let scene = TestScenario::new("util");
+
+    let mut cmd = scene.ccmd("env");
+    cmd.args(&["cat", "-"]);
+    cmd.terminal_simulation(true);
+    let mut child = cmd.run_no_wait();
+    child.write_in("Hello stdin forwarding via write_in!");
+    let out = child.wait().unwrap();
+
+    std::assert_eq!(
+        String::from_utf8_lossy(out.stdout()),
+        "Hello stdin forwarding via write_in!\r\n"
+    );
+    std::assert_eq!(String::from_utf8_lossy(out.stderr()), "");
+}
+
+#[test]
+fn test_env_french() {
+    new_ucmd!()
+        .arg("--verbo")
+        .env("LANG", "fr_FR")
+        .fails()
+        .stderr_contains("erreur : argument inattendu");
+}
+
+#[test]
+fn test_shebang_error() {
+    new_ucmd!()
+        .arg("\'-v \'")
+        .fails()
+        .stderr_contains("use -[v]S to pass options in shebang lines");
 }

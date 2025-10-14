@@ -3,11 +3,15 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-use crate::common::util::{expected_result, TestScenario};
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
+use uutests::unwrap_or_return;
+use uutests::util::{TestScenario, expected_result};
+use uutests::util_name;
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 
 #[test]
@@ -30,7 +34,7 @@ fn test_terse_fs_format() {
     let args = ["-f", "-t", "/proc"];
     let ts = TestScenario::new(util_name!());
     let expected_stdout = unwrap_or_return!(expected_result(&ts, &args)).stdout_move_str();
-    ts.ucmd().args(&args).run().stdout_is(expected_stdout);
+    ts.ucmd().args(&args).succeeds().stdout_is(expected_stdout);
 }
 
 #[test]
@@ -39,7 +43,7 @@ fn test_fs_format() {
     let args = ["-f", "-c", FS_FORMAT_STR, "/dev/shm"];
     let ts = TestScenario::new(util_name!());
     let expected_stdout = unwrap_or_return!(expected_result(&ts, &args)).stdout_move_str();
-    ts.ucmd().args(&args).run().stdout_is(expected_stdout);
+    ts.ucmd().args(&args).succeeds().stdout_is(expected_stdout);
 }
 
 #[cfg(unix)]
@@ -134,6 +138,7 @@ fn test_normal_format() {
 }
 
 #[cfg(unix)]
+#[cfg(not(target_os = "openbsd"))]
 #[test]
 fn test_symlinks() {
     let ts = TestScenario::new(util_name!());
@@ -160,9 +165,7 @@ fn test_symlinks() {
             ts.ucmd().args(&args).succeeds().stdout_is(expected_stdout);
         }
     }
-    if !tested {
-        panic!("No symlink found to test in this environment");
-    }
+    assert!(tested, "No symlink found to test in this environment");
 }
 
 #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
@@ -185,7 +188,69 @@ fn test_char() {
     ];
     let ts = TestScenario::new(util_name!());
     let expected_stdout = unwrap_or_return!(expected_result(&ts, &args)).stdout_move_str();
+    eprintln!("{expected_stdout}");
     ts.ucmd().args(&args).succeeds().stdout_is(expected_stdout);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_printf_mtime_precision() {
+    // TODO Higher precision numbers (`%.3Y`, `%.4Y`, etc.) are
+    // formatted correctly, but we are not precise enough when we do
+    // some `mtime` computations, so we get `.7640` instead of
+    // `.7639`. This can be fixed by being more careful when
+    // transforming the number from `Metadata::mtime_nsec()` to the form
+    // used in rendering.
+    let args = ["-c", "%.0Y %.1Y %.2Y", "/dev/pts/ptmx"];
+    let ts = TestScenario::new(util_name!());
+    let expected_stdout = unwrap_or_return!(expected_result(&ts, &args)).stdout_move_str();
+    eprintln!("{expected_stdout}");
+    ts.ucmd().args(&args).succeeds().stdout_is(expected_stdout);
+}
+
+#[cfg(feature = "touch")]
+#[test]
+fn test_timestamp_format() {
+    let ts = TestScenario::new(util_name!());
+
+    // Create a file with a specific timestamp for testing
+    ts.ccmd("touch")
+        .args(&["-d", "1970-01-01 18:43:33.023456789", "k"])
+        .succeeds()
+        .no_stderr();
+
+    let test_cases = vec![
+        // Basic timestamp formats
+        ("%Y", "67413"),
+        ("%.Y", "67413.023456789"),
+        ("%.1Y", "67413.0"),
+        ("%.3Y", "67413.023"),
+        ("%.6Y", "67413.023456"),
+        ("%.9Y", "67413.023456789"),
+        // Width and padding tests
+        ("%13.6Y", " 67413.023456"),
+        ("%013.6Y", "067413.023456"),
+        ("%-13.6Y", "67413.023456 "),
+        // Longer width/precision combinations
+        ("%18.10Y", "  67413.0234567890"),
+        ("%I18.10Y", "  67413.0234567890"),
+        ("%018.10Y", "0067413.0234567890"),
+        ("%-18.10Y", "67413.0234567890  "),
+    ];
+
+    for (format_str, expected) in test_cases {
+        let result = ts
+            .ucmd()
+            .args(&["-c", format_str, "k"])
+            .succeeds()
+            .stdout_move_str();
+
+        assert_eq!(
+            result,
+            format!("{expected}\n"),
+            "Format '{format_str}' failed.\nExpected: '{expected}'\nGot: '{result}'",
+        );
+    }
 }
 
 #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
@@ -243,7 +308,7 @@ fn test_multi_files() {
 #[test]
 fn test_printf() {
     let args = [
-        "--printf=123%-# 15q\\r\\\"\\\\\\a\\b\\e\\f\\v%+020.23m\\x12\\167\\132\\112\\n",
+        "--printf=123%-# 15q\\r\\\"\\\\\\a\\b\\x1B\\f\\x0B%+020.23m\\x12\\167\\132\\112\\n",
         "/",
     ];
     let ts = TestScenario::new(util_name!());
@@ -257,15 +322,23 @@ fn test_pipe_fifo() {
     let (at, mut ucmd) = at_and_ucmd!();
     at.mkfifo("FIFO");
     ucmd.arg("FIFO")
-        .run()
+        .succeeds()
         .no_stderr()
         .stdout_contains("fifo")
-        .stdout_contains("File: FIFO")
-        .succeeded();
+        .stdout_contains("File: FIFO");
 }
 
+// TODO(#7583): Re-enable on Mac OS X (and possibly other Unix platforms)
 #[test]
-#[cfg(all(unix, not(any(target_os = "android", target_os = "freebsd"))))]
+#[cfg(all(
+    unix,
+    not(any(
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "macos"
+    ))
+))]
 fn test_stdin_pipe_fifo1() {
     // $ echo | stat -
     // File: -
@@ -273,23 +346,22 @@ fn test_stdin_pipe_fifo1() {
     new_ucmd!()
         .arg("-")
         .set_stdin(std::process::Stdio::piped())
-        .run()
+        .succeeds()
         .no_stderr()
         .stdout_contains("fifo")
-        .stdout_contains("File: -")
-        .succeeded();
+        .stdout_contains("File: -");
     new_ucmd!()
         .args(&["-L", "-"])
         .set_stdin(std::process::Stdio::piped())
-        .run()
+        .succeeds()
         .no_stderr()
         .stdout_contains("fifo")
-        .stdout_contains("File: -")
-        .succeeded();
+        .stdout_contains("File: -");
 }
 
+// TODO(#7583): Re-enable on Mac OS X (and maybe Android)
 #[test]
-#[cfg(all(unix, not(target_os = "android")))]
+#[cfg(all(unix, not(any(target_os = "android", target_os = "macos"))))]
 fn test_stdin_pipe_fifo2() {
     // $ stat -
     // File: -
@@ -297,11 +369,10 @@ fn test_stdin_pipe_fifo2() {
     new_ucmd!()
         .arg("-")
         .set_stdin(std::process::Stdio::null())
-        .run()
+        .succeeds()
         .no_stderr()
         .stdout_contains("character special file")
-        .stdout_contains("File: -")
-        .succeeded();
+        .stdout_contains("File: -");
 }
 
 #[test]
@@ -312,15 +383,19 @@ fn test_stdin_with_fs_option() {
         .arg("-f")
         .arg("-")
         .set_stdin(std::process::Stdio::null())
-        .fails()
-        .code_is(1)
+        .fails_with_code(1)
         .stderr_contains("using '-' to denote standard input does not work in file system mode");
 }
 
 #[test]
 #[cfg(all(
     unix,
-    not(any(target_os = "android", target_os = "macos", target_os = "freebsd"))
+    not(any(
+        target_os = "android",
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "openbsd"
+    ))
 ))]
 fn test_stdin_redirect() {
     // $ touch f && stat - < f
@@ -332,11 +407,10 @@ fn test_stdin_redirect() {
     ts.ucmd()
         .arg("-")
         .set_stdin(std::fs::File::open(at.plus("f")).unwrap())
-        .run()
+        .succeeds()
         .no_stderr()
         .stdout_contains("regular empty file")
-        .stdout_contains("File: -")
-        .succeeded();
+        .stdout_contains("File: -");
 }
 
 #[test]
@@ -344,4 +418,152 @@ fn test_without_argument() {
     new_ucmd!()
         .fails()
         .stderr_contains("missing operand\nTry 'stat --help' for more information.");
+}
+
+#[test]
+fn test_quoting_style_locale() {
+    let ts = TestScenario::new(util_name!());
+    let at = &ts.fixtures;
+    at.touch("'");
+    ts.ucmd()
+        .env("QUOTING_STYLE", "locale")
+        .args(&["-c", "%N", "'"])
+        .succeeds()
+        .stdout_only("'\\''\n");
+
+    ts.ucmd()
+        .args(&["-c", "%N", "'"])
+        .succeeds()
+        .stdout_only("\"'\"\n");
+
+    // testing file having "
+    at.touch("\"");
+    ts.ucmd()
+        .args(&["-c", "%N", "\""])
+        .succeeds()
+        .stdout_only("\'\"\'\n");
+}
+
+#[test]
+fn test_printf_octal_1() {
+    let ts = TestScenario::new(util_name!());
+    let expected_stdout = vec![0x0A, 0xFF]; // Newline + byte 255
+    ts.ucmd()
+        .args(&["--printf=\\012\\377", "."])
+        .succeeds()
+        .stdout_is_bytes(expected_stdout);
+}
+
+#[test]
+fn test_printf_octal_2() {
+    let ts = TestScenario::new(util_name!());
+    let expected_stdout = vec![b'.', 0x0A, b'a', 0xFF, b'b'];
+    ts.ucmd()
+        .args(&["--printf=.\\012a\\377b", "."])
+        .succeeds()
+        .stdout_is_bytes(expected_stdout);
+}
+
+#[test]
+fn test_printf_incomplete_hex() {
+    let ts = TestScenario::new(util_name!());
+    ts.ucmd()
+        .args(&["--printf=\\x", "."])
+        .succeeds()
+        .stderr_contains("warning: incomplete hex escape");
+}
+
+#[test]
+fn test_printf_bel_etc() {
+    let ts = TestScenario::new(util_name!());
+    let expected_stdout = vec![0x07, 0x08, 0x0C, 0x0A, 0x0D, 0x09]; // BEL, BS, FF, LF, CR, TAB
+    ts.ucmd()
+        .args(&["--printf=\\a\\b\\f\\n\\r\\t", "."])
+        .succeeds()
+        .stdout_is_bytes(expected_stdout);
+}
+
+#[test]
+fn test_printf_invalid_directive() {
+    let ts = TestScenario::new(util_name!());
+
+    ts.ucmd()
+        .args(&["--printf=%9", "."])
+        .fails_with_code(1)
+        .stderr_contains("'%9': invalid directive");
+
+    ts.ucmd()
+        .args(&["--printf=%9%", "."])
+        .fails_with_code(1)
+        .stderr_contains("'%9%': invalid directive");
+}
+
+#[test]
+#[cfg(feature = "feat_selinux")]
+fn test_stat_selinux() {
+    let ts = TestScenario::new(util_name!());
+    let at = &ts.fixtures;
+    at.touch("f");
+    ts.ucmd()
+        .arg("--printf='%C'")
+        .arg("f")
+        .succeeds()
+        .no_stderr()
+        .stdout_contains("unconfined_u");
+    ts.ucmd()
+        .arg("--printf='%C'")
+        .arg("/bin/")
+        .succeeds()
+        .no_stderr()
+        .stdout_contains("system_u");
+    // Count that we have 4 fields
+    let result = ts.ucmd().arg("--printf='%C'").arg("/bin/").succeeds();
+    let s: Vec<_> = result.stdout_str().split(':').collect();
+    assert!(s.len() == 4);
+}
+
+#[cfg(unix)]
+#[test]
+fn test_mount_point_basic() {
+    let ts = TestScenario::new(util_name!());
+    let result = ts.ucmd().args(&["-c", "%m", "/"]).succeeds();
+    let output = result.stdout_str().trim();
+    assert!(!output.is_empty(), "Mount point should not be empty");
+    assert_eq!(output, "/");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_mount_point_width_and_alignment() {
+    let ts = TestScenario::new(util_name!());
+
+    // Right-aligned, width 15
+    let result = ts.ucmd().args(&["-c", "%15m", "/"]).succeeds();
+    let output = result.stdout_str();
+    assert!(
+        output.trim().len() <= 15 && output.len() >= 15,
+        "Output should be padded to width 15"
+    );
+
+    // Left-aligned, width 15
+    let result = ts.ucmd().args(&["-c", "%-15m", "/"]).succeeds();
+    let output = result.stdout_str();
+
+    assert!(
+        output.trim().len() <= 15 && output.len() >= 15,
+        "Output should be padded to width 15 (left-aligned)"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_mount_point_combined_with_other_specifiers() {
+    let ts = TestScenario::new(util_name!());
+    let result = ts.ucmd().args(&["-c", "%m %n %s", "/bin/sh"]).succeeds();
+    let output = result.stdout_str();
+    let parts: Vec<&str> = output.split_whitespace().collect();
+    assert!(
+        parts.len() >= 3,
+        "Should print mount point, file name, and size"
+    );
 }

@@ -23,14 +23,17 @@ use nix::fcntl::FcntlArg::F_SETFL;
 use nix::fcntl::OFlag;
 use parseargs::Parser;
 use progress::ProgUpdateType;
-use progress::{gen_prog_updater, ProgUpdate, ReadStat, StatusLevel, WriteStat};
+use progress::{ProgUpdate, ReadStat, StatusLevel, WriteStat,gen_prog_updater};
 use uucore::fs::FileExtSeekable;
 use uucore::io::OwnedFileDescriptorOrHandle;
+use uucore::translate;
 
 use std::cmp;
 use std::env;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Stdout, Write};
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use std::os::fd::AsFd;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use std::os::unix::fs::OpenOptionsExt;
 #[cfg(unix)]
@@ -42,30 +45,27 @@ use std::os::unix::{
 use std::os::windows::{fs::MetadataExt, io::AsHandle};
 use std::path::Path;
 use std::sync::atomic::AtomicU8;
-use std::sync::{atomic::Ordering::Relaxed, mpsc, Arc};
+use std::sync::{Arc, atomic::Ordering::Relaxed, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use clap::{crate_version, Arg, Command};
+use clap::{Arg, Command};
 use gcd::Gcd;
 #[cfg(any(target_os = "android", target_os = "linux"))]
 use nix::fcntl::{fcntl, FcntlArg};
 #[cfg(target_os = "linux")]
 use nix::{
     errno::Errno,
-    fcntl::{posix_fadvise, PosixFadviseAdvice},
+    fcntl::{PosixFadviseAdvice, posix_fadvise},
 };
 use uucore::display::Quotable;
-#[cfg(unix)]
-use uucore::error::set_exit_code;
 use uucore::error::{FromIo, UResult};
+#[cfg(unix)]
+use uucore::error::{USimpleError, set_exit_code};
 #[cfg(target_os = "linux")]
 use uucore::show_if_err;
-use uucore::{format_usage, help_about, help_section, help_usage, show_error};
+use uucore::{format_usage, show_error};
 
-const ABOUT: &str = help_about!("dd.md");
-const AFTER_HELP: &str = help_section!("after help", "dd.md");
-const USAGE: &str = help_usage!("dd.md");
 const BUF_INIT_BYTE: u8 = 0xDD;
 
 /// Final settings after parsing
@@ -262,7 +262,8 @@ impl Source {
     /// The length of the data source in number of bytes.
     ///
     /// If it cannot be determined, then this function returns 0.
-    fn len(&self) -> std::io::Result<i64> {
+    fn len(&self) -> io::Result<i64> {
+        #[allow(clippy::match_wildcard_for_single_variants)]
         if let Some(f) = self.get_file() {
             Ok(f.metadata()?.len().try_into().unwrap_or(i64::MAX))
         } else {
@@ -275,7 +276,10 @@ impl Source {
             #[cfg(not(unix))]
             SourceVariant::Stdin(stdin) => match io::copy(&mut stdin.take(n), &mut io::sink()) {
                 Ok(m) if m < n => {
-                    show_error!("'standard input': cannot skip to specified offset");
+                    show_error!(
+                        "{}",
+                        translate!("dd-error-cannot-skip-offset", "file" => "standard input")
+                    );
                     Ok(m)
                 }
                 Ok(m) => Ok(m),
@@ -287,14 +291,20 @@ impl Source {
                     if len < n {
                         // GNU compatibility:
                         // this case prints the stats but sets the exit code to 1
-                        show_error!("'standard input': cannot skip: Invalid argument");
+                        show_error!(
+                            "{}",
+                            translate!("dd-error-cannot-skip-invalid", "file" => "standard input")
+                        );
                         set_exit_code(1);
                         return Ok(len);
                     }
                 }
                 match io::copy(&mut f.take(n), &mut io::sink()) {
                     Ok(m) if m < n => {
-                        show_error!("'standard input': cannot skip to specified offset");
+                        show_error!(
+                            "{}",
+                            translate!("dd-error-cannot-skip-offset", "file" => "standard input")
+                        );
                         Ok(m)
                     }
                     Ok(m) => Ok(m),
@@ -317,7 +327,7 @@ impl Source {
     fn discard_cache(&self, offset: libc::off_t, len: libc::off_t) -> nix::Result<()> {
         if let Some(f) = self.get_file() {
             let advice = PosixFadviseAdvice::POSIX_FADV_DONTNEED;
-            posix_fadvise(f.as_raw_fd(), offset, len, advice)
+            posix_fadvise(f.as_fd(), offset, len, advice)
         } else {
             Err(Errno::ESPIPE) // "Illegal seek"
         }
@@ -378,13 +388,13 @@ impl<'a> Input<'a> {
         let mut src = Source::stdin_as_file();
         #[cfg(unix)]
         if let SourceVariant::StdinFile(f) = &src.variant {
-            // GNU compatibility:
-            // this will check whether stdin points to a folder or not
-            if f.metadata()?.is_file() && settings.iflags.directory {
-                show_error!("standard input: not a directory");
-                return Err(1.into());
+            if settings.iflags.directory && !f.metadata()?.is_dir() {
+                return Err(USimpleError::new(
+                    1,
+                    translate!("dd-error-not-directory", "file" => "standard input"),
+                ));
             }
-        };
+        }
         if settings.skip > 0 {
             src.skip(settings.skip)?;
         }
@@ -402,8 +412,9 @@ impl<'a> Input<'a> {
                 opts.custom_flags(libc_flags);
             }
 
-            opts.open(filename)
-                .map_err_context(|| format!("failed to open {}", filename.quote()))?
+            opts.open(filename).map_err_context(
+                || translate!("dd-error-failed-to-open", "path" => filename.quote()),
+            )?
         };
 
         let mut src = Source {
@@ -461,14 +472,10 @@ fn make_linux_iflags(iflags: &IFlags) -> Option<libc::c_int> {
         flag |= libc::O_SYNC;
     }
 
-    if flag == 0 {
-        None
-    } else {
-        Some(flag)
-    }
+    if flag == 0 { None } else { Some(flag) }
 }
 
-impl<'a> Read for Input<'a> {
+impl Read for Input<'_> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut base_idx = 0;
         let target_len = buf.len();
@@ -510,7 +517,7 @@ impl<'a> Read for Input<'a> {
                     }
                 }
                 Ok(len) => return Ok(len),
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => (),
                 Err(_) if self.settings.iconv.noerror => return Ok(base_idx),
                 Err(e) => return Err(e),
             }
@@ -518,7 +525,7 @@ impl<'a> Read for Input<'a> {
     }
 }
 
-impl<'a> Input<'a> {
+impl Input<'_> {
     /// Discard the system file cache for the given portion of the input.
     ///
     /// `offset` and `len` specify a contiguous portion of the input.
@@ -526,14 +533,15 @@ impl<'a> Input<'a> {
     /// the input file is no longer needed. If not possible, then this
     /// function prints an error message to stderr and sets the exit
     /// status code to 1.
-    #[allow(unused_variables)]
+    #[cfg_attr(not(target_os = "linux"), allow(clippy::unused_self, unused_variables))]
     fn discard_cache(&self, offset: libc::off_t, len: libc::off_t) {
         #[cfg(target_os = "linux")]
         {
-            show_if_err!(self
-                .src
-                .discard_cache(offset, len)
-                .map_err_context(|| "failed to discard cache for: 'standard input'".to_string()));
+            show_if_err!(
+                self.src
+                    .discard_cache(offset, len)
+                    .map_err_context(|| translate!("dd-error-failed-discard-cache-input"))
+            );
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -545,7 +553,7 @@ impl<'a> Input<'a> {
     /// Fills a given buffer.
     /// Reads in increments of 'self.ibs'.
     /// The start of each ibs-sized read follows the previous one.
-    fn fill_consecutive(&mut self, buf: &mut Vec<u8>) -> std::io::Result<ReadStat> {
+    fn fill_consecutive(&mut self, buf: &mut Vec<u8>) -> io::Result<ReadStat> {
         let mut reads_complete = 0;
         let mut reads_partial = 0;
         let mut bytes_total = 0;
@@ -576,7 +584,7 @@ impl<'a> Input<'a> {
     /// Fills a given buffer.
     /// Reads in increments of 'self.ibs'.
     /// The start of each ibs-sized read is aligned to multiples of ibs; remaining space is filled with the 'pad' byte.
-    fn fill_blocks(&mut self, buf: &mut Vec<u8>, pad: u8) -> std::io::Result<ReadStat> {
+    fn fill_blocks(&mut self, buf: &mut Vec<u8>, pad: u8) -> io::Result<ReadStat> {
         let mut reads_complete = 0;
         let mut reads_partial = 0;
         let mut base_idx = 0;
@@ -689,12 +697,15 @@ impl Dest {
                     if len < n {
                         // GNU compatibility:
                         // this case prints the stats but sets the exit code to 1
-                        show_error!("'standard output': cannot seek: Invalid argument");
+                        show_error!(
+                            "{}",
+                            translate!("dd-error-cannot-seek-invalid", "output" => "standard output")
+                        );
                         set_exit_code(1);
                         return Ok(len);
                     }
                 }
-                f.seek(io::SeekFrom::Current(n.try_into().unwrap()))
+                f.seek(SeekFrom::Current(n.try_into().unwrap()))
             }
             #[cfg(unix)]
             Self::Fifo(f) => {
@@ -708,6 +719,7 @@ impl Dest {
 
     /// Truncate the underlying file to the current stream position, if possible.
     fn truncate(&mut self) -> io::Result<()> {
+        #[allow(clippy::match_wildcard_for_single_variants)]
         match self {
             Self::File(f, _) => {
                 let pos = f.stream_position()?;
@@ -728,7 +740,7 @@ impl Dest {
         match self {
             Self::File(f, _) => {
                 let advice = PosixFadviseAdvice::POSIX_FADV_DONTNEED;
-                posix_fadvise(f.as_raw_fd(), offset, len, advice)
+                posix_fadvise(f.as_fd(), offset, len, advice)
             }
             _ => Err(Errno::ESPIPE), // "Illegal seek"
         }
@@ -737,7 +749,8 @@ impl Dest {
     /// The length of the data destination in number of bytes.
     ///
     /// If it cannot be determined, then this function returns 0.
-    fn len(&self) -> std::io::Result<i64> {
+    fn len(&self) -> io::Result<i64> {
+        #[allow(clippy::match_wildcard_for_single_variants)]
         match self {
             Self::File(f, _) => Ok(f.metadata()?.len().try_into().unwrap_or(i64::MAX)),
             _ => Ok(0),
@@ -768,7 +781,7 @@ impl Write for Dest {
                     .len()
                     .try_into()
                     .expect("Internal dd Error: Seek amount greater than signed 64-bit integer");
-                f.seek(io::SeekFrom::Current(seek_amt))?;
+                f.seek(SeekFrom::Current(seek_amt))?;
                 Ok(buf.len())
             }
             Self::File(f, _) => f.write(buf),
@@ -811,7 +824,7 @@ impl<'a> Output<'a> {
     fn new_stdout(settings: &'a Settings) -> UResult<Self> {
         let mut dst = Dest::Stdout(io::stdout());
         dst.seek(settings.seek)
-            .map_err_context(|| "write error".to_string())?;
+            .map_err_context(|| translate!("dd-error-write-error"))?;
         Ok(Self { dst, settings })
     }
 
@@ -832,8 +845,9 @@ impl<'a> Output<'a> {
             opts.open(path)
         }
 
-        let dst = open_dst(filename, &settings.oconv, &settings.oflags)
-            .map_err_context(|| format!("failed to open {}", filename.quote()))?;
+        let dst = open_dst(filename, &settings.oconv, &settings.oflags).map_err_context(
+            || translate!("dd-error-failed-to-open", "path" => filename.quote()),
+        )?;
 
         // Seek to the index in the output file, truncating if requested.
         //
@@ -858,7 +872,7 @@ impl<'a> Output<'a> {
         };
         let mut dst = Dest::File(dst, density);
         dst.seek(settings.seek)
-            .map_err_context(|| "failed to seek in output file".to_string())?;
+            .map_err_context(|| translate!("dd-error-failed-to-seek"))?;
         Ok(Self { dst, settings })
     }
 
@@ -872,7 +886,7 @@ impl<'a> Output<'a> {
         #[cfg(any(target_os = "linux", target_os = "android"))]
         if let Some(libc_flags) = make_linux_oflags(&settings.oflags) {
             nix::fcntl::fcntl(
-                fx.as_raw().as_raw_fd(),
+                fx.as_raw().as_fd(),
                 F_SETFL(OFlag::from_bits_retain(libc_flags)),
             )?;
         }
@@ -916,16 +930,17 @@ impl<'a> Output<'a> {
     /// the output file is no longer needed. If not possible, then
     /// this function prints an error message to stderr and sets the
     /// exit status code to 1.
-    #[allow(unused_variables)]
+    #[cfg_attr(not(target_os = "linux"), allow(clippy::unused_self, unused_variables))]
     fn discard_cache(&self, offset: libc::off_t, len: libc::off_t) {
         #[cfg(target_os = "linux")]
         {
-            show_if_err!(self
-                .dst
-                .discard_cache(offset, len)
-                .map_err_context(|| "failed to discard cache for: 'standard output'".to_string()));
+            show_if_err!(
+                self.dst
+                    .discard_cache(offset, len)
+                    .map_err_context(|| { translate!("dd-error-failed-discard-cache-output") })
+            );
         }
-        #[cfg(target_os = "linux")]
+        #[cfg(not(target_os = "linux"))]
         {
             // TODO Is there a way to discard filesystem cache on
             // these other operating systems?
@@ -950,7 +965,7 @@ impl<'a> Output<'a> {
                         return Ok(base_idx);
                     }
                 }
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => (),
                 Err(e) => return Err(e),
             }
         }
@@ -993,7 +1008,7 @@ impl<'a> Output<'a> {
     }
 
     /// Flush the output to disk, if configured to do so.
-    fn sync(&mut self) -> std::io::Result<()> {
+    fn sync(&mut self) -> io::Result<()> {
         if self.settings.oconv.fsync {
             self.dst.fsync()
         } else if self.settings.oconv.fdatasync {
@@ -1005,7 +1020,7 @@ impl<'a> Output<'a> {
     }
 
     /// Truncate the underlying file to the current stream position, if possible.
-    fn truncate(&mut self) -> std::io::Result<()> {
+    fn truncate(&mut self) -> io::Result<()> {
         self.dst.truncate()
     }
 }
@@ -1023,7 +1038,7 @@ enum BlockWriter<'a> {
     Unbuffered(Output<'a>),
 }
 
-impl<'a> BlockWriter<'a> {
+impl BlockWriter<'_> {
     fn discard_cache(&self, offset: libc::off_t, len: libc::off_t) {
         match self {
             Self::Unbuffered(o) => o.discard_cache(offset, len),
@@ -1059,7 +1074,7 @@ impl<'a> BlockWriter<'a> {
         };
     }
 
-    fn write_blocks(&mut self, buf: &[u8]) -> std::io::Result<WriteStat> {
+    fn write_blocks(&mut self, buf: &[u8]) -> io::Result<WriteStat> {
         match self {
             Self::Unbuffered(o) => o.write_blocks(buf),
             Self::Buffered(o) => o.write_blocks(buf),
@@ -1069,7 +1084,7 @@ impl<'a> BlockWriter<'a> {
 
 /// depending on the command line arguments, this function
 /// informs the OS to flush/discard the caches for input and/or output file.
-fn flush_caches_full_length(i: &Input, o: &Output) -> std::io::Result<()> {
+fn flush_caches_full_length(i: &Input, o: &Output) -> io::Result<()> {
     // TODO Better error handling for overflowing `len`.
     if i.settings.iflags.nocache {
         let offset = 0;
@@ -1159,7 +1174,7 @@ fn dd_copy(mut i: Input, o: Output) -> UResult<()> {
             output_thread,
             truncate,
         );
-    };
+    }
 
     // Create a common buffer with a capacity of the block size.
     // This is the max size needed.
@@ -1179,7 +1194,7 @@ fn dd_copy(mut i: Input, o: Output) -> UResult<()> {
     #[cfg(target_os = "linux")]
     if let Err(e) = &signal_handler {
         if Some(StatusLevel::None) != i.settings.status {
-            eprintln!("Internal dd Warning: Unable to register signal handler \n\t{e}");
+            eprintln!("{}\n\t{e}", translate!("dd-warning-signal-handler"));
         }
     }
 
@@ -1206,13 +1221,13 @@ fn dd_copy(mut i: Input, o: Output) -> UResult<()> {
     // blocks to this output. Read/write statistics are updated on
     // each iteration and cumulative statistics are reported to
     // the progress reporting thread.
-    while below_count_limit(&i.settings.count, &rstat) {
+    while below_count_limit(i.settings.count, &rstat) {
         // Read a block from the input then write the block to the output.
         //
         // As an optimization, make an educated guess about the
         // best buffer size for reading based on the number of
         // blocks already read and the number of blocks remaining.
-        let loop_bsize = calc_loop_bsize(&i.settings.count, &rstat, &wstat, i.settings.ibs, bsize);
+        let loop_bsize = calc_loop_bsize(i.settings.count, &rstat, &wstat, i.settings.ibs, bsize);
         let rstat_update = read_helper(&mut i, &mut buf, loop_bsize)
             .map_err_context(|| format!("reading, ls: {loop_bsize}, rbt: {}", rstat.bytes_total))?;
         if rstat_update.is_empty() {
@@ -1260,7 +1275,7 @@ fn dd_copy(mut i: Input, o: Output) -> UResult<()> {
         wstat += wstat_update;
         match alarm.get_trigger() {
             ALARM_TRIGGER_NONE => {}
-            t @ ALARM_TRIGGER_TIMER | t @ ALARM_TRIGGER_SIGNAL => {
+            t @ (ALARM_TRIGGER_TIMER | ALARM_TRIGGER_SIGNAL) => {
                 let tp = match t {
                     ALARM_TRIGGER_TIMER => ProgUpdateType::Periodic,
                     _ => ProgUpdateType::Signal,
@@ -1343,11 +1358,7 @@ fn make_linux_oflags(oflags: &OFlags) -> Option<libc::c_int> {
         flag |= libc::O_SYNC;
     }
 
-    if flag == 0 {
-        None
-    } else {
-        Some(flag)
-    }
+    if flag == 0 { None } else { Some(flag) }
 }
 
 /// Read from an input (that is, a source of bytes) into the given buffer.
@@ -1356,7 +1367,7 @@ fn make_linux_oflags(oflags: &OFlags) -> Option<libc::c_int> {
 /// `conv=swab` or `conv=block` command-line arguments. This function
 /// mutates the `buf` argument in-place. The returned [`ReadStat`]
 /// indicates how many blocks were read.
-fn read_helper(i: &mut Input, buf: &mut Vec<u8>, bsize: usize) -> std::io::Result<ReadStat> {
+fn read_helper(i: &mut Input, buf: &mut Vec<u8>, bsize: usize) -> io::Result<ReadStat> {
     // Local Helper Fns -------------------------------------------------
     fn perform_swab(buf: &mut [u8]) {
         for base in (1..buf.len()).step_by(2) {
@@ -1403,10 +1414,10 @@ fn calc_bsize(ibs: usize, obs: usize) -> usize {
     (ibs / gcd) * obs
 }
 
-// Calculate the buffer size appropriate for this loop iteration, respecting
-// a count=N if present.
+/// Calculate the buffer size appropriate for this loop iteration, respecting
+/// a `count=N` if present.
 fn calc_loop_bsize(
-    count: &Option<Num>,
+    count: Option<Num>,
     rstat: &ReadStat,
     wstat: &WriteStat,
     ibs: usize,
@@ -1419,7 +1430,7 @@ fn calc_loop_bsize(
             cmp::min(ideal_bsize as u64, rremain * ibs as u64) as usize
         }
         Some(Num::Bytes(bmax)) => {
-            let bmax: u128 = (*bmax).into();
+            let bmax: u128 = bmax.into();
             let bremain: u128 = bmax - wstat.bytes_total;
             cmp::min(ideal_bsize as u128, bremain) as usize
         }
@@ -1427,12 +1438,12 @@ fn calc_loop_bsize(
     }
 }
 
-// Decide if the current progress is below a count=N limit or return
-// true if no such limit is set.
-fn below_count_limit(count: &Option<Num>, rstat: &ReadStat) -> bool {
+/// Decide if the current progress is below a `count=N` limit or return
+/// `true` if no such limit is set.
+fn below_count_limit(count: Option<Num>, rstat: &ReadStat) -> bool {
     match count {
-        Some(Num::Blocks(n)) => rstat.reads_complete + rstat.reads_partial < *n,
-        Some(Num::Bytes(n)) => rstat.bytes_total < *n,
+        Some(Num::Blocks(n)) => rstat.reads_complete + rstat.reads_partial < n,
+        Some(Num::Bytes(n)) => rstat.bytes_total < n,
         None => true,
     }
 }
@@ -1488,14 +1499,12 @@ fn is_fifo(filename: &str) -> bool {
 
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-    let matches = uu_app().try_get_matches_from(args)?;
+    let matches = uucore::clap_localization::handle_clap_result(uu_app(), args)?;
 
     let settings: Settings = Parser::new().parse(
-        &matches
+        matches
             .get_many::<String>(options::OPERANDS)
-            .unwrap_or_default()
-            .map(|s| s.as_ref())
-            .collect::<Vec<_>>()[..],
+            .unwrap_or_default(),
     )?;
 
     let i = match settings.infile {
@@ -1516,17 +1525,18 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
 
 pub fn uu_app() -> Command {
     Command::new(uucore::util_name())
-        .version(crate_version!())
-        .about(ABOUT)
-        .override_usage(format_usage(USAGE))
-        .after_help(AFTER_HELP)
+        .version(uucore::crate_version!())
+        .help_template(uucore::localized_help_template(uucore::util_name()))
+        .about(translate!("dd-about"))
+        .override_usage(format_usage(&translate!("dd-usage")))
+        .after_help(translate!("dd-after-help"))
         .infer_long_args(true)
         .arg(Arg::new(options::OPERANDS).num_args(1..))
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{calc_bsize, Output, Parser};
+    use crate::{Output, Parser, calc_bsize};
 
     use std::path::Path;
 
@@ -1534,8 +1544,8 @@ mod tests {
     fn bsize_test_primes() {
         let (n, m) = (7901, 7919);
         let res = calc_bsize(n, m);
-        assert!(res % n == 0);
-        assert!(res % m == 0);
+        assert_eq!(res % n, 0);
+        assert_eq!(res % m, 0);
 
         assert_eq!(res, n * m);
     }
@@ -1544,8 +1554,8 @@ mod tests {
     fn bsize_test_rel_prime_obs_greater() {
         let (n, m) = (7 * 5119, 13 * 5119);
         let res = calc_bsize(n, m);
-        assert!(res % n == 0);
-        assert!(res % m == 0);
+        assert_eq!(res % n, 0);
+        assert_eq!(res % m, 0);
 
         assert_eq!(res, 7 * 13 * 5119);
     }
@@ -1554,8 +1564,8 @@ mod tests {
     fn bsize_test_rel_prime_ibs_greater() {
         let (n, m) = (13 * 5119, 7 * 5119);
         let res = calc_bsize(n, m);
-        assert!(res % n == 0);
-        assert!(res % m == 0);
+        assert_eq!(res % n, 0);
+        assert_eq!(res % m, 0);
 
         assert_eq!(res, 7 * 13 * 5119);
     }
@@ -1564,8 +1574,8 @@ mod tests {
     fn bsize_test_3fac_rel_prime() {
         let (n, m) = (11 * 13 * 5119, 7 * 11 * 5119);
         let res = calc_bsize(n, m);
-        assert!(res % n == 0);
-        assert!(res % m == 0);
+        assert_eq!(res % n, 0);
+        assert_eq!(res % m, 0);
 
         assert_eq!(res, 7 * 11 * 13 * 5119);
     }
@@ -1574,8 +1584,8 @@ mod tests {
     fn bsize_test_ibs_greater() {
         let (n, m) = (512 * 1024, 256 * 1024);
         let res = calc_bsize(n, m);
-        assert!(res % n == 0);
-        assert!(res % m == 0);
+        assert_eq!(res % n, 0);
+        assert_eq!(res % m, 0);
 
         assert_eq!(res, n);
     }
@@ -1584,8 +1594,8 @@ mod tests {
     fn bsize_test_obs_greater() {
         let (n, m) = (256 * 1024, 512 * 1024);
         let res = calc_bsize(n, m);
-        assert!(res % n == 0);
-        assert!(res % m == 0);
+        assert_eq!(res % n, 0);
+        assert_eq!(res % m, 0);
 
         assert_eq!(res, m);
     }
@@ -1594,8 +1604,8 @@ mod tests {
     fn bsize_test_bs_eq() {
         let (n, m) = (1024, 1024);
         let res = calc_bsize(n, m);
-        assert!(res % n == 0);
-        assert!(res % m == 0);
+        assert_eq!(res % n, 0);
+        assert_eq!(res % m, 0);
 
         assert_eq!(res, m);
     }

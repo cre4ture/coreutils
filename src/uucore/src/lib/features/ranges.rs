@@ -5,14 +5,20 @@
 
 // spell-checker:ignore (ToDO) inval
 
+//! A module for handling ranges of values.
+
 use std::cmp::max;
 use std::str::FromStr;
 
 use crate::display::Quotable;
 
+/// A range of values
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Range {
+    /// The lower bound of the range
     pub low: usize,
+
+    /// The upper bound of the range
     pub high: usize,
 }
 
@@ -72,19 +78,20 @@ impl FromStr for Range {
 }
 
 impl Range {
+    /// Parse a list of ranges separated by commas and/or spaces
     pub fn from_list(list: &str) -> Result<Vec<Self>, String> {
         let mut ranges = Vec::new();
 
         for item in list.split(&[',', ' ']) {
             let range_item = FromStr::from_str(item)
-                .map_err(|e| format!("range {} was invalid: {}", item.quote(), e))?;
+                .map_err(|e| format!("range {} was invalid: {e}", item.quote()))?;
             ranges.push(range_item);
         }
 
         Ok(Self::merge(ranges))
     }
 
-    /// Merge any overlapping ranges
+    /// Merge any overlapping ranges. Adjacent ranges are *NOT* merged.
     ///
     /// Is guaranteed to return only disjoint ranges in a sorted order.
     fn merge(mut ranges: Vec<Self>) -> Vec<Self> {
@@ -94,10 +101,7 @@ impl Range {
         for i in 0..ranges.len() {
             let j = i + 1;
 
-            // The +1 is a small optimization, because we can merge adjacent Ranges.
-            // For example (1,3) and (4,6), because in the integers, there are no
-            // possible values between 3 and 4, this is equivalent to (1,6).
-            while j < ranges.len() && ranges[j].low <= ranges[i].high + 1 {
+            while j < ranges.len() && ranges[j].low <= ranges[i].high {
                 let j_high = ranges.remove(j).high;
                 ranges[i].high = max(ranges[i].high, j_high);
             }
@@ -106,6 +110,7 @@ impl Range {
     }
 }
 
+/// Calculate the complement of the given ranges.
 pub fn complement(ranges: &[Range]) -> Vec<Range> {
     let mut prev_high = 0;
     let mut complements = Vec::with_capacity(ranges.len() + 1);
@@ -160,7 +165,7 @@ pub fn contain(ranges: &[Range], n: usize) -> bool {
 
 #[cfg(test)]
 mod test {
-    use super::{complement, Range};
+    use super::{Range, complement};
     use std::str::FromStr;
 
     fn m(a: Vec<Range>, b: &[Range]) {
@@ -208,8 +213,8 @@ mod test {
             &[r(10, 40), r(50, 60)],
         );
 
-        // Merge adjacent ranges
-        m(vec![r(1, 3), r(4, 6)], &[r(1, 6)]);
+        // Don't merge adjacent ranges
+        m(vec![r(1, 3), r(4, 6)], &[r(1, 3), r(4, 6)]);
     }
 
     #[test]

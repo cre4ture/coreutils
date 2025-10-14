@@ -2,12 +2,31 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-// spell-checker:ignore aabbaa aabbcc aabc abbb abbbcddd abcc abcdefabcdef abcdefghijk abcdefghijklmn abcdefghijklmnop ABCDEFGHIJKLMNOPQRS abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ ABCDEFZZ abcxyz ABCXYZ abcxyzabcxyz ABCXYZABCXYZ acbdef alnum amzamz AMZXAMZ bbbd cclass cefgm cntrl compl dabcdef dncase Gzabcdefg PQRST upcase wxyzz xdigit XXXYYY xycde xyyye xyyz xyzzzzxyzzzz ZABCDEF Zamz Cdefghijkl Cdefghijklmn
-use crate::common::util::TestScenario;
+// spell-checker:ignore aabbaa aabbcc aabc abbb abbbcddd abcc abcdefabcdef abcdefghijk abcdefghijklmn abcdefghijklmnop ABCDEFGHIJKLMNOPQRS abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ ABCDEFZZ abcxyz ABCXYZ abcxyzabcxyz ABCXYZABCXYZ acbdef alnum amzamz AMZXAMZ bbbd cclass cefgm cntrl compl dabcdef dncase Gzabcdefg PQRST upcase wxyzz xdigit XXXYYY xycde xyyye xyyz xyzzzzxyzzzz ZABCDEF Zamz Cdefghijkl Cdefghijklmn asdfqqwweerr qwerr asdfqwer qwer aassddffqwer asdfqwer
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
+
+#[cfg(unix)]
+use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
+}
+
+#[test]
+fn test_invalid_input() {
+    new_ucmd!()
+        .args(&["1", "1", "<", "."])
+        .fails_with_code(1)
+        .stderr_contains("tr: extra operand '<'");
+    #[cfg(unix)]
+    new_ucmd!()
+        .args(&["1", "1"])
+        // will test "tr 1 1 < ."
+        .set_stdin(std::process::Stdio::from(std::fs::File::open(".").unwrap()))
+        .fails_with_code(1)
+        .stderr_contains("tr: read error: Is a directory");
 }
 
 #[test]
@@ -15,7 +34,7 @@ fn test_to_upper() {
     new_ucmd!()
         .args(&["a-z", "A-Z"])
         .pipe_in("!abcd!")
-        .run()
+        .succeeds()
         .stdout_is("!ABCD!");
 }
 
@@ -24,7 +43,7 @@ fn test_small_set2() {
     new_ucmd!()
         .args(&["0-9", "X"])
         .pipe_in("@0123456789")
-        .run()
+        .succeeds()
         .stdout_is("@XXXXXXXXXX");
 }
 
@@ -42,7 +61,7 @@ fn test_delete() {
     new_ucmd!()
         .args(&["-d", "a-z"])
         .pipe_in("aBcD")
-        .run()
+        .succeeds()
         .stdout_is("BD");
 }
 
@@ -77,7 +96,7 @@ fn test_delete_complement() {
     new_ucmd!()
         .args(&["-d", "-c", "a-z"])
         .pipe_in("aBcD")
-        .run()
+        .succeeds()
         .stdout_is("ac");
 }
 
@@ -100,7 +119,7 @@ fn test_complement1() {
     new_ucmd!()
         .args(&["-c", "a", "X"])
         .pipe_in("ab")
-        .run()
+        .succeeds()
         .stdout_is("aX");
 }
 
@@ -117,7 +136,7 @@ fn test_complement2() {
     new_ucmd!()
         .args(&["-c", "0-9", "x"])
         .pipe_in("Phone: 01234 567890")
-        .run()
+        .succeeds()
         .stdout_is("xxxxxxx01234x567890");
 }
 
@@ -126,7 +145,7 @@ fn test_complement3() {
     new_ucmd!()
         .args(&["-c", "abcdefgh", "123"])
         .pipe_in("the cat and the bat")
-        .run()
+        .succeeds()
         .stdout_is("3he3ca33a3d33he3ba3");
 }
 
@@ -137,7 +156,7 @@ fn test_complement4() {
     new_ucmd!()
         .args(&["-c", "0-@", "*-~"])
         .pipe_in("0x1y2z3")
-        .run()
+        .succeeds()
         .stdout_is("0~1~2~3");
 }
 
@@ -148,7 +167,7 @@ fn test_complement5() {
     new_ucmd!()
         .args(&["-c", r"\0-@", "*-~"])
         .pipe_in("0x1y2z3")
-        .run()
+        .succeeds()
         .stdout_is("0a1b2c3");
 }
 
@@ -218,7 +237,7 @@ fn test_squeeze_complement_two_sets() {
     new_ucmd!()
         .args(&["-sc", "a", "_"])
         .pipe_in("test a aa with 3 ___ spaaaces +++") // spell-checker:disable-line
-        .run()
+        .succeeds()
         .stdout_is("_a_aa_aaa_");
 }
 
@@ -227,7 +246,7 @@ fn test_translate_and_squeeze() {
     new_ucmd!()
         .args(&["-s", "x", "y"])
         .pipe_in("xx")
-        .run()
+        .succeeds()
         .stdout_is("y");
 }
 
@@ -236,7 +255,7 @@ fn test_translate_and_squeeze_multiple_lines() {
     new_ucmd!()
         .args(&["-s", "x", "y"])
         .pipe_in("xxaax\nxaaxx") // spell-checker:disable-line
-        .run()
+        .succeeds()
         .stdout_is("yaay\nyaay"); // spell-checker:disable-line
 }
 
@@ -254,7 +273,7 @@ fn test_delete_and_squeeze() {
     new_ucmd!()
         .args(&["-ds", "a-z", "A-Z"])
         .pipe_in("abBcB")
-        .run()
+        .succeeds()
         .stdout_is("B");
 }
 
@@ -263,7 +282,7 @@ fn test_delete_and_squeeze_complement() {
     new_ucmd!()
         .args(&["-dsc", "a-z", "A-Z"])
         .pipe_in("abBcB")
-        .run()
+        .succeeds()
         .stdout_is("abc");
 }
 
@@ -281,7 +300,7 @@ fn test_set1_longer_than_set2() {
     new_ucmd!()
         .args(&["abc", "xy"])
         .pipe_in("abcde")
-        .run()
+        .succeeds()
         .stdout_is("xyyde"); // spell-checker:disable-line
 }
 
@@ -290,7 +309,7 @@ fn test_set1_shorter_than_set2() {
     new_ucmd!()
         .args(&["ab", "xyz"])
         .pipe_in("abcde")
-        .run()
+        .succeeds()
         .stdout_is("xycde");
 }
 
@@ -318,7 +337,7 @@ fn test_truncate_with_set1_shorter_than_set2() {
     new_ucmd!()
         .args(&["-t", "ab", "xyz"])
         .pipe_in("abcde")
-        .run()
+        .succeeds()
         .stdout_is("xycde");
 }
 
@@ -638,7 +657,6 @@ fn check_against_gnu_tr_tests_d() {
 }
 
 #[test]
-#[ignore = "I cannot tell if this means that tr preserve the octal representation?"]
 fn check_against_gnu_tr_tests_e() {
     // ['e', qw(-s '[\0-\5]'), {IN=>"\0\0a\1\1b\2\2\2c\3\3\3d\4\4\4\4e\5\5"}, {OUT=>"\0a\1b\2c\3d\4e\5"}],
     new_ucmd!()
@@ -1024,7 +1042,8 @@ fn check_against_gnu_tr_tests_bs_055() {
 }
 
 #[test]
-#[ignore = "Failing in Windows because it will not separate '\' and 'x' as separate arguments"]
+// Fails on Windows because it will not separate '\' and 'x' as separate arguments
+#[cfg(unix)]
 fn check_against_gnu_tr_tests_bs_at_end() {
     // ['bs-at-end', qw('\\' x), {IN=>"\\"}, {OUT=>'x'},
     //  {ERR=>"$prog: warning: an unescaped backslash at end of "
@@ -1038,7 +1057,6 @@ fn check_against_gnu_tr_tests_bs_at_end() {
 }
 
 #[test]
-#[ignore = "not sure why GNU bails here. `[Y*]` should be able to generate all the mapping"]
 fn check_against_gnu_tr_tests_ross_0a() {
     // # From Ross
     // ['ross-0a', qw(-cs '[:upper:]' 'X[Y*]'), {IN=>''}, {OUT=>''}, {EXIT=>1},
@@ -1051,7 +1069,6 @@ fn check_against_gnu_tr_tests_ross_0a() {
 }
 
 #[test]
-#[ignore = "not sure why GNU bails here. `[Y*]` should be able to generate all the mapping"]
 fn check_against_gnu_tr_tests_ross_0b() {
     // ['ross-0b', qw(-cs '[:cntrl:]' 'X[Y*]'), {IN=>''}, {OUT=>''}, {EXIT=>1},
     //  {ERR=>$map_all_to_1}],
@@ -1059,7 +1076,7 @@ fn check_against_gnu_tr_tests_ross_0b() {
         .args(&["-cs", "[:cntrl:]", "X[Y*]"])
         .pipe_in("")
         .fails()
-        .stderr_is("tr: when translating with complemented character classes,\nstring2 must map all characters in the domain to one");
+        .stderr_is("tr: when translating with complemented character classes,\nstring2 must map all characters in the domain to one\n");
 }
 
 #[test]
@@ -1149,6 +1166,15 @@ fn check_against_gnu_tr_tests_empty_eq() {
 }
 
 #[test]
+fn check_too_many_chars_in_eq() {
+    new_ucmd!()
+        .args(&["-d", "[=aa=]"])
+        .pipe_in("")
+        .fails()
+        .stderr_contains("aa: equivalence class operand must be a single character\n");
+}
+
+#[test]
 fn check_against_gnu_tr_tests_empty_cc() {
     // ['empty-cc', qw('[::]' x), {IN=>''}, {OUT=>''}, {EXIT=>1},
     //  {ERR=>"$prog: missing character class name '[::]'\n"}],
@@ -1230,7 +1256,6 @@ fn check_against_gnu_tr_tests_repeat_x_c() {
 }
 
 #[test]
-#[ignore = "I think either clap-rs or uutils is parsing the '-H' as an argument..."]
 fn check_against_gnu_tr_tests_fowler_1() {
     // # From Glenn Fowler.
     // ['fowler-1', qw(ah -H), {IN=>'aha'}, {OUT=>'-H-'}],
@@ -1312,4 +1337,250 @@ fn check_regression_class_blank() {
         .succeeds()
         .no_stderr()
         .stdout_only("a12b");
+}
+
+// Check regression found in https://github.com/uutils/coreutils/issues/6163
+#[test]
+fn check_regression_issue_6163_no_match() {
+    new_ucmd!()
+        .args(&["-c", "-t", "Y", "Z"])
+        .pipe_in("X\n")
+        .succeeds()
+        .no_stderr()
+        .stdout_only("X\n");
+}
+
+#[test]
+fn check_regression_issue_6163_match() {
+    new_ucmd!()
+        .args(&["-c", "-t", "Y", "Z"])
+        .pipe_in("\0\n")
+        .succeeds()
+        .no_stderr()
+        .stdout_only("Z\n");
+}
+
+#[test]
+fn check_ignore_truncate_when_deleting_and_squeezing() {
+    new_ucmd!()
+        .args(&["-dts", "asdf", "qwe"])
+        .pipe_in("asdfqqwweerr\n")
+        .succeeds()
+        .no_stderr()
+        .stdout_only("qwerr\n");
+}
+
+#[test]
+fn check_ignore_truncate_when_deleting() {
+    new_ucmd!()
+        .args(&["-dt", "asdf"])
+        .pipe_in("asdfqwer\n")
+        .succeeds()
+        .no_stderr()
+        .stdout_only("qwer\n");
+}
+
+#[test]
+fn check_ignore_truncate_when_squeezing() {
+    new_ucmd!()
+        .args(&["-ts", "asdf"])
+        .pipe_in("aassddffqwer\n")
+        .succeeds()
+        .no_stderr()
+        .stdout_only("asdfqwer\n");
+}
+
+#[test]
+fn check_disallow_blank_in_set2_when_translating() {
+    new_ucmd!().args(&["-t", "1234", "[:blank:]"]).fails();
+}
+
+#[test]
+fn check_class_in_set2_must_be_matched_in_set1() {
+    new_ucmd!().args(&["-t", "1[:upper:]", "[:upper:]"]).fails();
+}
+
+#[test]
+fn check_class_in_set2_must_be_matched_in_set1_right_length_check() {
+    new_ucmd!()
+        .args(&["-t", "a-z[:upper:]", "abcdefghijklmnopqrstuvwxyz[:upper:]"])
+        .succeeds();
+}
+
+#[test]
+fn check_set1_longer_set2_ends_in_class() {
+    new_ucmd!().args(&["[:lower:]a", "[:upper:]"]).fails();
+}
+
+#[test]
+fn check_set1_longer_set2_ends_in_class_with_trunc() {
+    new_ucmd!()
+        .args(&["-t", "[:lower:]a", "[:upper:]"])
+        .succeeds();
+}
+
+#[test]
+fn check_complement_2_unique_in_set2() {
+    let x226 = "x".repeat(226);
+
+    // [y*] is expanded tp "y" here
+    let arg = x226 + "[y*]xxx";
+    new_ucmd!().args(&["-c", "[:upper:]", arg.as_str()]).fails();
+}
+
+#[test]
+fn check_complement_1_unique_in_set2() {
+    let x226 = "x".repeat(226);
+
+    // [y*] is expanded to "" here
+    let arg = x226 + "[y*]xxxx";
+    new_ucmd!()
+        .args(&["-c", "[:upper:]", arg.as_str()])
+        .succeeds();
+}
+
+#[test]
+fn check_complement_set2_too_big() {
+    let x231 = "x".repeat(231);
+    let x230 = &x231[..230];
+
+    // The complement of [:upper:] expands to 230 characters,
+    // putting more characters in set2 should fail.
+    new_ucmd!().args(&["-c", "[:upper:]", x230]).succeeds();
+    new_ucmd!()
+        .args(&["-c", "[:upper:]", x231.as_str()])
+        .fails()
+        .stderr_contains("when translating with complemented character classes,\nstring2 must map all characters in the domain to one");
+}
+
+#[test]
+#[cfg(unix)]
+fn test_truncate_non_utf8_set() {
+    let stdin = b"\x01amp\xfe\xff";
+    let set1 = OsStr::from_bytes(b"a\xfe\xffz"); // spell-checker:disable-line
+    let set2 = OsStr::from_bytes(b"01234");
+
+    new_ucmd!()
+        .arg(set1)
+        .arg(set2)
+        .pipe_in(*stdin)
+        .succeeds()
+        .stdout_is_bytes(b"\x010mp12");
+}
+
+#[test]
+#[cfg(unix)]
+fn test_unescaped_backslash_warning_false_positive() {
+    // Was erroneously printing this warning (even though the backslash was escaped):
+    // "tr: warning: an unescaped backslash at end of string is not portable"
+    new_ucmd!()
+        .args(&["-d", r"\\"])
+        .pipe_in(r"a\b\c\")
+        .succeeds()
+        .stdout_only("abc");
+    new_ucmd!()
+        .args(&["-d", r"\\\\"])
+        .pipe_in(r"a\b\c\")
+        .succeeds()
+        .stdout_only("abc");
+    new_ucmd!()
+        .args(&["-d", r"\\\\\\"])
+        .pipe_in(r"a\b\c\")
+        .succeeds()
+        .stdout_only("abc");
+}
+
+#[test]
+#[cfg(unix)]
+fn test_trailing_backslash() {
+    new_ucmd!()
+        .args(&["-d", r"\"])
+        .pipe_in(r"a\b\c\")
+        .succeeds()
+        .stderr_is("tr: warning: an unescaped backslash at end of string is not portable\n")
+        .stdout_is("abc");
+    new_ucmd!()
+        .args(&["-d", r"\\\"])
+        .pipe_in(r"a\b\c\")
+        .succeeds()
+        .stderr_is("tr: warning: an unescaped backslash at end of string is not portable\n")
+        .stdout_is("abc");
+    new_ucmd!()
+        .args(&["-d", r"\\\\\"])
+        .pipe_in(r"a\b\c\")
+        .succeeds()
+        .stderr_is("tr: warning: an unescaped backslash at end of string is not portable\n")
+        .stdout_is("abc");
+}
+
+#[test]
+fn test_multibyte_octal_sequence() {
+    new_ucmd!()
+        .args(&["-d", r"\501"])
+        .pipe_in("(1Ł)")
+        .succeeds()
+        .stderr_is("tr: warning: the ambiguous octal escape \\501 is being interpreted as the 2-byte sequence \\050, 1\n")
+        .stdout_is("Ł)");
+}
+
+#[test]
+fn test_backwards_range() {
+    new_ucmd!()
+        .args(&["-d", r"\046-\048"])
+        .pipe_in("")
+        .fails()
+        .stderr_only(
+            r"tr: range-endpoints of '&-\004' are in reverse collating sequence order
+",
+        );
+}
+
+#[test]
+fn test_non_digit_repeat() {
+    new_ucmd!()
+        .args(&["a", "[b*c]"])
+        .pipe_in("")
+        .fails()
+        .stderr_only("tr: invalid repeat count 'c' in [c*n] construct\n");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_failed_write_is_reported() {
+    new_ucmd!()
+        .pipe_in("hello")
+        .args(&["e", "a"])
+        .set_stdout(std::fs::File::create("/dev/full").unwrap())
+        .fails()
+        .stderr_is("tr: write error: No space left on device\n");
+}
+
+#[test]
+fn test_broken_pipe_no_error() {
+    new_ucmd!()
+        .args(&["e", "a"])
+        .pipe_in("hello".repeat(100))
+        .run_stdout_starts_with(b"")
+        .fails_silently();
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_stdin_is_socket() {
+    use nix::sys::socket::{AddressFamily, SockFlag, SockType, socketpair};
+    use nix::unistd::write;
+
+    let (fd1, fd2) = socketpair(
+        AddressFamily::Unix,
+        SockType::Stream,
+        None,
+        SockFlag::empty(),
+    )
+    .unwrap();
+    write(fd1, b"::").unwrap();
+    new_ucmd!()
+        .args(&[":", ";"])
+        .set_stdin(fd2)
+        .succeeds()
+        .stdout_is(";;");
 }

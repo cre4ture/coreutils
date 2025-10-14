@@ -2,6 +2,7 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
+// spell-checker:ignore extendedbigdecimal
 
 //! `printf`-style formatting
 //!
@@ -22,7 +23,7 @@
 //!  3. Parse both `printf` specifiers and escape sequences (for e.g. `printf`)
 //!
 //! This module aims to combine all three use cases. An iterator parsing each
-//! of these cases is provided by [`parse_escape_only`], [`parse_spec_only`]
+//! of these cases is provided by [`parse_spec_only`], [`parse_escape_only`]
 //! and [`parse_spec_and_escape`], respectively.
 //!
 //! There is a special [`Format`] type, which can be used to parse a format
@@ -34,24 +35,24 @@ mod argument;
 mod escape;
 pub mod human;
 pub mod num_format;
-pub mod num_parser;
 mod spec;
 
-pub use argument::*;
-use spec::Spec;
+pub use self::escape::{EscapedChar, OctalParsing};
+use crate::extendedbigdecimal::ExtendedBigDecimal;
+pub use argument::{FormatArgument, FormatArguments};
+
+use self::{escape::parse_escape_code, num_format::Formatter};
+use crate::{NonUtf8OsStrError, error::UError};
+pub use spec::Spec;
 use std::{
     error::Error,
     fmt::Display,
-    io::{stdout, Write},
+    io::{Write, stdout},
+    marker::PhantomData,
     ops::ControlFlow,
 };
 
-use crate::error::UError;
-
-use self::{
-    escape::{parse_escape_code, EscapedChar},
-    num_format::Formatter,
-};
+use os_display::Quotable;
 
 #[derive(Debug)]
 pub enum FormatError {
@@ -62,6 +63,15 @@ pub enum FormatError {
     TooManySpecs(Vec<u8>),
     NeedAtLeastOneSpec(Vec<u8>),
     WrongSpecType,
+    InvalidPrecision(String),
+    /// The format specifier ends with a %, as in `%f%`.
+    EndsWithPercent(Vec<u8>),
+    /// The escape sequence `\x` appears without a literal hexadecimal value.
+    MissingHex,
+    /// The hexadecimal characters represent a code point that cannot represent a
+    /// Unicode character (e.g., a surrogate code point)
+    InvalidCharacter(char, Vec<u8>),
+    InvalidEncoding(NonUtf8OsStrError),
 }
 
 impl Error for FormatError {}
@@ -70,6 +80,12 @@ impl UError for FormatError {}
 impl From<std::io::Error> for FormatError {
     fn from(value: std::io::Error) -> Self {
         Self::IoError(value)
+    }
+}
+
+impl From<NonUtf8OsStrError> for FormatError {
+    fn from(value: NonUtf8OsStrError) -> Self {
+        Self::InvalidEncoding(value)
     }
 }
 
@@ -91,11 +107,22 @@ impl Display for FormatError {
                 "format '{}' has no % directive",
                 String::from_utf8_lossy(s)
             ),
+            Self::EndsWithPercent(s) => {
+                write!(f, "format {} ends in %", String::from_utf8_lossy(s).quote())
+            }
+            Self::InvalidPrecision(precision) => write!(f, "invalid precision: '{precision}'"),
             // TODO: Error message below needs some work
             Self::WrongSpecType => write!(f, "wrong % directive type was given"),
             Self::IoError(_) => write!(f, "io error"),
             Self::NoMoreArguments => write!(f, "no more arguments"),
             Self::InvalidArgument(_) => write!(f, "invalid argument"),
+            Self::MissingHex => write!(f, "missing hexadecimal number in escape"),
+            Self::InvalidCharacter(escape_char, digits) => write!(
+                f,
+                "invalid universal character name \\{escape_char}{}",
+                String::from_utf8_lossy(digits)
+            ),
+            Self::InvalidEncoding(no) => no.fmt(f),
         }
     }
 }
@@ -138,10 +165,10 @@ impl FormatChar for EscapedChar {
 }
 
 impl<C: FormatChar> FormatItem<C> {
-    pub fn write<'a>(
+    pub fn write(
         &self,
         writer: impl Write,
-        args: &mut impl Iterator<Item = &'a FormatArgument>,
+        args: &mut FormatArguments,
     ) -> Result<ControlFlow<()>, FormatError> {
         match self {
             Self::Spec(spec) => spec.write(writer, args)?,
@@ -172,7 +199,7 @@ pub fn parse_spec_and_escape(
         }
         [b'\\', rest @ ..] => {
             current = rest;
-            Some(Ok(FormatItem::Char(parse_escape_code(&mut current))))
+            Some(parse_escape_code(&mut current, OctalParsing::default()).map(FormatItem::Char))
         }
         [c, rest @ ..] => {
             current = rest;
@@ -188,6 +215,7 @@ pub fn parse_spec_only(
     let mut current = fmt;
     std::iter::from_fn(move || match current {
         [] => None,
+        [b'%'] => Some(Err(FormatError::EndsWithPercent(fmt.to_vec()))),
         [b'%', b'%', rest @ ..] => {
             current = rest;
             Some(Ok(FormatItem::Char(b'%')))
@@ -208,13 +236,19 @@ pub fn parse_spec_only(
 }
 
 /// Parse a format string containing escape sequences
-pub fn parse_escape_only(fmt: &[u8]) -> impl Iterator<Item = EscapedChar> + '_ {
+pub fn parse_escape_only(
+    fmt: &[u8],
+    zero_octal_parsing: OctalParsing,
+) -> impl Iterator<Item = EscapedChar> + '_ {
     let mut current = fmt;
     std::iter::from_fn(move || match current {
         [] => None,
         [b'\\', rest @ ..] => {
             current = rest;
-            Some(parse_escape_code(&mut current))
+            Some(
+                parse_escape_code(&mut current, zero_octal_parsing)
+                    .unwrap_or(EscapedChar::Backslash(b'x')),
+            )
         }
         [c, rest @ ..] => {
             current = rest;
@@ -250,9 +284,12 @@ fn printf_writer<'a>(
     format_string: impl AsRef<[u8]>,
     args: impl IntoIterator<Item = &'a FormatArgument>,
 ) -> Result<(), FormatError> {
-    let mut args = args.into_iter();
+    let args = args.into_iter().cloned().collect::<Vec<_>>();
+    let mut args = FormatArguments::new(&args);
     for item in parse_spec_only(format_string.as_ref()) {
-        item?.write(&mut writer, &mut args)?;
+        if item?.write(&mut writer, &mut args)?.is_break() {
+            break;
+        }
     }
     Ok(())
 }
@@ -282,20 +319,30 @@ pub fn sprintf<'a>(
     Ok(writer)
 }
 
-/// A parsed format for a single float value
+/// A format for a single numerical value of type T
 ///
-/// This is used by `seq`. It can be constructed with [`Format::parse`]
-/// and can write a value with [`Format::fmt`].
+/// This is used by `seq` and `csplit`. It can be constructed with [`Format::from_formatter`]
+/// or [`Format::parse`] and can write a value with [`Format::fmt`].
 ///
-/// It can only accept a single specification without any asterisk parameters.
+/// [`Format::parse`] can only accept a single specification without any asterisk parameters.
 /// If it does get more specifications, it will return an error.
-pub struct Format<F: Formatter> {
+pub struct Format<F: Formatter<T>, T> {
     prefix: Vec<u8>,
     suffix: Vec<u8>,
     formatter: F,
+    _marker: PhantomData<T>,
 }
 
-impl<F: Formatter> Format<F> {
+impl<F: Formatter<T>, T> Format<F, T> {
+    pub fn from_formatter(formatter: F) -> Self {
+        Self {
+            prefix: Vec::<u8>::new(),
+            suffix: Vec::<u8>::new(),
+            formatter,
+            _marker: PhantomData,
+        }
+    }
+
     pub fn parse(format_string: impl AsRef<[u8]>) -> Result<Self, FormatError> {
         let mut iter = parse_spec_only(format_string.as_ref());
 
@@ -321,11 +368,14 @@ impl<F: Formatter> Format<F> {
 
         let mut suffix = Vec::new();
         for item in &mut iter {
-            match item? {
-                FormatItem::Spec(_) => {
+            match item {
+                // If the `format_string` is of the form `%f%f` or
+                // `%f%`, then return an error.
+                Ok(FormatItem::Spec(_)) | Err(FormatError::EndsWithPercent(_)) => {
                     return Err(FormatError::TooManySpecs(format_string.as_ref().to_vec()));
                 }
-                FormatItem::Char(c) => suffix.push(c),
+                Ok(FormatItem::Char(c)) => suffix.push(c),
+                Err(e) => return Err(e),
             }
         }
 
@@ -333,10 +383,11 @@ impl<F: Formatter> Format<F> {
             prefix,
             suffix,
             formatter,
+            _marker: PhantomData,
         })
     }
 
-    pub fn fmt(&self, mut w: impl Write, f: F::Input) -> std::io::Result<()> {
+    pub fn fmt(&self, mut w: impl Write, f: T) -> std::io::Result<()> {
         w.write_all(&self.prefix)?;
         self.formatter.fmt(&mut w, f)?;
         w.write_all(&self.suffix)?;

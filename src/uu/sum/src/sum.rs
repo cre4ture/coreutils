@@ -5,60 +5,57 @@
 
 // spell-checker:ignore (ToDO) sysv
 
-use clap::{crate_version, Arg, ArgAction, Command};
+use clap::{Arg, ArgAction, Command};
+use std::ffi::OsString;
 use std::fs::File;
-use std::io::{stdin, Read};
+use std::io::{ErrorKind, Read, Write, stdin, stdout};
 use std::path::Path;
 use uucore::display::Quotable;
 use uucore::error::{FromIo, UResult, USimpleError};
-use uucore::{format_usage, help_about, help_usage, show};
+use uucore::translate;
 
-const USAGE: &str = help_usage!("sum.md");
-const ABOUT: &str = help_about!("sum.md");
+use uucore::{format_usage, show};
 
-// This can be replaced with usize::div_ceil once it is stabilized.
-// This implementation approach is optimized for when `b` is a constant,
-// particularly a power of two.
-const fn div_ceil(a: usize, b: usize) -> usize {
-    (a + b - 1) / b
-}
-
-fn bsd_sum(mut reader: Box<dyn Read>) -> (usize, u16) {
+fn bsd_sum(mut reader: impl Read) -> std::io::Result<(usize, u16)> {
     let mut buf = [0; 4096];
     let mut bytes_read = 0;
     let mut checksum: u16 = 0;
     loop {
         match reader.read(&mut buf) {
-            Ok(n) if n != 0 => {
+            Ok(0) => break,
+            Ok(n) => {
                 bytes_read += n;
-                for &byte in &buf[..n] {
-                    checksum = checksum.rotate_right(1);
-                    checksum = checksum.wrapping_add(u16::from(byte));
-                }
+                checksum = buf[..n].iter().fold(checksum, |acc, &byte| {
+                    let rotated = acc.rotate_right(1);
+                    rotated.wrapping_add(u16::from(byte))
+                });
             }
-            _ => break,
+            Err(e) if e.kind() == ErrorKind::Interrupted => (),
+            Err(e) => return Err(e),
         }
     }
 
     // Report blocks read in terms of 1024-byte blocks.
-    let blocks_read = div_ceil(bytes_read, 1024);
-    (blocks_read, checksum)
+    let blocks_read = bytes_read.div_ceil(1024);
+    Ok((blocks_read, checksum))
 }
 
-fn sysv_sum(mut reader: Box<dyn Read>) -> (usize, u16) {
+fn sysv_sum(mut reader: impl Read) -> std::io::Result<(usize, u16)> {
     let mut buf = [0; 4096];
     let mut bytes_read = 0;
     let mut ret = 0u32;
 
     loop {
         match reader.read(&mut buf) {
-            Ok(n) if n != 0 => {
+            Ok(0) => break,
+            Ok(n) => {
                 bytes_read += n;
-                for &byte in &buf[..n] {
-                    ret = ret.wrapping_add(u32::from(byte));
-                }
+                ret = buf[..n]
+                    .iter()
+                    .fold(ret, |acc, &byte| acc.wrapping_add(u32::from(byte)));
             }
-            _ => break,
+            Err(e) if e.kind() == ErrorKind::Interrupted => (),
+            Err(e) => return Err(e),
         }
     }
 
@@ -66,31 +63,30 @@ fn sysv_sum(mut reader: Box<dyn Read>) -> (usize, u16) {
     ret = (ret & 0xffff) + (ret >> 16);
 
     // Report blocks read in terms of 512-byte blocks.
-    let blocks_read = div_ceil(bytes_read, 512);
-    (blocks_read, ret as u16)
+    let blocks_read = bytes_read.div_ceil(512);
+    Ok((blocks_read, ret as u16))
 }
 
-fn open(name: &str) -> UResult<Box<dyn Read>> {
-    match name {
-        "-" => Ok(Box::new(stdin()) as Box<dyn Read>),
-        _ => {
-            let path = &Path::new(name);
-            if path.is_dir() {
-                return Err(USimpleError::new(
-                    2,
-                    format!("{}: Is a directory", name.maybe_quote()),
-                ));
-            };
-            // Silent the warning as we want to the error message
-            if path.metadata().is_err() {
-                return Err(USimpleError::new(
-                    2,
-                    format!("{}: No such file or directory", name.maybe_quote()),
-                ));
-            };
-            let f = File::open(path).map_err_context(String::new)?;
-            Ok(Box::new(f) as Box<dyn Read>)
+fn open(name: &OsString) -> UResult<Box<dyn Read>> {
+    if name == "-" {
+        Ok(Box::new(stdin()) as Box<dyn Read>)
+    } else {
+        let path = Path::new(name);
+        if path.is_dir() {
+            return Err(USimpleError::new(
+                2,
+                translate!("sum-error-is-directory", "name" => name.to_string_lossy().maybe_quote()),
+            ));
         }
+        // Silent the warning as we want to the error message
+        if path.metadata().is_err() {
+            return Err(USimpleError::new(
+                2,
+                translate!("sum-error-no-such-file-or-directory", "name" => name.to_string_lossy().maybe_quote()),
+            ));
+        }
+        let f = File::open(path).map_err_context(String::new)?;
+        Ok(Box::new(f) as Box<dyn Read>)
     }
 }
 
@@ -102,11 +98,11 @@ mod options {
 
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-    let matches = uu_app().try_get_matches_from(args)?;
+    let matches = uucore::clap_localization::handle_clap_result(uu_app(), args)?;
 
-    let files: Vec<String> = match matches.get_many::<String>(options::FILE) {
+    let files: Vec<OsString> = match matches.get_many::<OsString>(options::FILE) {
         Some(v) => v.cloned().collect(),
-        None => vec!["-".to_owned()],
+        None => vec![OsString::from("-")],
     };
 
     let sysv = matches.get_flag(options::SYSTEM_V_COMPATIBLE);
@@ -126,12 +122,17 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
             sysv_sum(reader)
         } else {
             bsd_sum(reader)
-        };
+        }?;
 
+        let mut stdout = stdout().lock();
         if print_names {
-            println!("{sum:0width$} {blocks:width$} {file}");
+            writeln!(
+                stdout,
+                "{sum:0width$} {blocks:width$} {}",
+                file.to_string_lossy()
+            )?;
         } else {
-            println!("{sum:0width$} {blocks:width$}");
+            writeln!(stdout, "{sum:0width$} {blocks:width$}")?;
         }
     }
     Ok(())
@@ -139,27 +140,29 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
 
 pub fn uu_app() -> Command {
     Command::new(uucore::util_name())
-        .version(crate_version!())
-        .override_usage(format_usage(USAGE))
-        .about(ABOUT)
+        .version(uucore::crate_version!())
+        .help_template(uucore::localized_help_template(uucore::util_name()))
+        .override_usage(format_usage(&translate!("sum-usage")))
+        .about(translate!("sum-about"))
         .infer_long_args(true)
         .arg(
             Arg::new(options::FILE)
                 .action(ArgAction::Append)
                 .hide(true)
-                .value_hint(clap::ValueHint::FilePath),
+                .value_hint(clap::ValueHint::FilePath)
+                .value_parser(clap::value_parser!(OsString)),
         )
         .arg(
             Arg::new(options::BSD_COMPATIBLE)
                 .short('r')
-                .help("use the BSD sum algorithm, use 1K blocks (default)")
+                .help(translate!("sum-help-bsd-compatible"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new(options::SYSTEM_V_COMPATIBLE)
                 .short('s')
                 .long(options::SYSTEM_V_COMPATIBLE)
-                .help("use System V sum algorithm, use 512 bytes blocks")
+                .help(translate!("sum-help-sysv-compatible"))
                 .action(ArgAction::SetTrue),
         )
 }

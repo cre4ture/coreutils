@@ -2,27 +2,24 @@
 use libfuzzer_sys::fuzz_target;
 use uu_echo::uumain;
 
-use rand::prelude::SliceRandom;
 use rand::Rng;
+use rand::prelude::IndexedRandom;
 use std::ffi::OsString;
 
-mod fuzz_common;
-use crate::fuzz_common::CommandResult;
-use crate::fuzz_common::{
-    compare_result, generate_and_run_uumain, generate_random_string, run_gnu_cmd,
-};
+use uufuzz::CommandResult;
+use uufuzz::{compare_result, generate_and_run_uumain, generate_random_string, run_gnu_cmd};
 
 static CMD_PATH: &str = "echo";
 
 fn generate_echo() -> String {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut echo_str = String::new();
 
     // Randomly decide whether to include options
-    let include_n = rng.gen_bool(0.1); // 10% chance
-    let include_e = rng.gen_bool(0.1); // 10% chance
+    let include_n = rng.random_bool(0.1); // 10% chance
+    let include_e = rng.random_bool(0.1); // 10% chance
     #[allow(non_snake_case)]
-    let include_E = rng.gen_bool(0.1); // 10% chance
+    let include_E = rng.random_bool(0.1); // 10% chance
 
     if include_n {
         echo_str.push_str("-n ");
@@ -35,12 +32,12 @@ fn generate_echo() -> String {
     }
 
     // Add a random string
-    echo_str.push_str(&generate_random_string(rng.gen_range(1..=10)));
+    echo_str.push_str(&generate_random_string(rng.random_range(1..=10)));
 
     // Include escape sequences if -e is enabled
     if include_e {
         // Add a 10% chance of including an escape sequence
-        if rng.gen_bool(0.1) {
+        if rng.random_bool(0.1) {
             echo_str.push_str(&generate_escape_sequence(&mut rng));
         }
     }

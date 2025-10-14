@@ -3,13 +3,22 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 // spell-checker:ignore udev pcent iuse itotal iused ipcent
+#![allow(
+    clippy::similar_names,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::float_cmp
+)]
+
 use std::collections::HashSet;
 
-use crate::common::util::TestScenario;
+#[cfg(not(any(target_os = "freebsd", target_os = "windows")))]
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 
 #[test]
@@ -108,10 +117,26 @@ fn test_df_output() {
         .arg("-H")
         .arg("--total")
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let actual = output.lines().take(1).collect::<Vec<&str>>()[0];
     let actual = actual.split_whitespace().collect::<Vec<_>>();
     assert_eq!(actual, expected);
+}
+
+#[test]
+fn test_df_follows_symlinks() {
+    let output = new_ucmd!()
+        .arg("-h")
+        .arg("--output=source")
+        .succeeds()
+        .stdout_str_lossy();
+
+    let filesystems = output.lines().skip(1).collect::<Vec<&str>>();
+    assert!(
+        filesystems
+            .iter()
+            .all(|&x| !std::path::Path::new(x).is_symlink())
+    );
 }
 
 #[test]
@@ -142,7 +167,7 @@ fn test_df_output_overridden() {
         .arg("-hH")
         .arg("--total")
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let actual = output.lines().take(1).collect::<Vec<&str>>()[0];
     let actual = actual.split_whitespace().collect::<Vec<_>>();
     assert_eq!(actual, expected);
@@ -172,20 +197,35 @@ fn test_default_headers() {
             "on",
         ]
     };
-    let output = new_ucmd!().succeeds().stdout_move_str();
+    let output = new_ucmd!().succeeds().stdout_str_lossy();
     let actual = output.lines().take(1).collect::<Vec<&str>>()[0];
     let actual = actual.split_whitespace().collect::<Vec<_>>();
     assert_eq!(actual, expected);
 }
 
 #[test]
-fn test_precedence_of_human_readable_header_over_output_header() {
+fn test_precedence_of_human_readable_and_si_header_over_output_header() {
+    let args = ["-h", "--human-readable", "-H", "--si"];
+
+    for arg in args {
+        let output = new_ucmd!()
+            .args(&[arg, "--output=size"])
+            .succeeds()
+            .stdout_str_lossy();
+        let header = output.lines().next().unwrap();
+        assert_eq!(header, " Size");
+    }
+}
+
+#[test]
+fn test_used_header_starts_with_space() {
     let output = new_ucmd!()
-        .args(&["-H", "--output=size"])
+        // using -h here to ensure the width of the column's content is <= 4
+        .args(&["-h", "--output=used"])
         .succeeds()
-        .stdout_move_str();
-    let header = output.lines().next().unwrap().to_string();
-    assert_eq!(header.trim(), "Size");
+        .stdout_str_lossy();
+    let header = output.lines().next().unwrap();
+    assert_eq!(header, " Used");
 }
 
 #[test]
@@ -202,11 +242,11 @@ fn test_order_same() {
     let output1 = new_ucmd!()
         .arg("--output=source")
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let output2 = new_ucmd!()
         .arg("--output=source")
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     assert_eq!(output1, output2);
 }
 
@@ -214,7 +254,7 @@ fn test_order_same() {
 #[cfg(all(unix, not(target_os = "freebsd")))] // FIXME: fix this test for FreeBSD
 #[test]
 fn test_output_mp_repeat() {
-    let output1 = new_ucmd!().arg("/").arg("/").succeeds().stdout_move_str();
+    let output1 = new_ucmd!().arg("/").arg("/").succeeds().stdout_str_lossy();
     let output1: Vec<String> = output1
         .lines()
         .map(|l| String::from(l.split_once(' ').unwrap().0))
@@ -248,7 +288,7 @@ fn test_type_option() {
     let fs_types = new_ucmd!()
         .arg("--output=fstype")
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let fs_type = fs_types.lines().nth(1).unwrap().trim();
 
     new_ucmd!().args(&["-t", fs_type]).succeeds();
@@ -263,11 +303,12 @@ fn test_type_option() {
 
 #[test]
 #[cfg(not(any(target_os = "freebsd", target_os = "windows")))] // FIXME: fix test for FreeBSD & Win
+#[cfg(not(feature = "feat_selinux"))]
 fn test_type_option_with_file() {
     let fs_type = new_ucmd!()
         .args(&["--output=fstype", "."])
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let fs_type = fs_type.lines().nth(1).unwrap().trim();
 
     new_ucmd!().args(&["-t", fs_type, "."]).succeeds();
@@ -276,10 +317,16 @@ fn test_type_option_with_file() {
         .fails()
         .stderr_contains("no file systems processed");
 
+    // Assume the mount point at /dev has a different filesystem type to the mount point at /
+    new_ucmd!()
+        .args(&["-t", fs_type, "/dev"])
+        .fails()
+        .stderr_contains("no file systems processed");
+
     let fs_types = new_ucmd!()
         .arg("--output=fstype")
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let fs_types: Vec<_> = fs_types
         .lines()
         .skip(1)
@@ -304,7 +351,7 @@ fn test_exclude_all_types() {
     let fs_types = new_ucmd!()
         .arg("--output=fstype")
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let fs_types: HashSet<_> = fs_types.lines().skip(1).collect();
 
     let mut args = Vec::new();
@@ -335,6 +382,10 @@ fn test_include_exclude_same_type() {
         );
 }
 
+#[cfg_attr(
+    all(target_arch = "aarch64", target_os = "linux"),
+    ignore = "Issue #7158 - Test not supported on ARM64 Linux"
+)]
 #[test]
 fn test_total() {
     // Example output:
@@ -344,34 +395,36 @@ fn test_total() {
     //     ...
     //     /dev/loop14               63488    63488         0 100% /snap/core20/1361
     //     total                 258775268 98099712 148220200  40% -
-    let output = new_ucmd!().arg("--total").succeeds().stdout_move_str();
+    // Use explicit numeric-only columns to avoid whitespace issues in Filesystem or Mounted on columns
+    let output = new_ucmd!()
+        .arg("--output=size,used,avail")
+        .arg("--total")
+        .succeeds()
+        .stdout_str_lossy();
 
     // Skip the header line.
     let lines: Vec<&str> = output.lines().skip(1).collect();
 
-    // Parse the values from the last row.
+    // Parse the values from the last row (report totals)
     let last_line = lines.last().unwrap();
     let mut iter = last_line.split_whitespace();
-    assert_eq!(iter.next().unwrap(), "total");
-    let reported_total_size = iter.next().unwrap().parse().unwrap();
-    let reported_total_used = iter.next().unwrap().parse().unwrap();
-    let reported_total_avail = iter.next().unwrap().parse().unwrap();
+    let reported_total_size: u64 = iter.next().unwrap().parse().unwrap();
+    let reported_total_used: u64 = iter.next().unwrap().parse().unwrap();
+    let reported_total_avail: u64 = iter.next().unwrap().parse().unwrap();
 
     // Loop over each row except the last, computing the sum of each column.
-    let mut computed_total_size = 0;
-    let mut computed_total_used = 0;
-    let mut computed_total_avail = 0;
+    let mut computed_total_size: u64 = 0;
+    let mut computed_total_used: u64 = 0;
+    let mut computed_total_avail: u64 = 0;
     let n = lines.len();
     for line in &lines[..n - 1] {
         let mut iter = line.split_whitespace();
-        iter.next().unwrap();
         computed_total_size += iter.next().unwrap().parse::<u64>().unwrap();
         computed_total_used += iter.next().unwrap().parse::<u64>().unwrap();
         computed_total_avail += iter.next().unwrap().parse::<u64>().unwrap();
     }
 
-    // Check that the sum of each column matches the reported value in
-    // the last row.
+    // Check that the sum of each column matches the reported value in the last row.
     assert_eq!(computed_total_size, reported_total_size);
     assert_eq!(computed_total_used, reported_total_used);
     assert_eq!(computed_total_avail, reported_total_avail);
@@ -387,21 +440,21 @@ fn test_total_label_in_correct_column() {
     let output = new_ucmd!()
         .args(&["--output=source", "--total", "."])
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let last_line = output.lines().last().unwrap();
     assert_eq!(last_line.trim(), "total");
 
     let output = new_ucmd!()
         .args(&["--output=target", "--total", "."])
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let last_line = output.lines().last().unwrap();
     assert_eq!(last_line.trim(), "total");
 
     let output = new_ucmd!()
         .args(&["--output=source,target", "--total", "."])
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let last_line = output.lines().last().unwrap();
     assert_eq!(
         last_line.split_whitespace().collect::<Vec<&str>>(),
@@ -411,7 +464,7 @@ fn test_total_label_in_correct_column() {
     let output = new_ucmd!()
         .args(&["--output=target,source", "--total", "."])
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let last_line = output.lines().last().unwrap();
     assert_eq!(
         last_line.split_whitespace().collect::<Vec<&str>>(),
@@ -428,7 +481,7 @@ fn test_use_percentage() {
         // "percentage" values.
         .args(&["--total", "--output=used,avail,pcent", "--block-size=1"])
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
 
     // Skip the header line.
     let lines: Vec<&str> = output.lines().skip(1).collect();
@@ -453,7 +506,7 @@ fn test_iuse_percentage() {
     let output = new_ucmd!()
         .args(&["--total", "--output=itotal,iused,ipcent"])
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
 
     // Skip the header line.
     let lines: Vec<&str> = output.lines().skip(1).collect();
@@ -483,7 +536,7 @@ fn test_default_block_size() {
     let output = new_ucmd!()
         .arg("--output=size")
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let header = output.lines().next().unwrap().trim().to_string();
 
     assert_eq!(header, "1K-blocks");
@@ -492,7 +545,7 @@ fn test_default_block_size() {
         .arg("--output=size")
         .env("POSIXLY_CORRECT", "1")
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let header = output.lines().next().unwrap().trim().to_string();
 
     assert_eq!(header, "512B-blocks");
@@ -512,14 +565,14 @@ fn test_default_block_size_in_posix_portability_mode() {
             .to_string()
     }
 
-    let output = new_ucmd!().arg("-P").succeeds().stdout_move_str();
+    let output = new_ucmd!().arg("-P").succeeds().stdout_str_lossy();
     assert_eq!(get_header(&output), "1024-blocks");
 
     let output = new_ucmd!()
         .arg("-P")
         .env("POSIXLY_CORRECT", "1")
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     assert_eq!(get_header(&output), "512-blocks");
 }
 
@@ -529,7 +582,7 @@ fn test_block_size_1024() {
         let output = new_ucmd!()
             .args(&["-B", &format!("{block_size}"), "--output=size"])
             .succeeds()
-            .stdout_move_str();
+            .stdout_str_lossy();
         output.lines().next().unwrap().trim().to_string()
     }
 
@@ -553,7 +606,7 @@ fn test_block_size_with_suffix() {
         let output = new_ucmd!()
             .args(&["-B", block_size, "--output=size"])
             .succeeds()
-            .stdout_move_str();
+            .stdout_str_lossy();
         output.lines().next().unwrap().trim().to_string()
     }
 
@@ -577,7 +630,7 @@ fn test_block_size_in_posix_portability_mode() {
         let output = new_ucmd!()
             .args(&["-P", "-B", block_size])
             .succeeds()
-            .stdout_move_str();
+            .stdout_str_lossy();
         output
             .lines()
             .next()
@@ -604,7 +657,7 @@ fn test_block_size_from_env() {
             .arg("--output=size")
             .env(env_var, env_value)
             .succeeds()
-            .stdout_move_str();
+            .stdout_str_lossy();
         output.lines().next().unwrap().trim().to_string()
     }
 
@@ -623,7 +676,7 @@ fn test_block_size_from_env_precedences() {
             .env(k1, v1)
             .env(k2, v2)
             .succeeds()
-            .stdout_move_str();
+            .stdout_str_lossy();
         output.lines().next().unwrap().trim().to_string()
     }
 
@@ -642,7 +695,7 @@ fn test_precedence_of_block_size_arg_over_env() {
         .args(&["-B", "999", "--output=size"])
         .env("DF_BLOCK_SIZE", "111")
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let header = output.lines().next().unwrap().trim().to_string();
 
     assert_eq!(header, "999B-blocks");
@@ -656,7 +709,7 @@ fn test_invalid_block_size_from_env() {
         .arg("--output=size")
         .env("DF_BLOCK_SIZE", "invalid")
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let header = output.lines().next().unwrap().trim().to_string();
 
     assert_eq!(header, default_block_size_header);
@@ -666,7 +719,7 @@ fn test_invalid_block_size_from_env() {
         .env("DF_BLOCK_SIZE", "invalid")
         .env("BLOCK_SIZE", "222")
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let header = output.lines().next().unwrap().trim().to_string();
 
     assert_eq!(header, default_block_size_header);
@@ -682,7 +735,7 @@ fn test_ignore_block_size_from_env_in_posix_portability_mode() {
         .env("BLOCK_SIZE", "222")
         .env("BLOCKSIZE", "333")
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let header = output
         .lines()
         .next()
@@ -749,13 +802,13 @@ fn test_output_selects_columns() {
     let output = new_ucmd!()
         .args(&["--output=source"])
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     assert_eq!(output.lines().next().unwrap(), "Filesystem");
 
     let output = new_ucmd!()
         .args(&["--output=source,target"])
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     assert_eq!(
         output
             .lines()
@@ -769,7 +822,7 @@ fn test_output_selects_columns() {
     let output = new_ucmd!()
         .args(&["--output=source,target,used"])
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     assert_eq!(
         output
             .lines()
@@ -786,7 +839,7 @@ fn test_output_multiple_occurrences() {
     let output = new_ucmd!()
         .args(&["--output=source", "--output=target"])
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     assert_eq!(
         output
             .lines()
@@ -805,7 +858,7 @@ fn test_output_file_all_filesystems() {
     let output = new_ucmd!()
         .arg("--output=file")
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let mut lines = output.lines();
     assert_eq!(lines.next().unwrap(), "File");
     for line in lines {
@@ -827,7 +880,7 @@ fn test_output_file_specific_files() {
     let output = ucmd
         .args(&["--output=file", "a", "b", "c"])
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let actual: Vec<&str> = output.lines().collect();
     assert_eq!(actual, vec!["File", "a", "b", "c"]);
 }
@@ -841,7 +894,7 @@ fn test_file_column_width_if_filename_contains_unicode_chars() {
     let output = ucmd
         .args(&["--output=file,target", "äöü.txt"])
         .succeeds()
-        .stdout_move_str();
+        .stdout_str_lossy();
     let actual = output.lines().next().unwrap();
     // expected width: 7 chars (length of äöü.txt) + 1 char (column separator)
     assert_eq!(actual, "File    Mounted on");

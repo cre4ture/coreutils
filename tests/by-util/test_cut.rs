@@ -2,7 +2,11 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-use crate::common::util::TestScenario;
+
+// spell-checker:ignore defg
+
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
 
 static INPUT: &str = "lists.txt";
 
@@ -44,8 +48,15 @@ static COMPLEX_SEQUENCE: &TestedSequence = &TestedSequence {
 };
 
 #[test]
+fn test_no_args() {
+    new_ucmd!().fails().stderr_is(
+        "cut: invalid usage: expects one of --fields (-f), --chars (-c) or --bytes (-b)\n",
+    );
+}
+
+#[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 
 #[test]
@@ -97,24 +108,21 @@ fn test_whitespace_delimited() {
 fn test_whitespace_with_explicit_delimiter() {
     new_ucmd!()
         .args(&["-w", "-f", COMPLEX_SEQUENCE.sequence, "-d:"])
-        .fails()
-        .code_is(1);
+        .fails_with_code(1);
 }
 
 #[test]
 fn test_whitespace_with_byte() {
     new_ucmd!()
         .args(&["-w", "-b", COMPLEX_SEQUENCE.sequence])
-        .fails()
-        .code_is(1);
+        .fails_with_code(1);
 }
 
 #[test]
 fn test_whitespace_with_char() {
     new_ucmd!()
         .args(&["-c", COMPLEX_SEQUENCE.sequence, "-w"])
-        .fails()
-        .code_is(1);
+        .fails_with_code(1);
 }
 
 #[test]
@@ -122,9 +130,9 @@ fn test_delimiter_with_byte_and_char() {
     for conflicting_arg in ["-c", "-b"] {
         new_ucmd!()
             .args(&[conflicting_arg, COMPLEX_SEQUENCE.sequence, "-d="])
-            .fails()
+            .fails_with_code(1)
             .stderr_is("cut: invalid input: The '--delimiter' ('-d') option only usable if printing a sequence of fields\n")
-            .code_is(1);
+;
     }
 }
 
@@ -132,8 +140,7 @@ fn test_delimiter_with_byte_and_char() {
 fn test_too_large() {
     new_ucmd!()
         .args(&["-b1-18446744073709551615", "/dev/null"])
-        .fails()
-        .code_is(1);
+        .fails_with_code(1);
 }
 
 #[test]
@@ -230,8 +237,7 @@ fn test_is_a_directory() {
 
     ucmd.arg("-b1")
         .arg("some")
-        .fails()
-        .code_is(1)
+        .fails_with_code(1)
         .stderr_is("cut: some: Is a directory\n");
 }
 
@@ -240,31 +246,34 @@ fn test_no_such_file() {
     new_ucmd!()
         .arg("-b1")
         .arg("some")
-        .fails()
-        .code_is(1)
+        .fails_with_code(1)
         .stderr_is("cut: some: No such file or directory\n");
 }
 
 #[test]
-fn test_equal_as_delimiter1() {
-    new_ucmd!()
-        .args(&["-f", "2", "-d="])
-        .pipe_in("--dir=./out/lib")
-        .succeeds()
-        .stdout_only("./out/lib\n");
+fn test_equal_as_delimiter() {
+    for arg in ["-d=", "--delimiter=="] {
+        new_ucmd!()
+            .args(&["-f2", arg])
+            .pipe_in("--dir=./out/lib")
+            .succeeds()
+            .stdout_only("./out/lib\n");
+    }
 }
 
 #[test]
-fn test_equal_as_delimiter2() {
-    new_ucmd!()
-        .args(&["-f2", "--delimiter="])
-        .pipe_in("a=b\n")
-        .succeeds()
-        .stdout_only("a=b\n");
+fn test_empty_string_as_delimiter() {
+    for arg in ["-d''", "--delimiter=", "--delimiter=''"] {
+        new_ucmd!()
+            .args(&["-f2", arg])
+            .pipe_in("a\0b\n")
+            .succeeds()
+            .stdout_only("b\n");
+    }
 }
 
 #[test]
-fn test_equal_as_delimiter3() {
+fn test_empty_string_as_delimiter_with_output_delimiter() {
     new_ucmd!()
         .args(&["-f", "1,2", "-d", "''", "--output-delimiter=Z"])
         .pipe_in("ab\0cd\n")
@@ -273,13 +282,38 @@ fn test_equal_as_delimiter3() {
 }
 
 #[test]
-fn test_multiple() {
-    let result = new_ucmd!()
+fn test_newline_as_delimiter() {
+    for (field, expected_output) in [("1", "a:1\n"), ("2", "b:\n")] {
+        new_ucmd!()
+            .args(&["-f", field, "-d", "\n"])
+            .pipe_in("a:1\nb:")
+            .succeeds()
+            .stdout_only_bytes(expected_output);
+    }
+}
+
+#[test]
+fn test_newline_as_delimiter_with_output_delimiter() {
+    new_ucmd!()
+        .args(&["-f1-", "-d", "\n", "--output-delimiter=:"])
+        .pipe_in("a\nb\n")
+        .succeeds()
+        .stdout_only_bytes("a:b\n");
+}
+
+#[test]
+fn test_multiple_delimiters() {
+    new_ucmd!()
         .args(&["-f2", "-d:", "-d="])
-        .pipe_in("a=b\n")
-        .succeeds();
-    assert_eq!(result.stdout_str(), "b\n");
-    assert_eq!(result.stderr_str(), "");
+        .pipe_in("a:=b\n")
+        .succeeds()
+        .stdout_only("b\n");
+
+    new_ucmd!()
+        .args(&["-f2", "-d=", "-d:"])
+        .pipe_in("a:=b\n")
+        .succeeds()
+        .stdout_only("=b\n");
 }
 
 #[test]
@@ -301,13 +335,6 @@ fn test_multiple_mode_args() {
 }
 
 #[test]
-fn test_no_argument() {
-    new_ucmd!().fails().stderr_is(
-        "cut: invalid usage: expects one of --fields (-f), --chars (-c) or --bytes (-b)\n",
-    );
-}
-
-#[test]
 #[cfg(unix)]
 fn test_8bit_non_utf8_delimiter() {
     use std::ffi::OsStr;
@@ -319,4 +346,81 @@ fn test_8bit_non_utf8_delimiter() {
         .args(&["--out=_", "-f2,3", "8bit-delim.txt"])
         .succeeds()
         .stdout_check(|out| out == "b_c\n".as_bytes());
+}
+
+#[test]
+fn test_newline_preservation_with_f1_option() {
+    let (at, mut ucmd) = at_and_ucmd!();
+    at.write("1", "a\nb");
+    let expected = "a\nb\n";
+    ucmd.args(&["-f1-", "1"]).succeeds().stdout_is(expected);
+}
+
+#[test]
+fn test_output_delimiter_with_character_ranges() {
+    new_ucmd!()
+        .args(&["-c2-3,4-", "--output-delim=:"])
+        .pipe_in("abcdefg\n")
+        .succeeds()
+        .stdout_only("bc:defg\n");
+}
+
+#[test]
+fn test_output_delimiter_with_adjacent_ranges() {
+    new_ucmd!()
+        .args(&["-b1-2,3-4", "--output-d=:"])
+        .pipe_in("abcd\n")
+        .succeeds()
+        .stdout_only("ab:cd\n");
+}
+
+#[test]
+fn test_emoji_delim() {
+    new_ucmd!()
+        .args(&["-d🗿", "-f1"])
+        .pipe_in("💐🗿🌹\n")
+        .succeeds()
+        .stdout_only("💐\n");
+    new_ucmd!()
+        .args(&["-d🗿", "-f2"])
+        .pipe_in("💐🗿🌹\n")
+        .succeeds()
+        .stdout_only("🌹\n");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_failed_write_is_reported() {
+    new_ucmd!()
+        .arg("-d=")
+        .arg("-f1")
+        .pipe_in("key=value")
+        .set_stdout(std::fs::File::create("/dev/full").unwrap())
+        .fails()
+        .stderr_is("cut: write error: No space left on device\n");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn test_cut_non_utf8_paths() {
+    use std::fs::File;
+    use std::io::Write;
+    use std::os::unix::ffi::OsStrExt;
+    use uutests::util::TestScenario;
+    use uutests::util_name;
+
+    let ts = TestScenario::new(util_name!());
+    let test_dir = ts.fixtures.subdir.as_path();
+
+    // Create file directly with non-UTF-8 name
+    let file_name = std::ffi::OsStr::from_bytes(b"test_\xFF\xFE.txt");
+    let mut file = File::create(test_dir.join(file_name)).unwrap();
+    file.write_all(b"a\tb\tc\n1\t2\t3\n").unwrap();
+
+    // Test that cut can handle non-UTF-8 filenames
+    ts.ucmd()
+        .arg("-f1,3")
+        .arg(file_name)
+        .succeeds()
+        .stdout_only("a\tc\n1\t3\n");
 }

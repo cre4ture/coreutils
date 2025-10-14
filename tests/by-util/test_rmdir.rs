@@ -2,7 +2,8 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-use crate::common::util::TestScenario;
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
 
 const DIR: &str = "dir";
 const DIR_FILE: &str = "dir/file";
@@ -26,7 +27,14 @@ const NOT_A_DIRECTORY: &str = "Not a directory";
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
+}
+
+#[test]
+fn test_no_arg() {
+    new_ucmd!()
+        .fails_with_code(1)
+        .stderr_contains("error: the following required arguments were not provided:");
 }
 
 #[test]

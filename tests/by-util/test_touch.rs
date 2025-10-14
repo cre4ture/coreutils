@@ -4,12 +4,15 @@
 // file that was distributed with this source code.
 // spell-checker:ignore (formats) cymdhm cymdhms mdhm mdhms ymdhm ymdhms datetime mktime
 
-use crate::common::util::{AtPath, TestScenario};
+use filetime::FileTime;
 #[cfg(not(target_os = "freebsd"))]
 use filetime::set_symlink_file_times;
-use filetime::FileTime;
 use std::fs::remove_file;
 use std::path::PathBuf;
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
+use uutests::util::{AtPath, TestScenario};
+use uutests::util_name;
 
 fn get_file_times(at: &AtPath, path: &str) -> (FileTime, FileTime) {
     let m = at.metadata(path);
@@ -42,7 +45,7 @@ fn str_to_filetime(format: &str, s: &str) -> FileTime {
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 
 #[test]
@@ -116,6 +119,69 @@ fn test_touch_set_mdhms_time() {
     assert_eq!(atime, mtime);
     assert_eq!(atime.unix_seconds() - start_of_year.unix_seconds(), 45296);
     assert_eq!(mtime.unix_seconds() - start_of_year.unix_seconds(), 45296);
+}
+
+#[test]
+#[cfg(target_pointer_width = "64")]
+fn test_touch_2_digit_years_68() {
+    // 68 and before are 20xx
+    // it will fail on 32 bits, because of wraparound for anything after
+    // 2038-01-19
+    let (at, mut ucmd) = at_and_ucmd!();
+    let file = "test_touch_set_two_digit_68_time";
+
+    ucmd.args(&["-t", "6801010000", file])
+        .succeeds()
+        .no_output();
+
+    assert!(at.file_exists(file));
+
+    //  January 1, 2068, 00:00:00
+    let expected = FileTime::from_unix_time(3_092_601_600, 0);
+    let (atime, mtime) = get_file_times(&at, file);
+    assert_eq!(atime, mtime);
+    assert_eq!(atime, expected);
+    assert_eq!(mtime, expected);
+}
+
+#[test]
+fn test_touch_2_digit_years_2038() {
+    // Same as test_touch_2_digit_years_68 but for 32 bits systems
+    // we test a date before the y2038 bug
+    let (at, mut ucmd) = at_and_ucmd!();
+    let file = "test_touch_set_two_digit_68_time";
+
+    ucmd.args(&["-t", "3801010000", file])
+        .succeeds()
+        .no_output();
+
+    assert!(at.file_exists(file));
+
+    // January 1, 2038, 00:00:00
+    let expected = FileTime::from_unix_time(2_145_916_800, 0);
+    let (atime, mtime) = get_file_times(&at, file);
+    assert_eq!(atime, mtime);
+    assert_eq!(atime, expected);
+    assert_eq!(mtime, expected);
+}
+
+#[test]
+fn test_touch_2_digit_years_69() {
+    // 69 and after are 19xx
+    let (at, mut ucmd) = at_and_ucmd!();
+    let file = "test_touch_set_two_digit_69_time";
+
+    ucmd.args(&["-t", "6901010000", file])
+        .succeeds()
+        .no_output();
+
+    assert!(at.file_exists(file));
+    // January 1, 1969, 00:00:00
+    let expected = FileTime::from_unix_time(-31_536_000, 0);
+    let (atime, mtime) = get_file_times(&at, file);
+    assert_eq!(atime, mtime);
+    assert_eq!(atime, expected);
+    assert_eq!(mtime, expected);
 }
 
 #[test]
@@ -213,17 +279,18 @@ fn test_touch_set_only_atime() {
 
         let start_of_year = str_to_filetime("%Y%m%d%H%M", "201501010000");
         let (atime, mtime) = get_file_times(&at, file);
-        assert!(atime != mtime);
+        assert_ne!(atime, mtime);
         assert_eq!(atime.unix_seconds() - start_of_year.unix_seconds(), 45240);
     }
 }
 
 #[test]
 fn test_touch_set_only_mtime_failed() {
-    let (_at, mut ucmd) = at_and_ucmd!();
     let file = "test_touch_set_only_mtime";
 
-    ucmd.args(&["-t", "2015010112342", "-m", file]).fails();
+    new_ucmd!()
+        .args(&["-t", "2015010112342", "-m", file])
+        .fails();
 }
 
 #[test]
@@ -285,17 +352,17 @@ fn test_touch_set_both_offset_date_and_reference() {
 
 #[test]
 fn test_touch_set_both_time_and_date() {
-    let (_at, mut ucmd) = at_and_ucmd!();
     let file = "test_touch_set_both_time_and_date";
 
-    ucmd.args(&[
-        "-t",
-        "2015010112342",
-        "-d",
-        "Thu Jan 01 12:34:00 2015",
-        file,
-    ])
-    .fails();
+    new_ucmd!()
+        .args(&[
+            "-t",
+            "2015010112342",
+            "-d",
+            "Thu Jan 01 12:34:00 2015",
+            file,
+        ])
+        .fails();
 }
 
 #[test]
@@ -314,7 +381,7 @@ fn test_touch_set_only_mtime() {
 
         let start_of_year = str_to_filetime("%Y%m%d%H%M", "201501010000");
         let (atime, mtime) = get_file_times(&at, file);
-        assert!(atime != mtime);
+        assert_ne!(atime, mtime);
         assert_eq!(mtime.unix_seconds() - start_of_year.unix_seconds(), 45240);
     }
 }
@@ -370,7 +437,7 @@ fn test_touch_no_dereference() {
 
 #[test]
 fn test_touch_reference() {
-    let scenario = TestScenario::new("touch");
+    let scenario = TestScenario::new(util_name!());
     let (at, mut _ucmd) = (scenario.fixtures.clone(), scenario.ucmd());
     let file_a = "test_touch_reference_a";
     let file_b = "test_touch_reference_b";
@@ -618,7 +685,8 @@ fn test_touch_set_date_relative_smoke() {
         "2 seconds",
         "2 years 1 week",
         "2 days ago",
-        "2 months and 1 second",
+        "2 months 1 second",
+        "a",
     ];
     for time in times {
         let (at, mut ucmd) = at_and_ucmd!();
@@ -628,19 +696,14 @@ fn test_touch_set_date_relative_smoke() {
             .no_stderr()
             .no_stdout();
     }
-    let (at, mut ucmd) = at_and_ucmd!();
-    at.touch("f");
-    ucmd.args(&["-d", "a", "f"])
-        .fails()
-        .stderr_contains("touch: Unable to parse date");
 }
 
 #[test]
 fn test_touch_set_date_wrong_format() {
-    let (_at, mut ucmd) = at_and_ucmd!();
     let file = "test_touch_set_date_wrong_format";
 
-    ucmd.args(&["-d", "2005-43-21", file])
+    new_ucmd!()
+        .args(&["-d", "2005-43-21", file])
         .fails()
         .stderr_contains("Unable to parse date: 2005-43-21");
 }
@@ -664,7 +727,6 @@ fn test_touch_mtime_dst_succeeds() {
 #[test]
 #[cfg(unix)]
 fn test_touch_mtime_dst_fails() {
-    let (_at, mut ucmd) = at_and_ucmd!();
     let file = "test_touch_set_mtime_dst_fails";
 
     // Some timezones use daylight savings time, this leads to problems if the
@@ -673,7 +735,8 @@ fn test_touch_mtime_dst_fails() {
     // invalid.
     // See https://www.gnu.org/software/libc/manual/html_node/TZ-Variable.html
     // for information on the TZ variable, which where the string is copied from.
-    ucmd.env("TZ", "EST+5EDT,M3.2.0/2,M11.1.0/2")
+    new_ucmd!()
+        .env("TZ", "EST+5EDT,M3.2.0/2,M11.1.0/2")
         .args(&["-m", "-t", "202003080200", file])
         .fails();
 }
@@ -681,18 +744,30 @@ fn test_touch_mtime_dst_fails() {
 #[test]
 #[cfg(unix)]
 fn test_touch_system_fails() {
-    let (_at, mut ucmd) = at_and_ucmd!();
     let file = "/";
-    ucmd.args(&[file])
+    new_ucmd!()
+        .args(&[file])
         .fails()
         .stderr_contains("setting times of '/'");
 }
 
 #[test]
+#[cfg(not(target_os = "windows"))]
 fn test_touch_trailing_slash() {
-    let (_at, mut ucmd) = at_and_ucmd!();
     let file = "no-file/";
-    ucmd.args(&[file]).fails();
+    new_ucmd!().args(&[file]).fails().stderr_only(format!(
+        "touch: cannot touch '{file}': No such file or directory\n"
+    ));
+}
+
+#[test]
+#[cfg(target_os = "windows")]
+fn test_touch_trailing_slash_windows() {
+    let file = "no-file/";
+    new_ucmd!()
+        .args(&[file])
+        .fails()
+        .stderr_contains(format!("touch: cannot touch '{file}'"));
 }
 
 #[test]
@@ -708,7 +783,7 @@ fn test_touch_no_such_file_error_msg() {
 }
 
 #[test]
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(not(any(target_os = "freebsd", target_os = "openbsd")))]
 fn test_touch_changes_time_of_file_in_stdout() {
     // command like: `touch - 1< ./c`
     // should change the timestamp of c
@@ -726,7 +801,7 @@ fn test_touch_changes_time_of_file_in_stdout() {
         .no_stderr();
 
     let (_, mtime_after) = get_file_times(&at, file);
-    assert!(mtime_after != mtime);
+    assert_ne!(mtime_after, mtime);
 }
 
 #[test]
@@ -745,8 +820,7 @@ fn test_touch_permission_denied_error_msg() {
 
     let full_path = at.plus_as_string(path_str);
     ucmd.arg(&full_path).fails().stderr_only(format!(
-        "touch: cannot touch '{}': Permission denied\n",
-        &full_path
+        "touch: cannot touch '{full_path}': Permission denied\n",
     ));
 }
 
@@ -793,7 +867,7 @@ fn test_touch_leap_second() {
 fn test_touch_trailing_slash_no_create() {
     let (at, mut ucmd) = at_and_ucmd!();
     at.touch("file");
-    ucmd.args(&["-c", "file/"]).fails().code_is(1);
+    ucmd.args(&["-c", "file/"]).fails_with_code(1);
 
     let (at, mut ucmd) = at_and_ucmd!();
     ucmd.args(&["-c", "no-file/"]).succeeds();
@@ -809,7 +883,7 @@ fn test_touch_trailing_slash_no_create() {
 
     let (at, mut ucmd) = at_and_ucmd!();
     at.relative_symlink_file("loop", "loop");
-    ucmd.args(&["-c", "loop/"]).fails().code_is(1);
+    ucmd.args(&["-c", "loop/"]).fails_with_code(1);
     assert!(!at.file_exists("loop"));
 
     #[cfg(not(target_os = "macos"))]
@@ -818,7 +892,7 @@ fn test_touch_trailing_slash_no_create() {
         let (at, mut ucmd) = at_and_ucmd!();
         at.touch("file2");
         at.relative_symlink_file("file2", "link1");
-        ucmd.args(&["-c", "link1/"]).fails().code_is(1);
+        ucmd.args(&["-c", "link1/"]).fails_with_code(1);
         assert!(at.file_exists("file2"));
         assert!(at.symlink_exists("link1"));
     }
@@ -851,18 +925,17 @@ fn test_touch_no_dereference_dangling() {
 }
 
 #[test]
+#[cfg(not(target_os = "openbsd"))]
 fn test_touch_dash() {
-    let (_, mut ucmd) = at_and_ucmd!();
-
-    ucmd.args(&["-h", "-"]).succeeds().no_stderr().no_stdout();
+    new_ucmd!().args(&["-h", "-"]).succeeds().no_output();
 }
 
 #[test]
 fn test_touch_invalid_date_format() {
-    let (_at, mut ucmd) = at_and_ucmd!();
     let file = "test_touch_invalid_date_format";
 
-    ucmd.args(&["-m", "-t", "+1000000000000 years", file])
+    new_ucmd!()
+        .args(&["-m", "-t", "+1000000000000 years", file])
         .fails()
         .stderr_contains("touch: invalid date format '+1000000000000 years'");
 }
@@ -902,4 +975,55 @@ fn test_touch_reference_symlink_with_no_deref() {
         .succeeds();
     // Times should be taken from the symlink, not the destination
     assert_eq!((time, time), get_symlink_times(&at, arg));
+}
+
+#[test]
+fn test_obsolete_posix_format() {
+    let (at, mut ucmd) = at_and_ucmd!();
+    ucmd.env("_POSIX2_VERSION", "199209")
+        .env("POSIXLY_CORRECT", "1")
+        .args(&["01010000", "11111111"])
+        .succeeds()
+        .no_output();
+    assert!(at.file_exists("11111111"));
+    assert!(!at.file_exists("01010000"));
+}
+
+#[test]
+fn test_obsolete_posix_format_with_year() {
+    let (at, mut ucmd) = at_and_ucmd!();
+    ucmd.env("_POSIX2_VERSION", "199209")
+        .env("POSIXLY_CORRECT", "1")
+        .args(&["0101000090", "11111111"])
+        .succeeds()
+        .no_output();
+    assert!(at.file_exists("11111111"));
+    assert!(!at.file_exists("0101000090"));
+}
+
+#[test]
+fn test_touch_f_option() {
+    let (at, mut ucmd) = at_and_ucmd!();
+    let file = "test_f_option.txt";
+
+    ucmd.args(&["-f", file]).succeeds().no_output();
+
+    assert!(at.file_exists(file));
+    at.remove(file);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn test_touch_non_utf8_paths() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let scene = TestScenario::new(util_name!());
+    let at = &scene.fixtures;
+
+    let non_utf8_bytes = b"test_\xFF\xFE.txt";
+    let non_utf8_name = OsStr::from_bytes(non_utf8_bytes);
+
+    scene.ucmd().arg(non_utf8_name).succeeds().no_output();
+    assert!(std::fs::metadata(at.plus(non_utf8_name)).is_ok());
 }

@@ -27,7 +27,7 @@ impl<'a, 'b, M: Matcher> Searcher<'a, 'b, M> {
 // Iterate over field delimiters
 // Returns (first, last) positions of each sequence, where `haystack[first..last]`
 // corresponds to the delimiter.
-impl<'a, 'b, M: Matcher> Iterator for Searcher<'a, 'b, M> {
+impl<M: Matcher> Iterator for Searcher<'_, '_, M> {
     type Item = (usize, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -61,7 +61,7 @@ mod exact_searcher_tests {
         let matcher = ExactMatcher::new("a".as_bytes());
         let iter = Searcher::new(&matcher, "".as_bytes());
         let items: Vec<(usize, usize)> = iter.collect();
-        assert_eq!(vec![] as Vec<(usize, usize)>, items);
+        assert!(items.is_empty());
     }
 
     fn test_multibyte(line: &[u8], expected: &[(usize, usize)]) {
@@ -140,7 +140,7 @@ mod whitespace_searcher_tests {
         let matcher = WhitespaceMatcher {};
         let iter = Searcher::new(&matcher, "".as_bytes());
         let items: Vec<(usize, usize)> = iter.collect();
-        assert_eq!(vec![] as Vec<(usize, usize)>, items);
+        assert!(items.is_empty());
     }
 
     fn test_multispace(line: &[u8], expected: &[(usize, usize)]) {

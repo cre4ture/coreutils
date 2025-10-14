@@ -1,22 +1,29 @@
 [package]
 name = "uu_mkdir"
-version = "0.0.26"
-authors = ["uutils developers"]
-license = "MIT"
 description = "mkdir ~ (uutils) create DIRECTORY"
-
-homepage = "https://github.com/uutils/coreutils"
 repository = "https://github.com/uutils/coreutils/tree/main/src/uu/mkdir"
-keywords = ["coreutils", "uutils", "cross-platform", "cli", "utility"]
-categories = ["command-line-utilities"]
-edition = "2021"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+edition.workspace = true
+readme.workspace = true
+
+[lints]
+workspace = true
 
 [lib]
 path = "src/mkdir.rs"
 
 [dependencies]
 clap = { workspace = true }
-uucore = { workspace = true, features = ["fs", "mode"] }
+uucore = { workspace = true, features = ["fs", "mode", "fsxattr"] }
+fluent = { workspace = true }
+
+[features]
+selinux = ["uucore/selinux"]
 
 [[bin]]
 name = "mkdir"

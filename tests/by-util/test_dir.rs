@@ -2,8 +2,10 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-use crate::common::util::TestScenario;
 use regex::Regex;
+use uutests::new_ucmd;
+use uutests::util::TestScenario;
+use uutests::util_name;
 
 /*
  * As dir use the same functions than ls, we don't have to retest them here.
@@ -48,4 +50,9 @@ fn test_long_output() {
         .arg("-l")
         .succeeds()
         .stdout_matches(&Regex::new("[rwx-]{10}.*some-file1\n$").unwrap());
+}
+
+#[test]
+fn test_invalid_option_exit_code() {
+    new_ucmd!().arg("-/").fails().code_is(2);
 }

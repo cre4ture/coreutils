@@ -5,30 +5,25 @@
 
 // spell-checker:ignore (ToDO) gethostid
 
-use clap::{crate_version, Command};
-use libc::c_long;
-use uucore::{error::UResult, format_usage, help_about, help_usage};
+use clap::Command;
+use libc::{c_long, gethostid};
+use uucore::{error::UResult, format_usage};
 
-const USAGE: &str = help_usage!("hostid.md");
-const ABOUT: &str = help_about!("hostid.md");
-
-// currently rust libc interface doesn't include gethostid
-extern "C" {
-    pub fn gethostid() -> c_long;
-}
+use uucore::translate;
 
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-    uu_app().try_get_matches_from(args)?;
+    uucore::clap_localization::handle_clap_result(uu_app(), args)?;
     hostid();
     Ok(())
 }
 
 pub fn uu_app() -> Command {
     Command::new(uucore::util_name())
-        .version(crate_version!())
-        .about(ABOUT)
-        .override_usage(format_usage(USAGE))
+        .version(uucore::crate_version!())
+        .help_template(uucore::localized_help_template(uucore::util_name()))
+        .about(translate!("hostid-about"))
+        .override_usage(format_usage(&translate!("hostid-usage")))
         .infer_long_args(true)
 }
 

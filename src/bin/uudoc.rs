@@ -5,6 +5,8 @@
 // spell-checker:ignore tldr uuhelp
 
 use clap::Command;
+use fluent_syntax::ast::{Entry, Message, Pattern};
+use fluent_syntax::parser;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs::File;
@@ -13,6 +15,9 @@ use zip::ZipArchive;
 
 include!(concat!(env!("OUT_DIR"), "/uutils_map.rs"));
 
+/// # Errors
+/// Returns an error if the writer fails.
+#[allow(clippy::too_many_lines)]
 fn main() -> io::Result<()> {
     let mut tldr_zip = File::open("docs/tldr.zip")
         .ok()
@@ -20,7 +25,9 @@ fn main() -> io::Result<()> {
 
     if tldr_zip.is_none() {
         println!("Warning: No tldr archive found, so the documentation will not include examples.");
-        println!("To include examples in the documentation, download the tldr archive and put it in the docs/ folder.");
+        println!(
+            "To include examples in the documentation, download the tldr archive and put it in the docs/ folder."
+        );
         println!();
         println!("  curl https://tldr.sh/assets/tldr.zip -o docs/tldr.zip");
         println!();
@@ -43,7 +50,9 @@ fn main() -> io::Result<()> {
         * [Installation](installation.md)\n\
         * [Build from source](build.md)\n\
         * [Platform support](platforms.md)\n\
-        * [Contributing](contributing.md)\n\
+        * [Contributing](CONTRIBUTING.md)\n\
+        \t* [Development](DEVELOPMENT.md)\n\
+        \t* [Code of Conduct](CODE_OF_CONDUCT.md)\n\
         * [GNU test coverage](test_coverage.md)\n\
         * [Extensions](extensions.md)\n\
         \n\
@@ -57,7 +66,7 @@ fn main() -> io::Result<()> {
         for platform in ["unix", "macos", "windows", "unix_android"] {
             let platform_utils: Vec<String> = String::from_utf8(
                 std::process::Command::new("./util/show-utils.sh")
-                    .arg(format!("--features=feat_os_{}", platform))
+                    .arg(format!("--features=feat_os_{platform}"))
                     .output()?
                     .stdout,
             )
@@ -107,7 +116,7 @@ fn main() -> io::Result<()> {
             "| util             | Linux | macOS | Windows | FreeBSD | Android |\n\
              | ---------------- | ----- | ----- | ------- | ------- | ------- |"
         )?;
-        for (&name, _) in &utils {
+        for &(&name, _) in &utils {
             if name == "[" {
                 continue;
             }
@@ -131,9 +140,9 @@ fn main() -> io::Result<()> {
         if name == "[" {
             continue;
         }
-        let p = format!("docs/src/utils/{}.md", name);
+        let p = format!("docs/src/utils/{name}.md");
 
-        let markdown = File::open(format!("src/uu/{name}/{name}.md"))
+        let fluent = File::open(format!("src/uu/{name}/locales/en-US.ftl"))
             .and_then(|mut f: File| {
                 let mut s = String::new();
                 f.read_to_string(&mut s)?;
@@ -148,14 +157,14 @@ fn main() -> io::Result<()> {
                 name,
                 tldr_zip: &mut tldr_zip,
                 utils_per_platform: &utils_per_platform,
-                markdown,
+                fluent,
             }
             .markdown()?;
-            println!("Wrote to '{}'", p);
+            println!("Wrote to '{p}'");
         } else {
-            println!("Error writing to {}", p);
+            println!("Error writing to {p}");
         }
-        writeln!(summary, "* [{0}](utils/{0}.md)", name)?;
+        writeln!(summary, "* [{name}](utils/{name}.md)")?;
     }
     Ok(())
 }
@@ -166,10 +175,12 @@ struct MDWriter<'a, 'b> {
     name: &'a str,
     tldr_zip: &'b mut Option<ZipArchive<File>>,
     utils_per_platform: &'b HashMap<&'b str, Vec<String>>,
-    markdown: Option<String>,
+    fluent: Option<String>,
 }
 
-impl<'a, 'b> MDWriter<'a, 'b> {
+impl MDWriter<'_, '_> {
+    /// # Errors
+    /// Returns an error if the writer fails.
     fn markdown(&mut self) -> io::Result<()> {
         write!(self.w, "# {}\n\n", self.name)?;
         self.additional()?;
@@ -180,6 +191,35 @@ impl<'a, 'b> MDWriter<'a, 'b> {
         self.examples()
     }
 
+    /// Extract value for a Fluent key from the .ftl content
+    fn extract_fluent_value(&self, key: &str) -> Option<String> {
+        let content = self.fluent.as_ref()?;
+        let resource = parser::parse(content.clone()).ok()?;
+
+        for entry in resource.body {
+            if let Entry::Message(Message {
+                id,
+                value: Some(Pattern { elements }),
+                ..
+            }) = entry
+            {
+                if id.name == key {
+                    // Simple text extraction - just concatenate text elements
+                    let mut result = String::new();
+                    for element in elements {
+                        if let fluent_syntax::ast::PatternElement::TextElement { value } = element {
+                            result.push_str(&value);
+                        }
+                    }
+                    return Some(result);
+                }
+            }
+        }
+        None
+    }
+
+    /// # Errors
+    /// Returns an error if the writer fails.
     fn additional(&mut self) -> io::Result<()> {
         writeln!(self.w, "<div class=\"additional\">")?;
         self.platforms()?;
@@ -187,6 +227,8 @@ impl<'a, 'b> MDWriter<'a, 'b> {
         writeln!(self.w, "</div>")
     }
 
+    /// # Errors
+    /// Returns an error if the writer fails.
     fn platforms(&mut self) -> io::Result<()> {
         writeln!(self.w, "<div class=\"platforms\">")?;
         for (feature, icon) in [
@@ -201,7 +243,7 @@ impl<'a, 'b> MDWriter<'a, 'b> {
                     .iter()
                     .any(|u| u == self.name)
             {
-                writeln!(self.w, "<i class=\"fa fa-brands fa-{}\"></i>", icon)?;
+                writeln!(self.w, "<i class=\"fa fa-brands fa-{icon}\"></i>")?;
             }
         }
         writeln!(self.w, "</div>")?;
@@ -209,6 +251,10 @@ impl<'a, 'b> MDWriter<'a, 'b> {
         Ok(())
     }
 
+    /// # Errors
+    /// Returns an error if the writer fails.
+    /// # Panics
+    /// Panics if the version is not found.
     fn version(&mut self) -> io::Result<()> {
         writeln!(
             self.w,
@@ -217,37 +263,40 @@ impl<'a, 'b> MDWriter<'a, 'b> {
         )
     }
 
+    /// # Errors
+    /// Returns an error if the writer fails.
     fn usage(&mut self) -> io::Result<()> {
-        if let Some(markdown) = &self.markdown {
-            let usage = uuhelp_parser::parse_usage(markdown);
-            let usage = usage.replace("{}", self.name);
-
+        if let Some(usage) = self.extract_fluent_value(&format!("{}-usage", self.name)) {
             writeln!(self.w, "\n```")?;
-            writeln!(self.w, "{}", usage)?;
+            writeln!(self.w, "{usage}")?;
             writeln!(self.w, "```")
         } else {
             Ok(())
         }
     }
 
+    /// # Errors
+    /// Returns an error if the writer fails.
     fn about(&mut self) -> io::Result<()> {
-        if let Some(markdown) = &self.markdown {
-            writeln!(self.w, "{}", uuhelp_parser::parse_about(markdown))
+        if let Some(about) = self.extract_fluent_value(&format!("{}-about", self.name)) {
+            writeln!(self.w, "{about}")
         } else {
             Ok(())
         }
     }
 
+    /// # Errors
+    /// Returns an error if the writer fails.
     fn after_help(&mut self) -> io::Result<()> {
-        if let Some(markdown) = &self.markdown {
-            if let Some(after_help) = uuhelp_parser::parse_section("after help", markdown) {
-                return writeln!(self.w, "\n\n{after_help}");
-            }
+        if let Some(after_help) = self.extract_fluent_value(&format!("{}-after-help", self.name)) {
+            writeln!(self.w, "\n\n{after_help}")
+        } else {
+            Ok(())
         }
-
-        Ok(())
     }
 
+    /// # Errors
+    /// Returns an error if the writer fails.
     fn examples(&mut self) -> io::Result<()> {
         if let Some(zip) = self.tldr_zip {
             let content = if let Some(f) =
@@ -268,14 +317,14 @@ impl<'a, 'b> MDWriter<'a, 'b> {
             writeln!(self.w)?;
             for line in content.lines().skip_while(|l| !l.starts_with('-')) {
                 if let Some(l) = line.strip_prefix("- ") {
-                    writeln!(self.w, "{}", l)?;
+                    writeln!(self.w, "{l}")?;
                 } else if line.starts_with('`') {
                     writeln!(self.w, "```shell\n{}\n```", line.trim_matches('`'))?;
                 } else if line.is_empty() {
                     writeln!(self.w)?;
                 } else {
                     println!("Not sure what to do with this line:");
-                    println!("{}", line);
+                    println!("{line}");
                 }
             }
             writeln!(self.w)?;
@@ -292,6 +341,8 @@ impl<'a, 'b> MDWriter<'a, 'b> {
         Ok(())
     }
 
+    /// # Errors
+    /// Returns an error if the writer fails.
     fn options(&mut self) -> io::Result<()> {
         writeln!(self.w, "<h2>Options</h2>")?;
         write!(self.w, "<dl>")?;
@@ -305,14 +356,14 @@ impl<'a, 'b> MDWriter<'a, 'b> {
                     write!(self.w, ", ")?;
                 }
                 write!(self.w, "<code>")?;
-                write!(self.w, "--{}", l)?;
+                write!(self.w, "--{l}")?;
                 if let Some(names) = arg.get_value_names() {
                     write!(
                         self.w,
                         "={}",
                         names
                             .iter()
-                            .map(|x| format!("&lt;{}&gt;", x))
+                            .map(|x| format!("&lt;{x}&gt;"))
                             .collect::<Vec<_>>()
                             .join(" ")
                     )?;
@@ -326,14 +377,14 @@ impl<'a, 'b> MDWriter<'a, 'b> {
                     write!(self.w, ", ")?;
                 }
                 write!(self.w, "<code>")?;
-                write!(self.w, "-{}", s)?;
+                write!(self.w, "-{s}")?;
                 if let Some(names) = arg.get_value_names() {
                     write!(
                         self.w,
                         " {}",
                         names
                             .iter()
-                            .map(|x| format!("&lt;{}&gt;", x))
+                            .map(|x| format!("&lt;{x}&gt;"))
                             .collect::<Vec<_>>()
                             .join(" ")
                     )?;
@@ -341,19 +392,25 @@ impl<'a, 'b> MDWriter<'a, 'b> {
                 write!(self.w, "</code>")?;
             }
             writeln!(self.w, "</dt>")?;
+            let help_text = arg.get_help().unwrap_or_default().to_string();
+            // Try to resolve Fluent key if it looks like one, otherwise use as-is
+            let resolved_help = if help_text.starts_with(&format!("{}-help-", self.name)) {
+                self.extract_fluent_value(&help_text).unwrap_or(help_text)
+            } else {
+                help_text
+            };
             writeln!(
                 self.w,
                 "<dd>\n\n{}\n\n</dd>",
-                arg.get_help()
-                    .unwrap_or_default()
-                    .to_string()
-                    .replace('\n', "<br />")
+                resolved_help.replace('\n', "<br />")
             )?;
         }
         writeln!(self.w, "</dl>\n")
     }
 }
 
+/// # Panics
+/// Panics if the archive is not ok
 fn get_zip_content(archive: &mut ZipArchive<impl Read + Seek>, name: &str) -> Option<String> {
     let mut s = String::new();
     archive.by_name(name).ok()?.read_to_string(&mut s).unwrap();

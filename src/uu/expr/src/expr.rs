@@ -3,18 +3,19 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-use std::fmt::Display;
-
-use clap::{crate_version, Arg, ArgAction, Command};
-use syntax_tree::AstNode;
+use clap::{Arg, ArgAction, Command};
+use std::io::Write;
+use syntax_tree::{AstNode, is_truthy};
+use thiserror::Error;
+use uucore::os_string_to_vec;
+use uucore::translate;
 use uucore::{
     display::Quotable,
     error::{UError, UResult},
-    format_usage, help_about, help_section, help_usage,
+    format_usage,
 };
 
-use crate::syntax_tree::is_truthy;
-
+mod locale_aware;
 mod syntax_tree;
 
 mod options {
@@ -25,38 +26,39 @@ mod options {
 
 pub type ExprResult<T> = Result<T, ExprError>;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Error, Clone, Debug, PartialEq, Eq)]
 pub enum ExprError {
+    #[error("{}", translate!("expr-error-unexpected-argument", "arg" => _0.quote()))]
     UnexpectedArgument(String),
+    #[error("{}", translate!("expr-error-missing-argument", "arg" => _0.quote()))]
     MissingArgument(String),
+    #[error("{}", translate!("expr-error-non-integer-argument"))]
     NonIntegerArgument,
+    #[error("{}", translate!("expr-error-missing-operand"))]
     MissingOperand,
+    #[error("{}", translate!("expr-error-division-by-zero"))]
     DivisionByZero,
+    #[error("{}", translate!("expr-error-invalid-regex-expression"))]
     InvalidRegexExpression,
+    #[error("{}", translate!("expr-error-expected-closing-brace-after", "arg" => _0.quote()))]
     ExpectedClosingBraceAfter(String),
+    #[error("{}", translate!("expr-error-expected-closing-brace-instead-of", "arg" => _0.quote()))]
+    ExpectedClosingBraceInsteadOf(String),
+    #[error("{}", translate!("expr-error-unmatched-opening-parenthesis"))]
+    UnmatchedOpeningParenthesis,
+    #[error("{}", translate!("expr-error-unmatched-closing-parenthesis"))]
+    UnmatchedClosingParenthesis,
+    #[error("{}", translate!("expr-error-unmatched-opening-brace"))]
+    UnmatchedOpeningBrace,
+    #[error("{}", translate!("expr-error-invalid-bracket-content"))]
+    InvalidBracketContent,
+    #[error("{}", translate!("expr-error-trailing-backslash"))]
+    TrailingBackslash,
+    #[error("{}", translate!("expr-error-too-big-range-quantifier-index"))]
+    TooBigRangeQuantifierIndex,
+    #[error("{}", translate!("expr-error-match-utf8", "arg" => _0.quote()))]
+    UnsupportedNonUtf8Match(String),
 }
-
-impl Display for ExprError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnexpectedArgument(s) => {
-                write!(f, "syntax error: unexpected argument {}", s.quote())
-            }
-            Self::MissingArgument(s) => {
-                write!(f, "syntax error: missing argument after {}", s.quote())
-            }
-            Self::NonIntegerArgument => write!(f, "non-integer argument"),
-            Self::MissingOperand => write!(f, "missing operand"),
-            Self::DivisionByZero => write!(f, "division by zero"),
-            Self::InvalidRegexExpression => write!(f, "Invalid regex expression"),
-            Self::ExpectedClosingBraceAfter(s) => {
-                write!(f, "expected ')' after {}", s.quote())
-            }
-        }
-    }
-}
-
-impl std::error::Error for ExprError {}
 
 impl UError for ExprError {
     fn code(&self) -> i32 {
@@ -70,23 +72,24 @@ impl UError for ExprError {
 
 pub fn uu_app() -> Command {
     Command::new(uucore::util_name())
-        .version(crate_version!())
-        .about(help_about!("expr.md"))
-        .override_usage(format_usage(help_usage!("expr.md")))
-        .after_help(help_section!("after help", "expr.md"))
+        .version(uucore::crate_version!())
+        .help_template(uucore::localized_help_template(uucore::util_name()))
+        .about(translate!("expr-about"))
+        .override_usage(format_usage(&translate!("expr-usage")))
+        .after_help(translate!("expr-after-help"))
         .infer_long_args(true)
         .disable_help_flag(true)
         .disable_version_flag(true)
         .arg(
             Arg::new(options::VERSION)
                 .long(options::VERSION)
-                .help("output version information and exit")
+                .help(translate!("expr-help-version"))
                 .action(ArgAction::Version),
         )
         .arg(
             Arg::new(options::HELP)
                 .long(options::HELP)
-                .help("display this help and exit")
+                .help(translate!("expr-help-help"))
                 .action(ArgAction::Help),
         )
         .arg(
@@ -99,17 +102,32 @@ pub fn uu_app() -> Command {
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
     // For expr utility we do not want getopts.
-    // The following usage should work without escaping hyphens: `expr -15 = 1 +  2 \* \( 3 - -4 \)`
-    let matches = uu_app().try_get_matches_from(args)?;
-    let token_strings: Vec<&str> = matches
-        .get_many::<String>(options::EXPRESSION)
-        .map(|v| v.into_iter().map(|s| s.as_ref()).collect::<Vec<_>>())
-        .unwrap_or_default();
+    // The following usage should work without escaping hyphens: `expr -15 = 1 + 2 \* \( 3 - -4 \)`
+    let args = args
+        .skip(1) // Skip binary name
+        .map(os_string_to_vec)
+        .collect::<Result<Vec<_>, _>>()?;
 
-    let res: String = AstNode::parse(&token_strings)?.eval()?.eval_as_string();
-    println!("{res}");
-    if !is_truthy(&res.into()) {
-        return Err(1.into());
+    if args.len() == 1 && args[0] == b"--help" {
+        let _ = uu_app().print_help();
+    } else if args.len() == 1 && args[0] == b"--version" {
+        println!("{} {}", uucore::util_name(), uucore::crate_version!());
+    } else {
+        // The first argument may be "--" and should be be ignored.
+        let args = if !args.is_empty() && args[0] == b"--" {
+            &args[1..]
+        } else {
+            &args
+        };
+
+        let res = AstNode::parse(args)?.eval()?.eval_as_string();
+        let _ = std::io::stdout().write_all(&res);
+        let _ = std::io::stdout().write_all(b"\n");
+
+        if !is_truthy(&res.into()) {
+            return Err(1.into());
+        }
     }
+
     Ok(())
 }

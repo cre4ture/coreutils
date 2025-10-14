@@ -1,6 +1,6 @@
 name: CheckScripts
 
-# spell-checker:ignore ludeeus mfinelli
+# spell-checker:ignore ludeeus mfinelli shellcheck scandir shfmt
 
 env:
   SCRIPT_DIR: 'util'
@@ -8,7 +8,7 @@ env:
 on:
   push:
     branches:
-      - main
+      - '*'
     paths:
       - 'util/**/*.sh'
   pull_request:
@@ -29,7 +29,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@master
         env:
@@ -45,9 +47,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - name: Setup shfmt
-        uses: mfinelli/setup-shfmt@v3
+        uses: mfinelli/setup-shfmt@v4
       - name: Run shfmt
         shell: bash
         run: |

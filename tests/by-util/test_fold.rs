@@ -2,18 +2,18 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-use crate::common::util::TestScenario;
+use uutests::new_ucmd;
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 
 #[test]
 fn test_default_80_column_wrap() {
     new_ucmd!()
         .arg("lorem_ipsum.txt")
-        .run()
+        .succeeds()
         .stdout_is_fixture("lorem_ipsum_80_column.expected");
 }
 
@@ -21,7 +21,7 @@ fn test_default_80_column_wrap() {
 fn test_40_column_hard_cutoff() {
     new_ucmd!()
         .args(&["-w", "40", "lorem_ipsum.txt"])
-        .run()
+        .succeeds()
         .stdout_is_fixture("lorem_ipsum_40_column_hard.expected");
 }
 
@@ -29,7 +29,7 @@ fn test_40_column_hard_cutoff() {
 fn test_40_column_word_boundary() {
     new_ucmd!()
         .args(&["-s", "-w", "40", "lorem_ipsum.txt"])
-        .run()
+        .succeeds()
         .stdout_is_fixture("lorem_ipsum_40_column_word.expected");
 }
 
@@ -37,7 +37,7 @@ fn test_40_column_word_boundary() {
 fn test_default_wrap_with_newlines() {
     new_ucmd!()
         .arg("lorem_ipsum_new_line.txt")
-        .run()
+        .succeeds()
         .stdout_is_fixture("lorem_ipsum_new_line_80_column.expected");
 }
 
@@ -551,4 +551,31 @@ fn test_obsolete_syntax() {
         .arg("space_separated_words.txt")
         .succeeds()
         .stdout_is("test1\n \ntest2\n \ntest3\n \ntest4\n \ntest5\n \ntest6\n ");
+}
+#[test]
+fn test_byte_break_at_non_utf8_character() {
+    new_ucmd!()
+        .arg("-b")
+        .arg("-s")
+        .arg("-w")
+        .arg("40")
+        .arg("non_utf8.input")
+        .succeeds()
+        .stdout_is_fixture_bytes("non_utf8.expected");
+}
+#[test]
+fn test_tab_advances_at_non_utf8_character() {
+    new_ucmd!()
+        .arg("-w8")
+        .arg("non_utf8_tab_stops.input")
+        .succeeds()
+        .stdout_is_fixture_bytes("non_utf8_tab_stops_w8.expected");
+}
+#[test]
+fn test_all_tab_advances_at_non_utf8_character() {
+    new_ucmd!()
+        .arg("-w16")
+        .arg("non_utf8_tab_stops.input")
+        .succeeds()
+        .stdout_is_fixture_bytes("non_utf8_tab_stops_w16.expected");
 }

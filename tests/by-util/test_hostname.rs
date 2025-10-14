@@ -2,7 +2,7 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-use crate::common::util::TestScenario;
+use uutests::new_ucmd;
 
 #[test]
 fn test_hostname() {
@@ -14,8 +14,8 @@ fn test_hostname() {
     assert!(ls_default_res.stdout().len() >= ls_domain_res.stdout().len());
 }
 
-// FixME: fails for "MacOS", "freebsd" and "openbsd" "failed to lookup address information: Name does not resolve"
-#[cfg(not(any(target_os = "macos", target_os = "freebsd", target_os = "openbsd")))]
+// FixME: fails for "MacOS" => "failed to lookup address information"
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn test_hostname_ip() {
     let result = new_ucmd!().arg("-i").succeeds();
@@ -35,5 +35,5 @@ fn test_hostname_full() {
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }

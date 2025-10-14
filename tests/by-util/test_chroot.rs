@@ -4,24 +4,27 @@
 // file that was distributed with this source code.
 // spell-checker:ignore (words) araba newroot userspec chdir pwd's isroot
 
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
 #[cfg(not(target_os = "android"))]
-use crate::common::util::is_ci;
-use crate::common::util::{run_ucmd_as_root, TestScenario};
+use uutests::util::is_ci;
+use uutests::util::{TestScenario, run_ucmd_as_root};
+use uutests::util_name;
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(125);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(125);
 }
 
 #[test]
 fn test_missing_operand() {
-    let result = new_ucmd!().fails();
+    let result = new_ucmd!().fails_with_code(125);
 
-    result.code_is(125);
-
-    assert!(result
-        .stderr_str()
-        .starts_with("error: the following required arguments were not provided"));
+    assert!(
+        result
+            .stderr_str()
+            .starts_with("error: the following required arguments were not provided")
+    );
 
     assert!(result.stderr_str().contains("<newroot>"));
 }
@@ -34,11 +37,12 @@ fn test_enter_chroot_fails() {
 
     at.mkdir("jail");
 
-    let result = ucmd.arg("jail").fails();
-    result.code_is(125);
-    assert!(result
-        .stderr_str()
-        .starts_with("chroot: cannot chroot to 'jail': Operation not permitted (os error 1)"));
+    let result = ucmd.arg("jail").fails_with_code(125);
+    assert!(
+        result
+            .stderr_str()
+            .starts_with("chroot: cannot chroot to 'jail': Operation not permitted (os error 1)")
+    );
 }
 
 #[test]
@@ -48,20 +52,77 @@ fn test_no_such_directory() {
     at.touch(at.plus_as_string("a"));
 
     ucmd.arg("a")
-        .fails()
-        .stderr_is("chroot: cannot change root directory to 'a': no such directory\n")
-        .code_is(125);
+        .fails_with_code(125)
+        .stderr_is("chroot: cannot change root directory to 'a': no such directory\n");
+}
+
+#[test]
+fn test_multiple_group_args() {
+    let ts = TestScenario::new(util_name!());
+    let at = &ts.fixtures;
+    at.mkdir("id");
+
+    if let Ok(result) = run_ucmd_as_root(
+        &ts,
+        &["--groups='invalid ignored'", "--groups=''", "/", "id", "-G"],
+    ) {
+        result.success().stdout_is("0");
+    } else {
+        print!("Test skipped; requires root user");
+    }
 }
 
 #[test]
 fn test_invalid_user_spec() {
-    let (at, mut ucmd) = at_and_ucmd!();
+    let ts = TestScenario::new(util_name!());
 
-    at.mkdir("a");
+    if let Ok(result) = run_ucmd_as_root(&ts, &["--userspec=ARABA:", "/"]) {
+        result
+            .failure()
+            .code_is(125)
+            .stderr_is("chroot: invalid user");
+    } else {
+        print!("Test skipped; requires root user");
+    }
 
-    let result = ucmd.arg("a").arg("--userspec=ARABA:").fails();
-    result.code_is(125);
-    assert!(result.stderr_str().starts_with("chroot: invalid userspec"));
+    if let Ok(result) = run_ucmd_as_root(&ts, &["--userspec=ARABA:ARABA", "/"]) {
+        result
+            .failure()
+            .code_is(125)
+            .stderr_is("chroot: invalid user");
+    } else {
+        print!("Test skipped; requires root user");
+    }
+
+    if let Ok(result) = run_ucmd_as_root(&ts, &["--userspec=:ARABA", "/"]) {
+        result
+            .failure()
+            .code_is(125)
+            .stderr_is("chroot: invalid group");
+    } else {
+        print!("Test skipped; requires root user");
+    }
+}
+
+#[test]
+fn test_invalid_user() {
+    let ts = TestScenario::new(util_name!());
+    let at = &ts.fixtures;
+
+    let dir = "CHROOT_DIR";
+    at.mkdir(dir);
+    if let Ok(result) = run_ucmd_as_root(&ts, &[dir, "whoami"]) {
+        result.success().no_stderr().stdout_is("root");
+    } else {
+        print!("Test skipped; requires root user");
+    }
+
+    // `--user` is an abbreviation of `--userspec`.
+    if let Ok(result) = run_ucmd_as_root(&ts, &["--user=nobody:+65535", dir, "pwd"]) {
+        result.failure().stderr_is("chroot: invalid user");
+    } else {
+        print!("Test skipped; requires root user");
+    }
 }
 
 #[test]
@@ -94,16 +155,15 @@ fn test_preference_of_userspec() {
 
     at.mkdir("a");
 
+    // `--user` is an abbreviation of `--userspec`.
     let result = ucmd
         .arg("a")
         .arg("--user")
         .arg("fake")
-        .arg("-G")
+        .arg("--groups")
         .arg("ABC,DEF")
         .arg(format!("--userspec={username}:{group_name}"))
-        .fails();
-
-    result.code_is(125);
+        .fails_with_code(125);
 
     println!("result.stdout = {}", result.stdout_str());
     println!("result.stderr = {}", result.stderr_str());
@@ -157,9 +217,8 @@ fn test_chroot_skip_chdir_not_root() {
 
     ucmd.arg("--skip-chdir")
         .arg(dir)
-        .fails()
-        .stderr_contains("chroot: option --skip-chdir only permitted if NEWROOT is old '/'")
-        .code_is(125);
+        .fails_with_code(125)
+        .stderr_contains("chroot: option --skip-chdir only permitted if NEWROOT is old '/'");
 }
 
 #[test]

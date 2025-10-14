@@ -2,175 +2,279 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-use clap::{crate_version, Arg, Command};
-use std::collections::{BTreeMap, BTreeSet};
-use std::fs::File;
-use std::io::{stdin, BufReader, Read};
+//spell-checker:ignore TAOCP indegree
+use clap::{Arg, Command};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::ffi::OsString;
 use std::path::Path;
+use thiserror::Error;
 use uucore::display::Quotable;
-use uucore::error::{FromIo, UResult, USimpleError};
-use uucore::{format_usage, help_about, help_usage};
+use uucore::error::{UError, UResult};
+use uucore::{format_usage, show};
 
-const ABOUT: &str = help_about!("tsort.md");
-const USAGE: &str = help_usage!("tsort.md");
+use uucore::translate;
 
 mod options {
     pub const FILE: &str = "file";
 }
 
+#[derive(Debug, Error)]
+enum TsortError {
+    /// The input file is actually a directory.
+    #[error("{input}: {message}", input = .0, message = translate!("tsort-error-is-dir"))]
+    IsDir(String),
+
+    /// The number of tokens in the input data is odd.
+    ///
+    /// The list of edges must be even because each edge has two
+    /// components: a source node and a target node.
+    #[error("{input}: {message}", input = .0.maybe_quote(), message = translate!("tsort-error-odd"))]
+    NumTokensOdd(String),
+
+    /// The graph contains a cycle.
+    #[error("{input}: {message}", input = .0, message = translate!("tsort-error-loop"))]
+    Loop(String),
+
+    /// A particular node in a cycle. (This is mainly used for printing.)
+    #[error("{0}")]
+    LoopNode(String),
+}
+
+impl UError for TsortError {}
+
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-    let matches = uu_app().try_get_matches_from(args)?;
+    let matches = uucore::clap_localization::handle_clap_result(uu_app(), args)?;
 
     let input = matches
-        .get_one::<String>(options::FILE)
+        .get_one::<OsString>(options::FILE)
         .expect("Value is required by clap");
 
-    let mut stdin_buf;
-    let mut file_buf;
-    let mut reader = BufReader::new(if input == "-" {
-        stdin_buf = stdin();
-        &mut stdin_buf as &mut dyn Read
+    let data = if input == "-" {
+        let stdin = std::io::stdin();
+        std::io::read_to_string(stdin)?
     } else {
-        let path = Path::new(&input);
+        let path = Path::new(input);
         if path.is_dir() {
-            return Err(USimpleError::new(
-                1,
-                format!("{}: read error: Is a directory", input),
-            ));
+            return Err(TsortError::IsDir(input.to_string_lossy().to_string()).into());
         }
-        file_buf = File::open(path).map_err_context(|| input.to_string())?;
-        &mut file_buf as &mut dyn Read
-    });
+        std::fs::read_to_string(path)?
+    };
 
-    let mut input_buffer = String::new();
-    reader.read_to_string(&mut input_buffer)?;
-    let mut g = Graph::new();
-
-    for line in input_buffer.lines() {
-        let tokens: Vec<_> = line.split_whitespace().collect();
-        if tokens.is_empty() {
+    // Create the directed graph from pairs of tokens in the input data.
+    let mut g = Graph::new(input.to_string_lossy().to_string());
+    // Input is considered to be in the format
+    // From1 To1 From2 To2 ...
+    // with tokens separated by whitespaces
+    let mut edge_tokens = data.split_whitespace();
+    // Note: this is equivalent to iterating over edge_tokens.chunks(2)
+    // but chunks() exists only for slices and would require unnecessary Vec allocation.
+    // Itertools::chunks() is not used due to unnecessary overhead for internal RefCells
+    loop {
+        // Try take next pair of tokens
+        let Some(from) = edge_tokens.next() else {
+            // no more tokens -> end of input. Graph constructed
             break;
-        }
-        for ab in tokens.chunks(2) {
-            match ab.len() {
-                2 => g.add_edge(ab[0], ab[1]),
-                _ => {
-                    return Err(USimpleError::new(
-                        1,
-                        format!(
-                            "{}: input contains an odd number of tokens",
-                            input.maybe_quote()
-                        ),
-                    ))
-                }
-            }
-        }
+        };
+        let Some(to) = edge_tokens.next() else {
+            return Err(TsortError::NumTokensOdd(input.to_string_lossy().to_string()).into());
+        };
+        g.add_edge(from, to);
     }
 
     g.run_tsort();
-
-    if !g.is_acyclic() {
-        return Err(USimpleError::new(
-            1,
-            format!("{input}, input contains a loop:"),
-        ));
-    }
-
-    for x in &g.result {
-        println!("{x}");
-    }
-
     Ok(())
 }
 
 pub fn uu_app() -> Command {
     Command::new(uucore::util_name())
-        .version(crate_version!())
-        .override_usage(format_usage(USAGE))
-        .about(ABOUT)
+        .version(uucore::crate_version!())
+        .help_template(uucore::localized_help_template(uucore::util_name()))
+        .override_usage(format_usage(&translate!("tsort-usage")))
+        .about(translate!("tsort-about"))
         .infer_long_args(true)
         .arg(
             Arg::new(options::FILE)
                 .default_value("-")
                 .hide(true)
+                .value_parser(clap::value_parser!(OsString))
                 .value_hint(clap::ValueHint::FilePath),
         )
+}
+
+/// Find the element `x` in `vec` and remove it, returning its index.
+fn remove<T>(vec: &mut Vec<T>, x: T) -> Option<usize>
+where
+    T: PartialEq,
+{
+    vec.iter().position(|item| *item == x).inspect(|i| {
+        vec.remove(*i);
+    })
 }
 
 // We use String as a representation of node here
 // but using integer may improve performance.
 #[derive(Default)]
+struct Node<'input> {
+    successor_names: Vec<&'input str>,
+    predecessor_count: usize,
+}
+
+impl<'input> Node<'input> {
+    fn add_successor(&mut self, successor_name: &'input str) {
+        self.successor_names.push(successor_name);
+    }
+}
+
 struct Graph<'input> {
-    in_edges: BTreeMap<&'input str, BTreeSet<&'input str>>,
-    out_edges: BTreeMap<&'input str, Vec<&'input str>>,
-    result: Vec<&'input str>,
+    name: String,
+    nodes: HashMap<&'input str, Node<'input>>,
 }
 
 impl<'input> Graph<'input> {
-    fn new() -> Self {
-        Self::default()
-    }
-
-    fn has_node(&self, n: &str) -> bool {
-        self.in_edges.contains_key(n)
-    }
-
-    fn has_edge(&self, from: &str, to: &str) -> bool {
-        self.in_edges[to].contains(from)
-    }
-
-    fn init_node(&mut self, n: &'input str) {
-        self.in_edges.insert(n, BTreeSet::new());
-        self.out_edges.insert(n, vec![]);
+    fn new(name: String) -> Self {
+        Self {
+            name,
+            nodes: HashMap::default(),
+        }
     }
 
     fn add_edge(&mut self, from: &'input str, to: &'input str) {
-        if !self.has_node(to) {
-            self.init_node(to);
-        }
-
-        if !self.has_node(from) {
-            self.init_node(from);
-        }
-
-        if from != to && !self.has_edge(from, to) {
-            self.in_edges.get_mut(to).unwrap().insert(from);
-            self.out_edges.get_mut(from).unwrap().push(to);
+        let from_node = self.nodes.entry(from).or_default();
+        if from != to {
+            from_node.add_successor(to);
+            let to_node = self.nodes.entry(to).or_default();
+            to_node.predecessor_count += 1;
         }
     }
 
-    // Kahn's algorithm
-    // O(|V|+|E|)
+    fn remove_edge(&mut self, u: &'input str, v: &'input str) {
+        remove(&mut self.nodes.get_mut(u).unwrap().successor_names, v);
+        self.nodes.get_mut(v).unwrap().predecessor_count -= 1;
+    }
+
+    /// Implementation of algorithm T from TAOCP (Don. Knuth), vol. 1.
     fn run_tsort(&mut self) {
-        let mut start_nodes = vec![];
-        for (n, edges) in &self.in_edges {
-            if edges.is_empty() {
-                start_nodes.push(*n);
-            }
-        }
+        // First, we find nodes that have no prerequisites (independent nodes).
+        // If no such node exists, then there is a cycle.
+        let mut independent_nodes_queue: VecDeque<&'input str> = self
+            .nodes
+            .iter()
+            .filter_map(|(&name, node)| {
+                if node.predecessor_count == 0 {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-        while !start_nodes.is_empty() {
-            let n = start_nodes.remove(0);
+        // To make sure the resulting ordering is deterministic we
+        // need to order independent nodes.
+        //
+        // FIXME: this doesn't comply entirely with the GNU coreutils
+        // implementation.
+        independent_nodes_queue.make_contiguous().sort_unstable();
 
-            self.result.push(n);
-
-            let n_out_edges = self.out_edges.get_mut(&n).unwrap();
-            #[allow(clippy::explicit_iter_loop)]
-            for m in n_out_edges.iter() {
-                let m_in_edges = self.in_edges.get_mut(m).unwrap();
-                m_in_edges.remove(&n);
-
-                // If m doesn't have other in-coming edges add it to start_nodes
-                if m_in_edges.is_empty() {
-                    start_nodes.push(m);
+        while !self.nodes.is_empty() {
+            // Get the next node (breaking any cycles necessary to do so).
+            let v = self.find_next_node(&mut independent_nodes_queue);
+            println!("{v}");
+            if let Some(node_to_process) = self.nodes.remove(v) {
+                for successor_name in node_to_process.successor_names {
+                    let successor_node = self.nodes.get_mut(successor_name).unwrap();
+                    successor_node.predecessor_count -= 1;
+                    if successor_node.predecessor_count == 0 {
+                        // If we find nodes without any other prerequisites, we add them to the queue.
+                        independent_nodes_queue.push_back(successor_name);
+                    }
                 }
             }
-            n_out_edges.clear();
         }
     }
 
-    fn is_acyclic(&self) -> bool {
-        self.out_edges.values().all(|edge| edge.is_empty())
+    /// Get the in-degree of the node with the given name.
+    fn indegree(&self, name: &str) -> Option<usize> {
+        self.nodes.get(name).map(|data| data.predecessor_count)
+    }
+
+    // Pre-condition: self.nodes is non-empty.
+    fn find_next_node(&mut self, frontier: &mut VecDeque<&'input str>) -> &'input str {
+        // If there are no nodes of in-degree zero but there are still
+        // un-visited nodes in the graph, then there must be a cycle.
+        // We need to find the cycle, display it, and then break the
+        // cycle.
+        //
+        // A cycle is guaranteed to be of length at least two. We break
+        // the cycle by deleting an arbitrary edge (the first). That is
+        // not necessarily the optimal thing, but it should be enough to
+        // continue making progress in the graph traversal.
+        //
+        // It is possible that deleting the edge does not actually
+        // result in the target node having in-degree zero, so we repeat
+        // the process until such a node appears.
+        loop {
+            match frontier.pop_front() {
+                None => self.find_and_break_cycle(frontier),
+                Some(v) => return v,
+            }
+        }
+    }
+
+    fn find_and_break_cycle(&mut self, frontier: &mut VecDeque<&'input str>) {
+        let cycle = self.detect_cycle();
+        show!(TsortError::Loop(self.name.clone()));
+        for node in &cycle {
+            show!(TsortError::LoopNode((*node).to_string()));
+        }
+        let u = cycle[0];
+        let v = cycle[1];
+        self.remove_edge(u, v);
+        if self.indegree(v).unwrap() == 0 {
+            frontier.push_back(v);
+        }
+    }
+
+    fn detect_cycle(&self) -> Vec<&'input str> {
+        // Sort the nodes just to make this function deterministic.
+        let mut nodes: Vec<_> = self.nodes.keys().collect();
+        nodes.sort_unstable();
+
+        let mut visited = HashSet::new();
+        let mut stack = Vec::with_capacity(self.nodes.len());
+        for node in nodes {
+            if !visited.contains(node) && self.dfs(node, &mut visited, &mut stack) {
+                return stack;
+            }
+        }
+        unreachable!();
+    }
+
+    fn dfs(
+        &self,
+        node: &'input str,
+        visited: &mut HashSet<&'input str>,
+        stack: &mut Vec<&'input str>,
+    ) -> bool {
+        if stack.contains(&node) {
+            return true;
+        }
+        if visited.contains(&node) {
+            return false;
+        }
+
+        visited.insert(node);
+        stack.push(node);
+
+        if let Some(successor_names) = self.nodes.get(node).map(|n| &n.successor_names) {
+            for &successor in successor_names {
+                if self.dfs(successor, visited, stack) {
+                    return true;
+                }
+            }
+        }
+
+        stack.pop();
+        false
     }
 }
