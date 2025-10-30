@@ -27,6 +27,7 @@ use progress::{gen_prog_updater, ProgUpdate, ReadStat, StatusLevel, WriteStat};
 use uucore::fs::FileExtSeekable;
 use uucore::io::OwnedFileDescriptorOrHandle;
 
+use std::alloc::Layout;
 use std::cmp;
 use std::env;
 use std::fs::{File, OpenOptions};
@@ -1163,7 +1164,18 @@ fn dd_copy(mut i: Input, o: Output) -> UResult<()> {
 
     // Create a common buffer with a capacity of the block size.
     // This is the max size needed.
-    let mut buf = vec![BUF_INIT_BYTE; bsize];
+    // Allocate aligned memory for direct I/O operations (TODO: is there a safe way?)
+    let layout = Layout::from_size_align(bsize, bsize).unwrap();
+    let ptr = unsafe { std::alloc::alloc(layout) };
+    if ptr.is_null() {
+        std::alloc::handle_alloc_error(layout);
+    }
+    // Initialize the memory with BUF_INIT_BYTE
+    unsafe {
+        std::ptr::write_bytes(ptr, BUF_INIT_BYTE, bsize);
+    }
+    // TODO: use slice (non-resizable) instead of Vec
+    let mut buf = unsafe { Vec::from_raw_parts(ptr, bsize, bsize) };
 
     // Spawn a timer thread to provide a scheduled signal indicating when we
     // should send an update of our progress to the reporting thread.
@@ -1317,6 +1329,8 @@ fn make_linux_oflags(oflags: &OFlags) -> Option<libc::c_int> {
     // oflag=FLAG
     if oflags.append {
         flag |= libc::O_APPEND;
+    } else {
+        flag |= libc::O_TRUNC;
     }
     if oflags.direct {
         flag |= libc::O_DIRECT;
@@ -1458,7 +1472,7 @@ fn is_stdout_redirected_to_seekable_file() -> bool {
         return false;
     };
     let mut f = fx.into_file();
-    f.is_seekable()
+    FileExtSeekable::is_seekable(&mut f)
 }
 
 /// Try to get the len if it is a block device

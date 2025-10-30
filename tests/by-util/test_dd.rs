@@ -1732,7 +1732,7 @@ fn test_reading_partial_blocks_from_fifo_unbuffered() {
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 #[test]
-fn test_reading_and_writing_with_direct_flag_from_and_to_files_with_irregular_size() {
+fn test_reading_and_writing_with_direct_flag_from_and_to_files_with_regular_size() {
     use uucore::fs::sane_blksize::sane_blksize_from_path;
 
     let ts = TestScenario::new(util_name!());
@@ -1742,30 +1742,19 @@ fn test_reading_and_writing_with_direct_flag_from_and_to_files_with_irregular_si
 
     let p = |m: i64, o: i64| (min_direct_block_size * m + o).to_string();
 
-    ts.ccmd("truncate")
-        .args(&["-s", p(1, -1).as_str(), "short"])
-        .succeeds();
-    ts.ccmd("truncate")
-        .args(&["-s", p(16, 0).as_str(), "in"])
-        .succeeds();
-    ts.ccmd("truncate")
-        .args(&["-s", p(16, -1).as_str(), "m1"])
-        .succeeds();
-    ts.ccmd("truncate")
-        .args(&["-s", p(16, 1).as_str(), "p1"])
-        .succeeds();
-
-    ts.ucmd()
-        .arg(format!("bs={}", min_direct_block_size))
-        .args(&["if=in", "oflag=direct", "of=out"])
-        .succeeds();
-
-    for testfile in ["short", "m1", "p1"] {
-        at.remove("out");
+    let out_file_name = "out";
+    for in_file_size in [p(1, 0), p(2, 0), p(16, 0), p(16, 1), p(16, -1)] {
+        if at.file_exists(out_file_name) {
+            at.remove(out_file_name);
+        }
+        let in_file_name = format!("in_{in_file_size}");
+        ts.ccmd("truncate")
+            .args(&["-s", in_file_size.as_str(), in_file_name.as_str()])
+            .succeeds();
         ts.ucmd()
-            .arg(format!("if={testfile}"))
+            .arg(format!("if={in_file_name}"))
             .arg(format!("bs={}", min_direct_block_size))
-            .args(&["iflag=direct", "oflag=direct", "of=out"])
+            .args(&["iflag=direct", "oflag=direct", format!("of={out_file_name}").as_str()])
             .succeeds();
     }
 }
