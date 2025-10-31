@@ -2,39 +2,75 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-// spell-checker:ignore overridable
-use crate::common::util::TestScenario;
+// spell-checker:ignore overridable colorterm
+#[cfg(target_os = "linux")]
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
 
-use dircolors::{guess_syntax, OutputFmt, StrUtils};
+use dircolors::{OutputFmt, StrUtils, guess_syntax};
+
+#[test]
+#[cfg(target_os = "linux")]
+fn test_dircolors_non_utf8_paths() {
+    use std::os::unix::ffi::OsStringExt;
+    let (at, mut ucmd) = at_and_ucmd!();
+
+    let filename = std::ffi::OsString::from_vec(vec![0xFF, 0xFE]);
+    std::fs::write(at.plus(&filename), b"NORMAL 00\n*.txt 32\n").unwrap();
+
+    ucmd.env("SHELL", "bash")
+        .arg(&filename)
+        .succeeds()
+        .stdout_contains("LS_COLORS=")
+        .stdout_contains("*.txt=32");
+}
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 
 #[test]
 fn test_shell_syntax() {
     use std::env;
     let last = env::var("SHELL");
-    env::set_var("SHELL", "/path/csh");
+    unsafe {
+        env::set_var("SHELL", "/path/csh");
+    }
     assert_eq!(OutputFmt::CShell, guess_syntax());
-    env::set_var("SHELL", "csh");
+    unsafe {
+        env::set_var("SHELL", "csh");
+    }
     assert_eq!(OutputFmt::CShell, guess_syntax());
-    env::set_var("SHELL", "/path/bash");
+    unsafe {
+        env::set_var("SHELL", "/path/bash");
+    }
     assert_eq!(OutputFmt::Shell, guess_syntax());
-    env::set_var("SHELL", "bash");
+    unsafe {
+        env::set_var("SHELL", "bash");
+    }
     assert_eq!(OutputFmt::Shell, guess_syntax());
-    env::set_var("SHELL", "/asd/bar");
+    unsafe {
+        env::set_var("SHELL", "/asd/bar");
+    }
     assert_eq!(OutputFmt::Shell, guess_syntax());
-    env::set_var("SHELL", "foo");
+    unsafe {
+        env::set_var("SHELL", "foo");
+    }
     assert_eq!(OutputFmt::Shell, guess_syntax());
-    env::set_var("SHELL", "");
+    unsafe {
+        env::set_var("SHELL", "");
+    }
     assert_eq!(OutputFmt::Unknown, guess_syntax());
-    env::remove_var("SHELL");
+    unsafe {
+        env::remove_var("SHELL");
+    }
     assert_eq!(OutputFmt::Unknown, guess_syntax());
 
     if let Ok(s) = last {
-        env::set_var("SHELL", s);
+        unsafe {
+            env::set_var("SHELL", s);
+        }
     }
 }
 
@@ -66,7 +102,7 @@ fn test_keywords() {
 fn test_internal_db() {
     new_ucmd!()
         .arg("-p")
-        .run()
+        .succeeds()
         .stdout_is_fixture("internal.expected");
 }
 
@@ -74,7 +110,7 @@ fn test_internal_db() {
 fn test_ls_colors() {
     new_ucmd!()
         .arg("--print-ls-colors")
-        .run()
+        .succeeds()
         .stdout_is_fixture("ls_colors.expected");
 }
 
@@ -83,7 +119,7 @@ fn test_bash_default() {
     new_ucmd!()
         .env("TERM", "screen")
         .arg("-b")
-        .run()
+        .succeeds()
         .stdout_is_fixture("bash_def.expected");
 }
 
@@ -92,7 +128,7 @@ fn test_csh_default() {
     new_ucmd!()
         .env("TERM", "screen")
         .arg("-c")
-        .run()
+        .succeeds()
         .stdout_is_fixture("csh_def.expected");
 }
 #[test]
@@ -100,12 +136,12 @@ fn test_overridable_args() {
     new_ucmd!()
         .env("TERM", "screen")
         .arg("-bc")
-        .run()
+        .succeeds()
         .stdout_is_fixture("csh_def.expected");
     new_ucmd!()
         .env("TERM", "screen")
         .arg("-cb")
-        .run()
+        .succeeds()
         .stdout_is_fixture("bash_def.expected");
 }
 
@@ -200,15 +236,15 @@ TERM {term_pattern}
             .no_stderr();
     }
 
-    let expectation_if_match = r#"
+    let expectation_if_match = r"
 LS_COLORS='*.term_matching=00;38;5;61:';
 export LS_COLORS
-"#
+"
     .trim_start();
-    let expectation_if_no_match = r#"
+    let expectation_if_no_match = r"
 LS_COLORS='';
 export LS_COLORS
-"#
+"
     .trim_start();
 
     // sanity checks
@@ -226,14 +262,14 @@ fn test_helper(file_name: &str, term: &str) {
         .env("TERM", term)
         .arg("-c")
         .arg(format!("{file_name}.txt"))
-        .run()
+        .succeeds()
         .stdout_is_fixture(format!("{file_name}.csh.expected"));
 
     new_ucmd!()
         .env("TERM", term)
         .arg("-b")
         .arg(format!("{file_name}.txt"))
-        .run()
+        .succeeds()
         .stdout_is_fixture(format!("{file_name}.sh.expected"));
 }
 
@@ -252,4 +288,15 @@ fn test_repeated() {
     for arg in ["-b", "-c", "--print-database", "--print-ls-colors"] {
         new_ucmd!().arg(arg).arg(arg).succeeds().no_stderr();
     }
+}
+
+#[test]
+fn test_colorterm_empty_with_wildcard() {
+    new_ucmd!()
+        .env("COLORTERM", "")
+        .pipe_in("COLORTERM ?*\nowt 40;33\n")
+        .args(&["-b", "-"])
+        .succeeds()
+        .stdout_is("LS_COLORS='';\nexport LS_COLORS\n")
+        .no_stderr();
 }

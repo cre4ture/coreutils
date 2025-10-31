@@ -4,11 +4,12 @@
 // file that was distributed with this source code.
 
 // spell-checker:ignore (ToDO) unwritable
-use crate::common::util::TestScenario;
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 
 #[test]
@@ -93,7 +94,7 @@ fn test_very_large_range() {
     let num_samples = 10;
     let result = new_ucmd!()
         .arg("-n")
-        .arg(&num_samples.to_string())
+        .arg(num_samples.to_string())
         .arg("-i0-1234567890")
         .succeeds();
     result.no_stderr();
@@ -106,7 +107,7 @@ fn test_very_large_range() {
         .collect();
     assert_eq!(result_seq.len(), num_samples, "Miscounted output length!");
     assert!(
-        result_seq.iter().all(|x| (0..=1234567890).contains(x)),
+        result_seq.iter().all(|x| (0..=1_234_567_890).contains(x)),
         "Output includes element not from range: {}",
         result.stdout_str()
     );
@@ -117,7 +118,7 @@ fn test_very_large_range_offset() {
     let num_samples = 10;
     let result = new_ucmd!()
         .arg("-n")
-        .arg(&num_samples.to_string())
+        .arg(num_samples.to_string())
         .arg("-i1234567890-2147483647")
         .succeeds();
     result.no_stderr();
@@ -132,7 +133,7 @@ fn test_very_large_range_offset() {
     assert!(
         result_seq
             .iter()
-            .all(|x| (1234567890..=2147483647).contains(x)),
+            .all(|x| (1_234_567_890..=2_147_483_647).contains(x)),
         "Output includes element not from range: {}",
         result.stdout_str()
     );
@@ -140,10 +141,10 @@ fn test_very_large_range_offset() {
 
 #[test]
 fn test_range_repeat_no_overflow_1_max() {
-    let upper_bound = std::usize::MAX;
+    let upper_bound = usize::MAX;
     let result = new_ucmd!()
         .arg("-rn1")
-        .arg(&format!("-i1-{upper_bound}"))
+        .arg(format!("-i1-{upper_bound}"))
         .succeeds();
     result.no_stderr();
 
@@ -158,10 +159,10 @@ fn test_range_repeat_no_overflow_1_max() {
 
 #[test]
 fn test_range_repeat_no_overflow_0_max_minus_1() {
-    let upper_bound = std::usize::MAX - 1;
+    let upper_bound = usize::MAX - 1;
     let result = new_ucmd!()
         .arg("-rn1")
-        .arg(&format!("-i0-{upper_bound}"))
+        .arg(format!("-i0-{upper_bound}"))
         .succeeds();
     result.no_stderr();
 
@@ -176,10 +177,10 @@ fn test_range_repeat_no_overflow_0_max_minus_1() {
 
 #[test]
 fn test_range_permute_no_overflow_1_max() {
-    let upper_bound = std::usize::MAX;
+    let upper_bound = usize::MAX;
     let result = new_ucmd!()
         .arg("-n1")
-        .arg(&format!("-i1-{upper_bound}"))
+        .arg(format!("-i1-{upper_bound}"))
         .succeeds();
     result.no_stderr();
 
@@ -194,10 +195,10 @@ fn test_range_permute_no_overflow_1_max() {
 
 #[test]
 fn test_range_permute_no_overflow_0_max_minus_1() {
-    let upper_bound = std::usize::MAX - 1;
+    let upper_bound = usize::MAX - 1;
     let result = new_ucmd!()
         .arg("-n1")
-        .arg(&format!("-i0-{upper_bound}"))
+        .arg(format!("-i0-{upper_bound}"))
         .succeeds();
     result.no_stderr();
 
@@ -215,10 +216,10 @@ fn test_range_permute_no_overflow_0_max() {
     // NOTE: This is different from GNU shuf!
     // GNU shuf accepts -i0-MAX-1 and -i1-MAX, but not -i0-MAX.
     // This feels like a bug in GNU shuf.
-    let upper_bound = std::usize::MAX;
+    let upper_bound = usize::MAX;
     let result = new_ucmd!()
         .arg("-n1")
-        .arg(&format!("-i0-{upper_bound}"))
+        .arg(format!("-i0-{upper_bound}"))
         .succeeds();
     result.no_stderr();
 
@@ -234,7 +235,13 @@ fn test_range_permute_no_overflow_0_max() {
 #[test]
 fn test_very_high_range_full() {
     let input_seq = vec![
-        2147483641, 2147483642, 2147483643, 2147483644, 2147483645, 2147483646, 2147483647,
+        2_147_483_641,
+        2_147_483_642,
+        2_147_483_643,
+        2_147_483_644,
+        2_147_483_645,
+        2_147_483_646,
+        2_147_483_647,
     ];
     let result = new_ucmd!().arg("-i2147483641-2147483647").succeeds();
     result.no_stderr();
@@ -255,7 +262,7 @@ fn test_range_repeat() {
     let result = new_ucmd!()
         .arg("-r")
         .arg("-n")
-        .arg(&num_samples.to_string())
+        .arg(num_samples.to_string())
         .arg("-i12-34")
         .succeeds();
     result.no_stderr();
@@ -320,7 +327,7 @@ fn test_echo_multi() {
         .stdout_str()
         .split('\n')
         .filter(|x| !x.is_empty())
-        .map(|x| x.into())
+        .map(std::convert::Into::into)
         .collect();
     result_seq.sort_unstable();
     assert_eq!(result_seq, ["a", "b", "c"], "Output is not a permutation");
@@ -335,7 +342,7 @@ fn test_echo_postfix() {
         .stdout_str()
         .split('\n')
         .filter(|x| !x.is_empty())
-        .map(|x| x.into())
+        .map(std::convert::Into::into)
         .collect();
     result_seq.sort_unstable();
     assert_eq!(result_seq, ["a", "b", "c"], "Output is not a permutation");
@@ -354,6 +361,51 @@ fn test_echo_short_collapsed_zero() {
         .collect();
     result_seq.sort_unstable();
     assert_eq!(result_seq, ["a", "b", "c"], "Output is not a permutation");
+}
+
+#[test]
+fn test_echo_separators_in_arguments() {
+    // We used to split arguments themselves on newlines, but this was wrong.
+    // shuf should behave as though it's shuffling two arguments and therefore
+    // output all of them.
+    // (Note that arguments can't contain null bytes so we don't need to test that.)
+    let result = new_ucmd!()
+        .arg("-e")
+        .arg("-n2")
+        .arg("a\nb")
+        .arg("c\nd")
+        .succeeds();
+    result.no_stderr();
+    assert_eq!(result.stdout_str().len(), 8, "Incorrect output length");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_echo_invalid_unicode_in_arguments() {
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+
+    let result = new_ucmd!()
+        .arg("-e")
+        .arg(OsStr::from_bytes(b"a\xFFb"))
+        .arg("ok")
+        .succeeds();
+    result.no_stderr();
+    assert!(result.stdout().contains(&b'\xFF'));
+}
+
+#[cfg(any(unix, target_os = "wasi"))]
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn test_invalid_unicode_in_filename() {
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+
+    let (at, mut ucmd) = at_and_ucmd!();
+    let filename = OsStr::from_bytes(b"a\xFFb");
+    at.append(filename, "foo\n");
+
+    let result = ucmd.arg(filename).succeeds();
+    result.no_stderr();
+    assert_eq!(result.stdout(), b"foo\n");
 }
 
 #[test]
@@ -472,9 +524,9 @@ fn test_head_count_multi_big_then_small() {
 
     let result = new_ucmd!()
         .arg("-n")
-        .arg(&(repeat_limit + 1).to_string())
+        .arg((repeat_limit + 1).to_string())
         .arg("-n")
-        .arg(&repeat_limit.to_string())
+        .arg(repeat_limit.to_string())
         .pipe_in(input.as_bytes())
         .succeeds();
     result.no_stderr();
@@ -505,9 +557,9 @@ fn test_head_count_multi_small_then_big() {
 
     let result = new_ucmd!()
         .arg("-n")
-        .arg(&repeat_limit.to_string())
+        .arg(repeat_limit.to_string())
         .arg("-n")
-        .arg(&(repeat_limit + 1).to_string())
+        .arg((repeat_limit + 1).to_string())
         .pipe_in(input.as_bytes())
         .succeeds();
     result.no_stderr();
@@ -641,23 +693,21 @@ fn test_shuf_invalid_input_range_one() {
     new_ucmd!()
         .args(&["-i", "0"])
         .fails()
-        .stderr_contains("invalid input range");
+        .stderr_contains("invalid value '0' for '--input-range <LO-HI>': missing '-'");
 }
 
 #[test]
 fn test_shuf_invalid_input_range_two() {
-    new_ucmd!()
-        .args(&["-i", "a-9"])
-        .fails()
-        .stderr_contains("invalid input range: 'a'");
+    new_ucmd!().args(&["-i", "a-9"]).fails().stderr_contains(
+        "invalid value 'a-9' for '--input-range <LO-HI>': invalid digit found in string",
+    );
 }
 
 #[test]
 fn test_shuf_invalid_input_range_three() {
-    new_ucmd!()
-        .args(&["-i", "0-b"])
-        .fails()
-        .stderr_contains("invalid input range: 'b'");
+    new_ucmd!().args(&["-i", "0-b"]).fails().stderr_contains(
+        "invalid value '0-b' for '--input-range <LO-HI>': invalid digit found in string",
+    );
 }
 
 #[test]
@@ -696,10 +746,9 @@ fn test_shuf_three_input_files() {
 
 #[test]
 fn test_shuf_invalid_input_line_count() {
-    new_ucmd!()
-        .args(&["-n", "a"])
-        .fails()
-        .stderr_contains("invalid line count: 'a'");
+    new_ucmd!().args(&["-n", "a"]).fails().stderr_contains(
+        "invalid value 'a' for '--head-count <COUNT>': invalid digit found in string",
+    );
 }
 
 #[test]
@@ -766,7 +815,7 @@ fn test_range_empty_minus_one() {
         .arg("-i5-3")
         .fails()
         .no_stdout()
-        .stderr_only("shuf: invalid input range: '5-3'\n");
+        .stderr_contains("invalid value '5-3' for '--input-range <LO-HI>': start exceeds end\n");
 }
 
 #[test]
@@ -796,5 +845,5 @@ fn test_range_repeat_empty_minus_one() {
         .arg("-ri5-3")
         .fails()
         .no_stdout()
-        .stderr_only("shuf: invalid input range: '5-3'\n");
+        .stderr_contains("invalid value '5-3' for '--input-range <LO-HI>': start exceeds end\n");
 }

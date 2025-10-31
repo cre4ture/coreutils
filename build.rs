@@ -11,13 +11,17 @@ use std::io::Write;
 use std::path::Path;
 
 pub fn main() {
-    if let Ok(profile) = env::var("PROFILE") {
-        println!("cargo:rustc-cfg=build={profile:?}");
-    }
-
     const ENV_FEATURE_PREFIX: &str = "CARGO_FEATURE_";
     const FEATURE_PREFIX: &str = "feat_";
     const OVERRIDE_PREFIX: &str = "uu_";
+
+    // Do not rebuild build script unless the script itself or the enabled features are modified
+    // See <https://doc.rust-lang.org/cargo/reference/build-scripts.html#change-detection>
+    println!("cargo:rerun-if-changed=build.rs");
+
+    if let Ok(profile) = env::var("PROFILE") {
+        println!("cargo:rustc-cfg=build={profile:?}");
+    }
 
     let out_dir = env::var("OUT_DIR").unwrap();
 
@@ -29,8 +33,10 @@ pub fn main() {
             #[allow(clippy::match_same_arms)]
             match krate.as_ref() {
                 "default" | "macos" | "unix" | "windows" | "selinux" | "zip" => continue, // common/standard feature names
-                "nightly" | "test_unimplemented" => continue, // crate-local custom features
-                "uudoc" => continue,                          // is not a utility
+                "nightly" | "test_unimplemented" | "expensive_tests" | "test_risky_names" => {
+                    continue;
+                } // crate-local custom features
+                "uudoc" => continue, // is not a utility
                 "test" => continue, // over-ridden with 'uu_test' to avoid collision with rust core crate 'test'
                 s if s.starts_with(FEATURE_PREFIX) => continue, // crate feature sets
                 _ => {}             // util feature name
@@ -46,6 +52,7 @@ pub fn main() {
         "type UtilityMap<T> = phf::OrderedMap<&'static str, (fn(T) -> i32, fn() -> Command)>;\n\
          \n\
          #[allow(clippy::too_many_lines)]
+         #[allow(clippy::unreadable_literal)]
          fn util_map<T: uucore::Args>() -> UtilityMap<T> {\n"
             .as_bytes(),
     )
@@ -58,39 +65,39 @@ pub fn main() {
             // 'test' is named uu_test to avoid collision with rust core crate 'test'.
             // It can also be invoked by name '[' for the '[ expr ] syntax'.
             "uu_test" => {
-                phf_map.entry("test", &map_value);
-                phf_map.entry("[", &map_value);
+                phf_map.entry("test", map_value.clone());
+                phf_map.entry("[", map_value.clone());
             }
             k if k.starts_with(OVERRIDE_PREFIX) => {
-                phf_map.entry(&k[OVERRIDE_PREFIX.len()..], &map_value);
+                phf_map.entry(&k[OVERRIDE_PREFIX.len()..], map_value.clone());
             }
             "false" | "true" => {
-                phf_map.entry(krate, &format!("(r#{krate}::uumain, r#{krate}::uu_app)"));
+                phf_map.entry(krate, format!("(r#{krate}::uumain, r#{krate}::uu_app)"));
             }
             "hashsum" => {
-                phf_map.entry(krate, &format!("({krate}::uumain, {krate}::uu_app_custom)"));
+                phf_map.entry(krate, format!("({krate}::uumain, {krate}::uu_app_custom)"));
 
                 let map_value = format!("({krate}::uumain, {krate}::uu_app_common)");
                 let map_value_bits = format!("({krate}::uumain, {krate}::uu_app_bits)");
                 let map_value_b3sum = format!("({krate}::uumain, {krate}::uu_app_b3sum)");
-                phf_map.entry("md5sum", &map_value);
-                phf_map.entry("sha1sum", &map_value);
-                phf_map.entry("sha224sum", &map_value);
-                phf_map.entry("sha256sum", &map_value);
-                phf_map.entry("sha384sum", &map_value);
-                phf_map.entry("sha512sum", &map_value);
-                phf_map.entry("sha3sum", &map_value_bits);
-                phf_map.entry("sha3-224sum", &map_value);
-                phf_map.entry("sha3-256sum", &map_value);
-                phf_map.entry("sha3-384sum", &map_value);
-                phf_map.entry("sha3-512sum", &map_value);
-                phf_map.entry("shake128sum", &map_value_bits);
-                phf_map.entry("shake256sum", &map_value_bits);
-                phf_map.entry("b2sum", &map_value);
-                phf_map.entry("b3sum", &map_value_b3sum);
+                phf_map.entry("md5sum", map_value.clone());
+                phf_map.entry("sha1sum", map_value.clone());
+                phf_map.entry("sha224sum", map_value.clone());
+                phf_map.entry("sha256sum", map_value.clone());
+                phf_map.entry("sha384sum", map_value.clone());
+                phf_map.entry("sha512sum", map_value.clone());
+                phf_map.entry("sha3sum", map_value_bits.clone());
+                phf_map.entry("sha3-224sum", map_value.clone());
+                phf_map.entry("sha3-256sum", map_value.clone());
+                phf_map.entry("sha3-384sum", map_value.clone());
+                phf_map.entry("sha3-512sum", map_value.clone());
+                phf_map.entry("shake128sum", map_value_bits.clone());
+                phf_map.entry("shake256sum", map_value_bits.clone());
+                phf_map.entry("b2sum", map_value.clone());
+                phf_map.entry("b3sum", map_value_b3sum);
             }
             _ => {
-                phf_map.entry(krate, &map_value);
+                phf_map.entry(krate, map_value.clone());
             }
         }
     }

@@ -12,21 +12,14 @@ use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
-
-use quick_error::ResultExt;
-
+use uucore::buf_copy;
 use uucore::mode::get_umask;
+use uucore::translate;
 
-use crate::{CopyDebug, CopyResult, OffloadReflinkDebug, ReflinkMode, SparseDebug, SparseMode};
-
-// From /usr/include/linux/fs.h:
-// #define FICLONE		_IOW(0x94, 9, int)
-// Use a macro as libc::ioctl expects u32 or u64 depending on the arch
-macro_rules! FICLONE {
-    () => {
-        0x40049409
-    };
-}
+use crate::{
+    CopyDebug, CopyResult, CpError, OffloadReflinkDebug, ReflinkMode, SparseDebug, SparseMode,
+    is_stream,
+};
 
 /// The fallback behavior for [`clone`] on failed system call.
 #[derive(Clone, Copy)]
@@ -37,10 +30,10 @@ enum CloneFallback {
     /// Use [`std::fs::copy`].
     FSCopy,
 
-    /// Use sparse_copy
+    /// Use [`sparse_copy`]
     SparseCopy,
 
-    /// Use sparse_copy_without_hole
+    /// Use [`sparse_copy_without_hole`]
     SparseCopyWithoutHole,
 }
 
@@ -51,9 +44,9 @@ enum CopyMethod {
     SparseCopy,
     /// Use [`std::fs::copy`].
     FSCopy,
-    /// Default (can either be sparse_copy or FSCopy)
+    /// Default (can either be [`CopyMethod::SparseCopy`] or [`CopyMethod::FSCopy`])
     Default,
-    /// Use sparse_copy_without_hole
+    /// Use [`sparse_copy_without_hole`]
     SparseCopyWithoutHole,
 }
 
@@ -69,7 +62,7 @@ where
     let dst_file = File::create(&dest)?;
     let src_fd = src_file.as_raw_fd();
     let dst_fd = dst_file.as_raw_fd();
-    let result = unsafe { libc::ioctl(dst_fd, FICLONE!(), src_fd) };
+    let result = unsafe { libc::ioctl(dst_fd, libc::FICLONE, src_fd) };
     if result == 0 {
         return Ok(());
     }
@@ -124,8 +117,8 @@ fn check_sparse_detection(source: &Path) -> Result<bool, std::io::Error> {
     Ok(false)
 }
 
-/// Optimized sparse_copy, doesn't create holes for large sequences of zeros in non sparse_files
-/// Used when --sparse=auto
+/// Optimized [`sparse_copy`] doesn't create holes for large sequences of zeros in non `sparse_files`
+/// Used when `--sparse=auto`
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn sparse_copy_without_hole<P>(source: P, dest: P) -> std::io::Result<()>
 where
@@ -141,6 +134,10 @@ where
     }
     let src_fd = src_file.as_raw_fd();
     let mut current_offset: isize = 0;
+    // Maximize the data read at once to 16 MiB to avoid memory hogging with large files
+    // 16 MiB chunks should saturate an SSD
+    let step = std::cmp::min(size, 16 * 1024 * 1024) as usize;
+    let mut buf: Vec<u8> = vec![0x0; step];
     loop {
         let result = unsafe { libc::lseek(src_fd, current_offset.try_into().unwrap(), SEEK_DATA) }
             .try_into()
@@ -158,22 +155,20 @@ where
             return Err(std::io::Error::last_os_error());
         }
         let len: isize = hole - current_offset;
-        let mut buf: Vec<u8> = vec![0x0; len as usize];
-        src_file.read_exact_at(&mut buf, current_offset as u64)?;
-        unsafe {
-            libc::pwrite(
-                dst_fd,
-                buf.as_ptr() as *const libc::c_void,
-                len as usize,
-                current_offset.try_into().unwrap(),
-            )
-        };
+        // Read and write data in chunks of `step` while reusing the same buffer
+        for i in (0..len).step_by(step) {
+            // Ensure we don't read past the end of the file or the start of the next hole
+            let read_len = std::cmp::min((len - i) as usize, step);
+            let buf = &mut buf[..read_len];
+            src_file.read_exact_at(buf, (current_offset + i) as u64)?;
+            dst_file.write_all_at(buf, (current_offset + i) as u64)?;
+        }
         current_offset = hole;
     }
     Ok(())
 }
 /// Perform a sparse copy from one file to another.
-/// Creates a holes for large sequences of zeros in non_sparse_files, used for --sparse=always
+/// Creates a holes for large sequences of zeros in `non_sparse_files`, used for `--sparse=always`
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn sparse_copy<P>(source: P, dest: P) -> std::io::Result<()>
 where
@@ -197,15 +192,9 @@ where
     // https://www.kernel.org/doc/html/latest/filesystems/fiemap.html
     while current_offset < size {
         let this_read = src_file.read(&mut buf)?;
+        let buf = &buf[..this_read];
         if buf.iter().any(|&x| x != 0) {
-            unsafe {
-                libc::pwrite(
-                    dst_fd,
-                    buf.as_ptr() as *const libc::c_void,
-                    this_read,
-                    current_offset.try_into().unwrap(),
-                )
-            };
+            dst_file.write_all_at(buf, current_offset.try_into().unwrap())?;
         }
         current_offset += this_read;
     }
@@ -224,8 +213,8 @@ fn check_dest_is_fifo(dest: &Path) -> bool {
     }
 }
 
-/// Copy the contents of the given source FIFO to the given file.
-fn copy_fifo_contents<P>(source: P, dest: P) -> std::io::Result<u64>
+/// Copy the contents of a stream from `source` to `dest`.
+fn copy_stream<P>(source: P, dest: P) -> std::io::Result<u64>
 where
     P: AsRef<Path>,
 {
@@ -254,24 +243,27 @@ where
         .write(true)
         .mode(mode)
         .open(&dest)?;
-    let num_bytes_copied = std::io::copy(&mut src_file, &mut dst_file)?;
-    dst_file.set_permissions(src_file.metadata()?.permissions())?;
+
+    let dest_is_stream = is_stream(&dst_file.metadata()?);
+    if !dest_is_stream {
+        // `copy_stream` doesn't clear the dest file, if dest is not a stream, we should clear it manually.
+        dst_file.set_len(0)?;
+    }
+
+    let num_bytes_copied = buf_copy::copy_stream(&mut src_file, &mut dst_file)
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::Other))?;
+
     Ok(num_bytes_copied)
 }
 
 /// Copies `source` to `dest` using copy-on-write if possible.
-///
-/// The `source_is_fifo` flag must be set to `true` if and only if
-/// `source` is a FIFO (also known as a named pipe). In this case,
-/// copy-on-write is not possible, so we copy the contents using
-/// [`std::io::copy`].
 pub(crate) fn copy_on_write(
     source: &Path,
     dest: &Path,
     reflink_mode: ReflinkMode,
     sparse_mode: SparseMode,
     context: &str,
-    source_is_fifo: bool,
+    source_is_stream: bool,
 ) -> CopyResult<CopyDebug> {
     let mut copy_debug = CopyDebug {
         offload: OffloadReflinkDebug::Unknown,
@@ -283,10 +275,9 @@ pub(crate) fn copy_on_write(
             copy_debug.sparse_detection = SparseDebug::Zeros;
             // Default SparseDebug val for SparseMode::Always
             copy_debug.reflink = OffloadReflinkDebug::No;
-            if source_is_fifo {
+            if source_is_stream {
                 copy_debug.offload = OffloadReflinkDebug::Avoided;
-
-                copy_fifo_contents(source, dest).map(|_| ())
+                copy_stream(source, dest).map(|_| ())
             } else {
                 let mut copy_method = CopyMethod::Default;
                 let result = handle_reflink_never_sparse_always(source, dest);
@@ -304,10 +295,9 @@ pub(crate) fn copy_on_write(
         (ReflinkMode::Never, SparseMode::Never) => {
             copy_debug.reflink = OffloadReflinkDebug::No;
 
-            if source_is_fifo {
+            if source_is_stream {
                 copy_debug.offload = OffloadReflinkDebug::Avoided;
-
-                copy_fifo_contents(source, dest).map(|_| ())
+                copy_stream(source, dest).map(|_| ())
             } else {
                 let result = handle_reflink_never_sparse_never(source);
                 if let Ok(debug) = result {
@@ -319,9 +309,9 @@ pub(crate) fn copy_on_write(
         (ReflinkMode::Never, SparseMode::Auto) => {
             copy_debug.reflink = OffloadReflinkDebug::No;
 
-            if source_is_fifo {
+            if source_is_stream {
                 copy_debug.offload = OffloadReflinkDebug::Avoided;
-                copy_fifo_contents(source, dest).map(|_| ())
+                copy_stream(source, dest).map(|_| ())
             } else {
                 let mut copy_method = CopyMethod::Default;
                 let result = handle_reflink_never_sparse_auto(source, dest);
@@ -338,11 +328,10 @@ pub(crate) fn copy_on_write(
         }
         (ReflinkMode::Auto, SparseMode::Always) => {
             copy_debug.sparse_detection = SparseDebug::Zeros; // Default SparseDebug val for
-                                                              // SparseMode::Always
-            if source_is_fifo {
+            // SparseMode::Always
+            if source_is_stream {
                 copy_debug.offload = OffloadReflinkDebug::Avoided;
-
-                copy_fifo_contents(source, dest).map(|_| ())
+                copy_stream(source, dest).map(|_| ())
             } else {
                 let mut copy_method = CopyMethod::Default;
                 let result = handle_reflink_auto_sparse_always(source, dest);
@@ -360,9 +349,9 @@ pub(crate) fn copy_on_write(
 
         (ReflinkMode::Auto, SparseMode::Never) => {
             copy_debug.reflink = OffloadReflinkDebug::No;
-            if source_is_fifo {
+            if source_is_stream {
                 copy_debug.offload = OffloadReflinkDebug::Avoided;
-                copy_fifo_contents(source, dest).map(|_| ())
+                copy_stream(source, dest).map(|_| ())
             } else {
                 let result = handle_reflink_auto_sparse_never(source);
                 if let Ok(debug) = result {
@@ -373,9 +362,9 @@ pub(crate) fn copy_on_write(
             }
         }
         (ReflinkMode::Auto, SparseMode::Auto) => {
-            if source_is_fifo {
+            if source_is_stream {
                 copy_debug.offload = OffloadReflinkDebug::Unsupported;
-                copy_fifo_contents(source, dest).map(|_| ())
+                copy_stream(source, dest).map(|_| ())
             } else {
                 let mut copy_method = CopyMethod::Default;
                 let result = handle_reflink_auto_sparse_auto(source, dest);
@@ -400,10 +389,10 @@ pub(crate) fn copy_on_write(
             clone(source, dest, CloneFallback::Error)
         }
         (ReflinkMode::Always, _) => {
-            return Err("`--reflink=always` can be used only with --sparse=auto".into())
+            return Err(translate!("cp-error-reflink-always-sparse-auto").into());
         }
     };
-    result.context(context)?;
+    result.map_err(|e| CpError::IoErrContext(e, context.to_owned()))?;
     Ok(copy_debug)
 }
 
@@ -469,7 +458,7 @@ fn handle_reflink_never_sparse_never(source: &Path) -> Result<CopyDebug, std::io
 }
 
 /// Handles debug results when flags are "--reflink=auto" and "--sparse=never", files will be copied
-/// through cloning them with fallback switching to std::fs::copy
+/// through cloning them with fallback switching to [`std::fs::copy`]
 fn handle_reflink_auto_sparse_never(source: &Path) -> Result<CopyDebug, std::io::Error> {
     let mut copy_debug = CopyDebug {
         offload: OffloadReflinkDebug::Unknown,
@@ -523,7 +512,7 @@ fn handle_reflink_auto_sparse_auto(
         } else {
             copy_method = CopyMethod::SparseCopyWithoutHole;
         } // Since sparse_flag is true, sparse_detection shall be SeekHole for any non virtual
-          // regular sparse file and the file will be sparsely copied
+        // regular sparse file and the file will be sparsely copied
         copy_debug.sparse_detection = SparseDebug::SeekHole;
     }
 
@@ -556,7 +545,7 @@ fn handle_reflink_never_sparse_auto(
     if sparse_flag {
         if blocks == 0 && data_flag {
             copy_method = CopyMethod::FSCopy; // Handles virtual files which have size > 0 but no
-                                              // disk allocation
+        // disk allocation
         } else {
             copy_method = CopyMethod::SparseCopyWithoutHole; // Handles regular sparse-files
         }

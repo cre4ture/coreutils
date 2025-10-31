@@ -2,16 +2,21 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-// spell-checker:ignore NOFILE nonewline
+// spell-checker:ignore NOFILE nonewline cmdline
 
-#[cfg(not(windows))]
-use crate::common::util::vec_of_size;
-use crate::common::util::TestScenario;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use rlimit::Resource;
+#[cfg(unix)]
+use std::fs::File;
 use std::fs::OpenOptions;
-#[cfg(not(windows))]
+use std::fs::read_to_string;
 use std::process::Stdio;
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
+use uutests::util::TestScenario;
+#[cfg(not(windows))]
+use uutests::util::vec_of_size;
+use uutests::util_name;
 
 #[test]
 fn test_output_simple() {
@@ -96,7 +101,9 @@ fn test_fifo_symlink() {
 }
 
 #[test]
-#[cfg(any(target_os = "linux", target_os = "android"))]
+// TODO(#7542): Re-enable on Android once we figure out why setting limit is broken.
+// #[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(target_os = "linux")]
 fn test_closes_file_descriptors() {
     // Each file creates a pipe, which has two file descriptors.
     // If they are not closed then five is certainly too many.
@@ -110,6 +117,20 @@ fn test_closes_file_descriptors() {
         ])
         .limit(Resource::NOFILE, 9, 9)
         .succeeds();
+}
+
+#[test]
+#[cfg(unix)]
+fn test_broken_pipe() {
+    let mut cmd = new_ucmd!();
+    let mut child = cmd
+        .set_stdin(Stdio::from(File::open("/dev/zero").unwrap()))
+        .set_stdout(Stdio::piped())
+        .run_no_wait();
+    // Dropping the stdout should not lead to an error.
+    // The "Broken pipe" error should be silently ignored.
+    child.close_stdout();
+    child.wait().unwrap().fails_silently();
 }
 
 #[test]
@@ -289,6 +310,15 @@ fn test_numbered_lines_no_trailing_newline() {
 }
 
 #[test]
+fn test_numbered_lines_with_crlf() {
+    new_ucmd!()
+        .args(&["-n"])
+        .pipe_in("Hello\r\nWorld")
+        .succeeds()
+        .stdout_only("     1\tHello\r\n     2\tWorld");
+}
+
+#[test]
 fn test_stdin_show_nonprinting() {
     for same_param in ["-v", "-vv", "--show-nonprinting", "--show-non"] {
         new_ucmd!()
@@ -400,6 +430,15 @@ fn test_stdin_nonprinting_and_tabs_repeated() {
 }
 
 #[test]
+fn test_stdin_tabs_no_newline() {
+    new_ucmd!()
+        .args(&["-T"])
+        .pipe_in("\ta")
+        .succeeds()
+        .stdout_only("^Ia");
+}
+
+#[test]
 fn test_stdin_squeeze_blank() {
     for same_param in ["-s", "--squeeze-blank", "--squeeze"] {
         new_ucmd!()
@@ -485,7 +524,7 @@ fn test_dev_random() {
 }
 
 /// Reading from /dev/full should return an infinite amount of zero bytes.
-/// Wikipedia says there is support on Linux, FreeBSD, and NetBSD.
+/// Wikipedia says there is support on Linux, FreeBSD, and `NetBSD`.
 #[test]
 #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "netbsd"))]
 fn test_dev_full() {
@@ -520,9 +559,24 @@ fn test_dev_full_show_all() {
     proc.kill();
 }
 
+// For some reason splice() on first of those files fails, resulting in
+// fallback inside `write_fast`, the other splice succeeds, in effect
+// without additional flush output gets reversed.
+#[test]
+#[cfg(target_os = "linux")]
+fn test_write_fast_fallthrough_uses_flush() {
+    const PROC_INIT_CMDLINE: &str = "/proc/1/cmdline";
+    let cmdline = std::fs::read_to_string(PROC_INIT_CMDLINE).unwrap();
+
+    new_ucmd!()
+        .args(&[PROC_INIT_CMDLINE, "alpha.txt"])
+        .succeeds()
+        .stdout_only(format!("{cmdline}abcde\nfghij\nklmno\npqrst\nuvwxyz\n")); // spell-checker:disable-line
+}
+
 #[test]
 #[cfg(unix)]
-#[ignore]
+#[ignore = ""]
 fn test_domain_socket() {
     use std::io::prelude::*;
     use std::os::unix::net::UnixListener;
@@ -589,8 +643,7 @@ fn test_write_to_self() {
         .arg("first_file")
         .arg("first_file")
         .arg("second_file")
-        .fails()
-        .code_is(2)
+        .fails_with_code(2)
         .stderr_only("cat: first_file: input file is output file\ncat: first_file: input file is output file\n");
 
     assert_eq!(
@@ -599,8 +652,60 @@ fn test_write_to_self() {
     );
 }
 
+/// Test derived from the following GNU test in `tests/cat/cat-self.sh`:
+///
+/// `cat fxy2 fy 1<>fxy2`
+// TODO: make this work on windows
 #[test]
 #[cfg(unix)]
+fn test_successful_write_to_read_write_self() {
+    let (at, mut ucmd) = at_and_ucmd!();
+    at.write("fy", "y");
+    at.write("fxy2", "x");
+
+    // Open `rw_file` as both stdin and stdout (read/write)
+    let fxy2_file_path = at.plus("fxy2");
+    let fxy2_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&fxy2_file_path)
+        .unwrap();
+    ucmd.args(&["fxy2", "fy"]).set_stdout(fxy2_file).succeeds();
+
+    // The contents of `fxy2` and `fy` files should be merged
+    let fxy2_contents = read_to_string(fxy2_file_path).unwrap();
+    assert_eq!(fxy2_contents, "xy");
+}
+
+/// Test derived from the following GNU test in `tests/cat/cat-self.sh`:
+///
+/// `cat fx fx3 1<>fx3`
+#[test]
+fn test_failed_write_to_read_write_self() {
+    let (at, mut ucmd) = at_and_ucmd!();
+    at.write("fx", "g");
+    at.write("fx3", "bold");
+
+    // Open `rw_file` as both stdin and stdout (read/write)
+    let fx3_file_path = at.plus("fx3");
+    let fx3_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&fx3_file_path)
+        .unwrap();
+    ucmd.args(&["fx", "fx3"])
+        .set_stdout(fx3_file)
+        .fails_with_code(1)
+        .stderr_only("cat: fx3: input file is output file\n");
+
+    // The contents of `fx` should have overwritten the beginning of `fx3`
+    let fx3_contents = read_to_string(fx3_file_path).unwrap();
+    assert_eq!(fx3_contents, "gold");
+}
+
+#[test]
+#[cfg(unix)]
+#[cfg(not(target_os = "openbsd"))]
 fn test_error_loop() {
     let (at, mut ucmd) = at_and_ucmd!();
     at.symlink_file("2", "1");
@@ -620,4 +725,104 @@ fn test_u_ignored() {
             .succeeds()
             .stdout_only("hello");
     }
+}
+
+#[test]
+#[cfg(unix)]
+fn test_write_fast_read_error() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (at, mut ucmd) = at_and_ucmd!();
+
+    // Create a file with content
+    at.write("foo", "content");
+
+    // Remove read permissions to cause a read error
+    let file_path = at.plus_as_string("foo");
+    let mut perms = std::fs::metadata(&file_path).unwrap().permissions();
+    perms.set_mode(0o000); // No permissions
+    std::fs::set_permissions(&file_path, perms).unwrap();
+
+    // Test that cat fails with permission denied
+    ucmd.arg("foo").fails().stderr_contains("Permission denied");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn test_cat_non_utf8_paths() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let scene = TestScenario::new(util_name!());
+    let at = &scene.fixtures;
+
+    // Create a test file with non-UTF-8 bytes in the name
+    let non_utf8_bytes = b"test_\xFF\xFE.txt";
+    let non_utf8_name = OsStr::from_bytes(non_utf8_bytes);
+
+    // Create the actual file with some content
+    std::fs::write(at.plus(non_utf8_name), "Hello, non-UTF-8 world!\n").unwrap();
+
+    // Test that cat handles non-UTF-8 file names without crashing
+    let result = scene.ucmd().arg(non_utf8_name).succeeds();
+
+    // The result should contain the file content
+    let output = result.stdout_str_lossy();
+    assert_eq!(output, "Hello, non-UTF-8 world!\n");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn test_appending_same_input_output() {
+    let (at, mut ucmd) = at_and_ucmd!();
+
+    at.write("foo", "content");
+    let foo_file = at.plus_as_string("foo");
+
+    let file_read = File::open(&foo_file).unwrap();
+    let file_write = OpenOptions::new().append(true).open(&foo_file).unwrap();
+
+    ucmd.set_stdin(file_read);
+    ucmd.set_stdout(file_write);
+
+    ucmd.fails()
+        .no_stdout()
+        .stderr_contains("input file is output file");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_uchild_when_no_capture_reading_from_infinite_source() {
+    use regex::Regex;
+
+    let ts = TestScenario::new("cat");
+
+    let expected_stdout = b"\0".repeat(12345);
+    let mut child = ts
+        .ucmd()
+        .set_stdin(Stdio::from(File::open("/dev/zero").unwrap()))
+        .set_stdout(Stdio::piped())
+        .run_no_wait();
+
+    child
+        .make_assertion()
+        .with_exact_output(12345, 0)
+        .stdout_only_bytes(expected_stdout);
+
+    child
+        .kill()
+        .make_assertion()
+        .with_current_output()
+        .stdout_matches(&Regex::new("[\0].*").unwrap())
+        .no_stderr();
+}
+
+#[test]
+fn test_child_when_pipe_in() {
+    let ts = TestScenario::new("cat");
+    let mut child = ts.ucmd().set_stdin(Stdio::piped()).run_no_wait();
+    child.pipe_in("content");
+    child.wait().unwrap().stdout_only("content").success();
+
+    ts.ucmd().pipe_in("content").run().stdout_is("content");
 }

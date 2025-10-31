@@ -22,19 +22,21 @@ use std::{
 use itertools::Itertools;
 use uucore::error::UResult;
 
+use crate::Output;
 use crate::chunks::RecycledChunk;
 use crate::merge::ClosedTmpFile;
 use crate::merge::WriteableCompressedTmpFile;
 use crate::merge::WriteablePlainTmpFile;
 use crate::merge::WriteableTmpFile;
 use crate::tmp_dir::TmpDirWrapper;
-use crate::Output;
 use crate::{
+    GlobalSettings,
     chunks::{self, Chunk},
-    compare_by, merge, sort_by, GlobalSettings,
+    compare_by, merge, sort_by,
 };
-use crate::{print_sorted, Line};
+use crate::{Line, print_sorted};
 
+// Note: update `test_sort::test_start_buffer` if this size is changed
 const START_BUFFER_SIZE: usize = 8_000;
 
 /// Sort files by using auxiliary files for storing intermediate chunks (if needed), and output the result.
@@ -98,12 +100,12 @@ fn reader_writer<
     )?;
     match read_result {
         ReadResult::WroteChunksToFile { tmp_files } => {
-            let merger = merge::merge_with_file_limit::<_, _, Tmp>(
+            merge::merge_with_file_limit::<_, _, Tmp>(
                 tmp_files.into_iter().map(|c| c.reopen()),
                 settings,
+                output,
                 tmp_dir,
             )?;
-            merger.write_all(settings, output)?;
         }
         ReadResult::SortedSingleChunk(chunk) => {
             if settings.unique {
@@ -114,9 +116,9 @@ fn reader_writer<
                     }),
                     settings,
                     output,
-                );
+                )?;
             } else {
-                print_sorted(chunk.lines().iter(), settings, output);
+                print_sorted(chunk.lines().iter(), settings, output)?;
             }
         }
         ReadResult::SortedTwoChunks([a, b]) => {
@@ -137,9 +139,9 @@ fn reader_writer<
                         .map(|(line, _)| line),
                     settings,
                     output,
-                );
+                )?;
             } else {
-                print_sorted(merged_iter.map(|(line, _)| line), settings, output);
+                print_sorted(merged_iter.map(|(line, _)| line), settings, output)?;
             }
         }
         ReadResult::EmptyInput => {
@@ -224,11 +226,8 @@ fn read_write_loop<I: WriteableTmpFile>(
     let mut sender_option = Some(sender);
     let mut tmp_files = vec![];
     loop {
-        let chunk = match receiver.recv() {
-            Ok(it) => it,
-            _ => {
-                return Ok(ReadResult::WroteChunksToFile { tmp_files });
-            }
+        let Ok(chunk) = receiver.recv() else {
+            return Ok(ReadResult::WroteChunksToFile { tmp_files });
         };
 
         let tmp_file = write::<I>(
@@ -274,7 +273,7 @@ fn write<I: WriteableTmpFile>(
 
 fn write_lines<T: Write>(lines: &[Line], writer: &mut T, separator: u8) {
     for s in lines {
-        writer.write_all(s.line.as_bytes()).unwrap();
+        writer.write_all(s.line).unwrap();
         writer.write_all(&[separator]).unwrap();
     }
 }

@@ -2,18 +2,23 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-// spell-checker:ignore (ToDO) extendedbigdecimal numberparse
-use std::io::{stdout, ErrorKind, Write};
+// spell-checker:ignore (ToDO) bigdecimal extendedbigdecimal numberparse hexadecimalfloat biguint
+use std::ffi::{OsStr, OsString};
+use std::io::{BufWriter, ErrorKind, Write, stdout};
 
-use clap::{crate_version, Arg, ArgAction, Command};
-use num_traits::{ToPrimitive, Zero};
+use clap::{Arg, ArgAction, Command};
+use num_bigint::BigUint;
+use num_traits::ToPrimitive;
+use num_traits::Zero;
 
 use uucore::error::{FromIo, UResult};
-use uucore::format::{num_format, Format};
-use uucore::{format_usage, help_about, help_usage};
+use uucore::extendedbigdecimal::ExtendedBigDecimal;
+use uucore::format::num_format::FloatVariant;
+use uucore::format::{Format, num_format};
+use uucore::{fast_inc::fast_inc, format_usage};
 
 mod error;
-mod extendedbigdecimal;
+
 // public to allow fuzzing
 #[cfg(fuzzing)]
 pub mod number;
@@ -21,11 +26,9 @@ pub mod number;
 mod number;
 mod numberparse;
 use crate::error::SeqError;
-use crate::extendedbigdecimal::ExtendedBigDecimal;
 use crate::number::PreciseNumber;
 
-const ABOUT: &str = help_about!("seq.md");
-const USAGE: &str = help_usage!("seq.md");
+use uucore::translate;
 
 const OPT_SEPARATOR: &str = "separator";
 const OPT_TERMINATOR: &str = "terminator";
@@ -36,8 +39,8 @@ const ARG_NUMBERS: &str = "numbers";
 
 #[derive(Clone)]
 struct SeqOptions<'a> {
-    separator: String,
-    terminator: String,
+    separator: OsString,
+    terminator: OsString,
     equal_width: bool,
     format: Option<&'a str>,
 }
@@ -47,9 +50,50 @@ struct SeqOptions<'a> {
 /// The elements are (first, increment, last).
 type RangeFloat = (ExtendedBigDecimal, ExtendedBigDecimal, ExtendedBigDecimal);
 
+/// Turn short args with attached value, for example "-s,", into two args "-s" and "," to make
+/// them work with clap.
+fn split_short_args_with_value(args: impl uucore::Args) -> impl uucore::Args {
+    let mut v: Vec<OsString> = Vec::new();
+
+    for arg in args {
+        let bytes = arg.as_encoded_bytes();
+
+        if bytes.len() > 2
+            && (bytes.starts_with(b"-f") || bytes.starts_with(b"-s") || bytes.starts_with(b"-t"))
+        {
+            let (short_arg, value) = bytes.split_at(2);
+            // SAFETY:
+            // Both `short_arg` and `value` only contain content that originated from `OsStr::as_encoded_bytes`
+            v.push(unsafe { OsString::from_encoded_bytes_unchecked(short_arg.to_vec()) });
+            v.push(unsafe { OsString::from_encoded_bytes_unchecked(value.to_vec()) });
+        } else {
+            v.push(arg);
+        }
+    }
+
+    v.into_iter()
+}
+
+fn select_precision(
+    first: &PreciseNumber,
+    increment: &PreciseNumber,
+    last: &PreciseNumber,
+) -> Option<usize> {
+    match (
+        first.num_fractional_digits,
+        increment.num_fractional_digits,
+        last.num_fractional_digits,
+    ) {
+        (Some(0), Some(0), Some(0)) => Some(0),
+        (Some(f), Some(i), Some(_)) => Some(f.max(i)),
+        _ => None,
+    }
+}
+
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-    let matches = uu_app().try_get_matches_from(args)?;
+    let matches =
+        uucore::clap_localization::handle_clap_result(uu_app(), split_short_args_with_value(args))?;
 
     let numbers_option = matches.get_many::<String>(ARG_NUMBERS);
 
@@ -61,18 +105,20 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
 
     let options = SeqOptions {
         separator: matches
-            .get_one::<String>(OPT_SEPARATOR)
-            .map(|s| s.as_str())
-            .unwrap_or("\n")
-            .to_string(),
+            .get_one::<OsString>(OPT_SEPARATOR)
+            .cloned()
+            .unwrap_or_else(|| OsString::from("\n")),
         terminator: matches
-            .get_one::<String>(OPT_TERMINATOR)
-            .map(|s| s.as_str())
-            .unwrap_or("\n")
-            .to_string(),
+            .get_one::<OsString>(OPT_TERMINATOR)
+            .cloned()
+            .unwrap_or_else(|| OsString::from("\n")),
         equal_width: matches.get_flag(OPT_EQUAL_WIDTH),
         format: matches.get_one::<String>(OPT_FORMAT).map(|s| s.as_str()),
     };
+
+    if options.equal_width && options.format.is_some() {
+        return Err(SeqError::FormatAndEqualWidth.into());
+    }
 
     let first = if numbers.len() > 1 {
         match numbers[0].parse() {
@@ -104,75 +150,181 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
         }
     };
 
-    let padding = first
-        .num_integral_digits
-        .max(increment.num_integral_digits)
-        .max(last.num_integral_digits);
-    let largest_dec = first
-        .num_fractional_digits
-        .max(increment.num_fractional_digits);
+    // If a format was passed on the command line, use that.
+    // If not, use some default format based on parameters precision.
+    let (format, padding, fast_allowed) = match options.format {
+        Some(str) => (
+            Format::<num_format::Float, &ExtendedBigDecimal>::parse(str)?,
+            0,
+            false,
+        ),
+        None => {
+            let precision = select_precision(&first, &increment, &last);
 
-    let format = match options.format {
-        Some(f) => {
-            let f = Format::<num_format::Float>::parse(f)?;
-            Some(f)
+            let padding = if options.equal_width {
+                let precision_value = precision.unwrap_or(0);
+                first
+                    .num_integral_digits
+                    .max(increment.num_integral_digits)
+                    .max(last.num_integral_digits)
+                    + if precision_value > 0 {
+                        precision_value + 1
+                    } else {
+                        0
+                    }
+            } else {
+                0
+            };
+
+            let formatter = match precision {
+                // format with precision: decimal floats and integers
+                Some(precision) => num_format::Float {
+                    variant: FloatVariant::Decimal,
+                    width: padding,
+                    alignment: num_format::NumberAlignment::RightZero,
+                    precision: Some(precision),
+                    ..Default::default()
+                },
+                // format without precision: hexadecimal floats
+                None => num_format::Float {
+                    variant: FloatVariant::Shortest,
+                    ..Default::default()
+                },
+            };
+            // Allow fast printing if precision is 0 (integer inputs), `print_seq` will do further checks.
+            (
+                Format::from_formatter(formatter),
+                padding,
+                precision == Some(0),
+            )
         }
-        None => None,
     };
+
     let result = print_seq(
         (first.number, increment.number, last.number),
-        largest_dec,
         &options.separator,
         &options.terminator,
-        options.equal_width,
-        padding,
         &format,
+        fast_allowed,
+        padding,
     );
+
     match result {
-        Ok(_) => Ok(()),
+        Ok(()) => Ok(()),
         Err(err) if err.kind() == ErrorKind::BrokenPipe => Ok(()),
-        Err(e) => Err(e.map_err_context(|| "write error".into())),
+        Err(err) => Err(err.map_err_context(|| "write error".into())),
     }
 }
 
 pub fn uu_app() -> Command {
     Command::new(uucore::util_name())
         .trailing_var_arg(true)
-        .allow_negative_numbers(true)
         .infer_long_args(true)
-        .version(crate_version!())
-        .about(ABOUT)
-        .override_usage(format_usage(USAGE))
+        .version(uucore::crate_version!())
+        .help_template(uucore::localized_help_template(uucore::util_name()))
+        .about(translate!("seq-about"))
+        .override_usage(format_usage(&translate!("seq-usage")))
         .arg(
             Arg::new(OPT_SEPARATOR)
                 .short('s')
                 .long("separator")
-                .help("Separator character (defaults to \\n)"),
+                .help(translate!("seq-help-separator"))
+                .value_parser(clap::value_parser!(OsString)),
         )
         .arg(
             Arg::new(OPT_TERMINATOR)
                 .short('t')
                 .long("terminator")
-                .help("Terminator character (defaults to \\n)"),
+                .help(translate!("seq-help-terminator"))
+                .value_parser(clap::value_parser!(OsString)),
         )
         .arg(
             Arg::new(OPT_EQUAL_WIDTH)
                 .short('w')
                 .long("equal-width")
-                .help("Equalize widths of all numbers by padding with zeros")
+                .help(translate!("seq-help-equal-width"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new(OPT_FORMAT)
                 .short('f')
                 .long(OPT_FORMAT)
-                .help("use printf style floating-point FORMAT"),
+                .help(translate!("seq-help-format")),
         )
         .arg(
+            // we use allow_hyphen_values instead of allow_negative_numbers because clap removed
+            // the support for "exotic" negative numbers like -.1 (see https://github.com/clap-rs/clap/discussions/5837)
             Arg::new(ARG_NUMBERS)
+                .allow_hyphen_values(true)
                 .action(ArgAction::Append)
                 .num_args(1..=3),
         )
+}
+
+/// Integer print, default format, positive increment: fast code path
+/// that avoids reformating digit at all iterations.
+fn fast_print_seq(
+    mut stdout: impl Write,
+    first: &BigUint,
+    increment: u64,
+    last: &BigUint,
+    separator: &OsStr,
+    terminator: &OsStr,
+    padding: usize,
+) -> std::io::Result<()> {
+    // Nothing to do, just return.
+    if last < first {
+        return Ok(());
+    }
+
+    // Do at most u64::MAX loops. We can print in the order of 1e8 digits per second,
+    // u64::MAX is 1e19, so it'd take hundreds of years for this to complete anyway.
+    // TODO: we can move this test to `print_seq` if we care about this case.
+    let loop_cnt = ((last - first) / increment).to_u64().unwrap_or(u64::MAX);
+
+    // Format the first number.
+    let first_str = first.to_string();
+
+    // Makeshift log10.ceil
+    let last_length = last.to_string().len();
+
+    // Allocate a large u8 buffer, that contains a preformatted string
+    // of the number followed by the `separator`.
+    //
+    // | ... head space ... | number | separator |
+    // ^0                   ^ start  ^ num_end   ^ size (==buf.len())
+    //
+    // We keep track of start in this buffer, as the number grows.
+    // When printing, we take a slice between start and end.
+    let size = last_length.max(padding) + separator.len();
+    // Fill with '0', this is needed for equal_width, and harmless otherwise.
+    let mut buf = vec![b'0'; size];
+    let buf = buf.as_mut_slice();
+
+    let num_end = buf.len() - separator.len();
+    let mut start = num_end - first_str.len();
+
+    // Initialize buf with first and separator.
+    buf[start..num_end].copy_from_slice(first_str.as_bytes());
+    buf[num_end..].copy_from_slice(separator.as_encoded_bytes());
+
+    // Normally, if padding is > 0, it should be equal to last_length,
+    // so start would be == 0, but there are corner cases.
+    start = start.min(num_end - padding);
+
+    // Prepare the number to increment with as a string
+    let inc_str = increment.to_string();
+    let inc_str = inc_str.as_bytes();
+
+    for _ in 0..loop_cnt {
+        stdout.write_all(&buf[start..])?;
+        fast_inc(buf, &mut start, num_end, inc_str);
+    }
+    // Write the last number without separator, but with terminator.
+    stdout.write_all(&buf[start..num_end])?;
+    stdout.write_all(terminator.as_encoded_bytes())?;
+    stdout.flush()?;
+    Ok(())
 }
 
 fn done_printing<T: Zero + PartialOrd>(next: &T, increment: &T, last: &T) -> bool {
@@ -183,77 +335,56 @@ fn done_printing<T: Zero + PartialOrd>(next: &T, increment: &T, last: &T) -> boo
     }
 }
 
-/// Write a big decimal formatted according to the given parameters.
-fn write_value_float(
-    writer: &mut impl Write,
-    value: &ExtendedBigDecimal,
-    width: usize,
-    precision: usize,
-) -> std::io::Result<()> {
-    let value_as_str =
-        if *value == ExtendedBigDecimal::Infinity || *value == ExtendedBigDecimal::MinusInfinity {
-            format!("{value:>width$.precision$}")
-        } else {
-            format!("{value:>0width$.precision$}")
-        };
-    write!(writer, "{value_as_str}")
-}
-
-/// Floating point based code path
+/// Arbitrary precision decimal number code path ("slow" path)
 fn print_seq(
     range: RangeFloat,
-    largest_dec: usize,
-    separator: &str,
-    terminator: &str,
-    pad: bool,
-    padding: usize,
-    format: &Option<Format<num_format::Float>>,
+    separator: &OsStr,
+    terminator: &OsStr,
+    format: &Format<num_format::Float, &ExtendedBigDecimal>,
+    fast_allowed: bool,
+    padding: usize, // Used by fast path only
 ) -> std::io::Result<()> {
-    let stdout = stdout();
-    let mut stdout = stdout.lock();
+    let stdout = stdout().lock();
+    let mut stdout = BufWriter::new(stdout);
     let (first, increment, last) = range;
+
+    if fast_allowed {
+        // Test if we can use fast code path.
+        // First try to convert the range to BigUint (u64 for the increment).
+        let (first_bui, increment_u64, last_bui) = (
+            first.to_biguint(),
+            increment.to_biguint().and_then(|x| x.to_u64()),
+            last.to_biguint(),
+        );
+        if let (Some(first_bui), Some(increment_u64), Some(last_bui)) =
+            (first_bui, increment_u64, last_bui)
+        {
+            return fast_print_seq(
+                stdout,
+                &first_bui,
+                increment_u64,
+                &last_bui,
+                separator,
+                terminator,
+                padding,
+            );
+        }
+    }
+
     let mut value = first;
-    let padding = if pad {
-        padding + if largest_dec > 0 { largest_dec + 1 } else { 0 }
-    } else {
-        0
-    };
+
     let mut is_first_iteration = true;
     while !done_printing(&value, &increment, &last) {
         if !is_first_iteration {
-            write!(stdout, "{separator}")?;
+            stdout.write_all(separator.as_encoded_bytes())?;
         }
-        // If there was an argument `-f FORMAT`, then use that format
-        // template instead of the default formatting strategy.
-        //
-        // TODO The `printf()` method takes a string as its second
-        // parameter but we have an `ExtendedBigDecimal`. In order to
-        // satisfy the signature of the function, we convert the
-        // `ExtendedBigDecimal` into a string. The `printf()`
-        // logic will subsequently parse that string into something
-        // similar to an `ExtendedBigDecimal` again before rendering
-        // it as a string and ultimately writing to `stdout`. We
-        // shouldn't have to do so much converting back and forth via
-        // strings.
-        match &format {
-            Some(f) => {
-                let float = match &value {
-                    ExtendedBigDecimal::BigDecimal(bd) => bd.to_f64().unwrap(),
-                    ExtendedBigDecimal::Infinity => f64::INFINITY,
-                    ExtendedBigDecimal::MinusInfinity => f64::NEG_INFINITY,
-                    ExtendedBigDecimal::MinusZero => -0.0,
-                    ExtendedBigDecimal::Nan => f64::NAN,
-                };
-                f.fmt(&mut stdout, float)?;
-            }
-            None => write_value_float(&mut stdout, &value, padding, largest_dec)?,
-        }
+        format.fmt(&mut stdout, &value)?;
         // TODO Implement augmenting addition.
         value = value + increment.clone();
         is_first_iteration = false;
     }
     if !is_first_iteration {
-        write!(stdout, "{terminator}")?;
+        stdout.write_all(terminator.as_encoded_bytes())?;
     }
     stdout.flush()?;
     Ok(())

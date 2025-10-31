@@ -8,44 +8,37 @@
 pub(crate) mod error;
 mod parser;
 
-use clap::{crate_version, Command};
+use clap::Command;
 use error::{ParseError, ParseResult};
-use parser::{parse, Operator, Symbol, UnaryOperator};
+use parser::{Operator, Symbol, UnaryOperator, parse};
 use std::ffi::{OsStr, OsString};
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use uucore::display::Quotable;
 use uucore::error::{UResult, USimpleError};
+use uucore::format_usage;
 #[cfg(not(windows))]
 use uucore::process::{getegid, geteuid};
-use uucore::{format_usage, help_about, help_section};
 
-const ABOUT: &str = help_about!("test.md");
+use uucore::translate;
 
 // The help_usage method replaces util name (the first word) with {}.
 // And, The format_usage method replaces {} with execution_phrase ( e.g. test or [ ).
 // However, This test command has two util names.
 // So, we use test or [ instead of {} so that the usage string is correct.
-const USAGE: &str = "\
-test EXPRESSION
-[
-[ EXPRESSION ]
-[ ]
-[ OPTION
-]";
 
 // We use after_help so that this comes after the usage string (it would come before if we used about)
-const AFTER_HELP: &str = help_section!("after help", "test.md");
 
 pub fn uu_app() -> Command {
     // Disable printing of -h and -v as valid alternatives for --help and --version,
     // since we don't recognize -h and -v as help/version flags.
     Command::new(uucore::util_name())
-        .version(crate_version!())
-        .about(ABOUT)
-        .override_usage(format_usage(USAGE))
-        .after_help(AFTER_HELP)
+        .version(uucore::crate_version!())
+        .help_template(uucore::localized_help_template(uucore::util_name()))
+        .about(translate!("test-about"))
+        .override_usage(format_usage(&translate!("test-usage")))
+        .after_help(translate!("test-after-help"))
 }
 
 #[uucore::main]
@@ -57,23 +50,25 @@ pub fn uumain(mut args: impl uucore::Args) -> UResult<()> {
     if binary_name.ends_with('[') {
         // If invoked as [ we should recognize --help and --version (but not -h or -v)
         if args.len() == 1 && (args[0] == "--help" || args[0] == "--version") {
-            uu_app().get_matches_from(std::iter::once(program).chain(args.into_iter()));
+            uucore::clap_localization::handle_clap_result(
+                uu_app(),
+                std::iter::once(program).chain(args.into_iter()),
+            )?;
             return Ok(());
         }
         // If invoked via name '[', matching ']' must be in the last arg
         let last = args.pop();
         if last.as_deref() != Some(OsStr::new("]")) {
-            return Err(USimpleError::new(2, "missing ']'"));
+            return Err(USimpleError::new(
+                2,
+                translate!("test-error-missing-closing-bracket"),
+            ));
         }
     }
 
     let result = parse(args).map(|mut stack| eval(&mut stack))??;
 
-    if result {
-        Ok(())
-    } else {
-        Err(1.into())
-    }
+    if result { Ok(()) } else { Err(1.into()) }
 }
 
 /// Evaluate a stack of Symbols, returning the result of the evaluation or
@@ -97,9 +92,14 @@ fn eval(stack: &mut Vec<Symbol>) -> ParseResult<bool> {
             Ok(!result)
         }
         Some(Symbol::Op(Operator::String(op))) => {
-            let b = stack.pop();
-            let a = stack.pop();
-            Ok(if op == "!=" { a != b } else { a == b })
+            let b = pop_literal!();
+            let a = pop_literal!();
+            match op.to_string_lossy().as_ref() {
+                "!=" => Ok(a != b),
+                "<" => Ok(a < b),
+                ">" => Ok(a > b),
+                _ => Ok(a == b),
+            }
         }
         Some(Symbol::Op(Operator::Int(op))) => {
             let b = pop_literal!();
@@ -162,6 +162,10 @@ fn eval(stack: &mut Vec<Symbol>) -> ParseResult<bool> {
         Some(Symbol::Literal(s)) => Ok(!s.is_empty()),
         Some(Symbol::None) | None => Ok(false),
         Some(Symbol::BoolOp(op)) => {
+            if (op == "-a" || op == "-o") && stack.len() < 2 {
+                return Err(ParseError::UnaryOperatorExpected(op.quote().to_string()));
+            }
+
             let b = eval(stack)?;
             let a = eval(stack)?;
 
@@ -206,13 +210,8 @@ fn integers(a: &OsStr, b: &OsStr, op: &OsStr) -> ParseResult<bool> {
 fn files(a: &OsStr, b: &OsStr, op: &OsStr) -> ParseResult<bool> {
     // Don't manage the error. GNU doesn't show error when doing
     // test foo -nt bar
-    let f_a = match fs::metadata(a) {
-        Ok(f) => f,
-        Err(_) => return Ok(false),
-    };
-    let f_b = match fs::metadata(b) {
-        Ok(f) => f,
-        Err(_) => return Ok(false),
+    let (Ok(f_a), Ok(f_b)) = (fs::metadata(a), fs::metadata(b)) else {
+        return Ok(false);
     };
 
     Ok(match op.to_str() {
@@ -230,14 +229,7 @@ fn isatty(fd: &OsStr) -> ParseResult<bool> {
     fd.to_str()
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| ParseError::InvalidInteger(fd.quote().to_string()))
-        .map(|i| {
-            #[cfg(not(target_os = "redox"))]
-            unsafe {
-                libc::isatty(i) == 1
-            }
-            #[cfg(target_os = "redox")]
-            syscall::dup(i, b"termios").map(syscall::close).is_ok()
-        })
+        .map(|i| unsafe { libc::isatty(i) == 1 })
 }
 
 #[derive(Eq, PartialEq)]
@@ -277,24 +269,6 @@ fn path(path: &OsStr, condition: &PathCondition) -> bool {
         Execute = 0o1,
     }
 
-    let geteuid = || {
-        #[cfg(not(target_os = "redox"))]
-        let euid = geteuid();
-        #[cfg(target_os = "redox")]
-        let euid = syscall::geteuid().unwrap() as u32;
-
-        euid
-    };
-
-    let getegid = || {
-        #[cfg(not(target_os = "redox"))]
-        let egid = getegid();
-        #[cfg(target_os = "redox")]
-        let egid = syscall::getegid().unwrap() as u32;
-
-        egid
-    };
-
     let perm = |metadata: Metadata, p: Permission| {
         if geteuid() == metadata.uid() {
             metadata.mode() & ((p as u32) << 6) != 0
@@ -311,11 +285,8 @@ fn path(path: &OsStr, condition: &PathCondition) -> bool {
         fs::metadata(path)
     };
 
-    let metadata = match metadata {
-        Ok(metadata) => metadata,
-        Err(_) => {
-            return false;
-        }
+    let Ok(metadata) = metadata else {
+        return false;
     };
 
     let file_type = metadata.file_type();
@@ -348,9 +319,8 @@ fn path(path: &OsStr, condition: &PathCondition) -> bool {
 fn path(path: &OsStr, condition: &PathCondition) -> bool {
     use std::fs::metadata;
 
-    let stat = match metadata(path) {
-        Ok(s) => s,
-        _ => return false,
+    let Ok(stat) = metadata(path) else {
+        return false;
     };
 
     match condition {

@@ -3,30 +3,35 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-//! Set of functions to manage files and symlinks
+//! Set of functions to manage regular files, special files, and links.
 
 // spell-checker:ignore backport seekable
 
 #[cfg(unix)]
 use libc::{
-    mode_t, S_IFBLK, S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK, S_IRGRP,
-    S_IROTH, S_IRUSR, S_ISGID, S_ISUID, S_ISVTX, S_IWGRP, S_IWOTH, S_IWUSR, S_IXGRP, S_IXOTH,
-    S_IXUSR,
+    S_IFBLK, S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK, S_IRGRP, S_IROTH,
+    S_IRUSR, S_ISGID, S_ISUID, S_ISVTX, S_IWGRP, S_IWOTH, S_IWUSR, S_IXGRP, S_IXOTH, S_IXUSR,
+    mkfifo, mode_t,
 };
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::env;
+#[cfg(unix)]
+use std::ffi::CString;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::fs::read_dir;
 use std::fs::File;
 use std::hash::Hash;
+use std::io::Stdin;
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::io::{Error, ErrorKind, Result as IOResult};
 #[cfg(unix)]
-use std::os::unix::{fs::MetadataExt, io::AsRawFd};
-use std::path::{Component, Path, PathBuf, MAIN_SEPARATOR};
+use std::os::fd::AsFd;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+use std::path::{Component, MAIN_SEPARATOR, Path, PathBuf};
 #[cfg(target_os = "windows")]
 use winapi_util::AsHandleRef;
 
@@ -50,8 +55,8 @@ pub struct FileInformation(
 impl FileInformation {
     /// Get information from a currently open file
     #[cfg(unix)]
-    pub fn from_file(file: &impl AsRawFd) -> IOResult<Self> {
-        let stat = nix::sys::stat::fstat(file.as_raw_fd())?;
+    pub fn from_file(file: &impl AsFd) -> IOResult<Self> {
+        let stat = nix::sys::stat::fstat(file)?;
         Ok(Self(stat))
     }
 
@@ -234,7 +239,7 @@ pub enum ResolveMode {
 /// replace this once that lands
 pub fn normalize_path(path: &Path) -> PathBuf {
     let mut components = path.components().peekable();
-    let mut ret = if let Some(c @ Component::Prefix(..)) = components.peek().cloned() {
+    let mut ret = if let Some(c @ Component::Prefix(..)) = components.peek().copied() {
         components.next();
         PathBuf::from(c.as_os_str())
     } else {
@@ -502,11 +507,7 @@ pub fn display_permissions_unix(mode: mode_t, display_file_type: bool) -> String
     result.push(if has!(mode, S_IRUSR) { 'r' } else { '-' });
     result.push(if has!(mode, S_IWUSR) { 'w' } else { '-' });
     result.push(if has!(mode, S_ISUID as mode_t) {
-        if has!(mode, S_IXUSR) {
-            's'
-        } else {
-            'S'
-        }
+        if has!(mode, S_IXUSR) { 's' } else { 'S' }
     } else if has!(mode, S_IXUSR) {
         'x'
     } else {
@@ -516,11 +517,7 @@ pub fn display_permissions_unix(mode: mode_t, display_file_type: bool) -> String
     result.push(if has!(mode, S_IRGRP) { 'r' } else { '-' });
     result.push(if has!(mode, S_IWGRP) { 'w' } else { '-' });
     result.push(if has!(mode, S_ISGID as mode_t) {
-        if has!(mode, S_IXGRP) {
-            's'
-        } else {
-            'S'
-        }
+        if has!(mode, S_IXGRP) { 's' } else { 'S' }
     } else if has!(mode, S_IXGRP) {
         'x'
     } else {
@@ -530,11 +527,7 @@ pub fn display_permissions_unix(mode: mode_t, display_file_type: bool) -> String
     result.push(if has!(mode, S_IROTH) { 'r' } else { '-' });
     result.push(if has!(mode, S_IWOTH) { 'w' } else { '-' });
     result.push(if has!(mode, S_ISVTX as mode_t) {
-        if has!(mode, S_IXOTH) {
-            't'
-        } else {
-            'T'
-        }
+        if has!(mode, S_IXOTH) { 't' } else { 'T' }
     } else if has!(mode, S_IXOTH) {
         'x'
     } else {
@@ -544,14 +537,16 @@ pub fn display_permissions_unix(mode: mode_t, display_file_type: bool) -> String
     result
 }
 
-/// For some programs like install or mkdir, dir/. can be provided
+/// For some programs like install or mkdir, dir/. or dir/./ can be provided
 /// Special case to match GNU's behavior:
-/// install -d foo/. should work and just create foo/
+/// install -d foo/. (and foo/./) should work and just create foo/
 /// std::fs::create_dir("foo/."); fails in pure Rust
 pub fn dir_strip_dot_for_creation(path: &Path) -> PathBuf {
-    if path.to_string_lossy().ends_with("/.") {
+    let path_str = path.to_string_lossy();
+
+    if path_str.ends_with("/.") || path_str.ends_with("/./") {
         // Do a simple dance to strip the "/."
-        Path::new(&path).components().collect::<PathBuf>()
+        Path::new(&path).components().collect()
     } else {
         path.to_path_buf()
     }
@@ -654,14 +649,10 @@ pub fn are_hardlinks_to_same_file(_source: &Path, _target: &Path) -> bool {
 /// * `bool` - Returns `true` if the paths are hard links to the same file, and `false` otherwise.
 #[cfg(unix)]
 pub fn are_hardlinks_to_same_file(source: &Path, target: &Path) -> bool {
-    let source_metadata = match fs::symlink_metadata(source) {
-        Ok(metadata) => metadata,
-        Err(_) => return false,
-    };
-
-    let target_metadata = match fs::symlink_metadata(target) {
-        Ok(metadata) => metadata,
-        Err(_) => return false,
+    let (Ok(source_metadata), Ok(target_metadata)) =
+        (fs::symlink_metadata(source), fs::symlink_metadata(target))
+    else {
+        return false;
     };
 
     source_metadata.ino() == target_metadata.ino() && source_metadata.dev() == target_metadata.dev()
@@ -684,14 +675,10 @@ pub fn are_hardlinks_or_one_way_symlink_to_same_file(_source: &Path, _target: &P
 /// * `bool` - Returns `true` if either of above conditions are true, and `false` otherwise.
 #[cfg(unix)]
 pub fn are_hardlinks_or_one_way_symlink_to_same_file(source: &Path, target: &Path) -> bool {
-    let source_metadata = match fs::metadata(source) {
-        Ok(metadata) => metadata,
-        Err(_) => return false,
-    };
-
-    let target_metadata = match fs::symlink_metadata(target) {
-        Ok(metadata) => metadata,
-        Err(_) => return false,
+    let (Ok(source_metadata), Ok(target_metadata)) =
+        (fs::metadata(source), fs::symlink_metadata(target))
+    else {
+        return false;
     };
 
     source_metadata.ino() == target_metadata.ino() && source_metadata.dev() == target_metadata.dev()
@@ -712,7 +699,7 @@ pub fn path_ends_with_terminator(path: &Path) -> bool {
     path.as_os_str()
         .as_bytes()
         .last()
-        .map_or(false, |&byte| byte == b'/' || byte == b'\\')
+        .is_some_and(|&byte| byte == b'/')
 }
 
 #[cfg(windows)]
@@ -721,7 +708,37 @@ pub fn path_ends_with_terminator(path: &Path) -> bool {
     path.as_os_str()
         .encode_wide()
         .last()
-        .map_or(false, |wide| wide == b'/'.into() || wide == b'\\'.into())
+        .is_some_and(|wide| wide == b'/'.into() || wide == b'\\'.into())
+}
+
+/// Checks if the standard input (stdin) is a directory.
+///
+/// # Arguments
+///
+/// * `stdin` - A reference to the standard input handle.
+///
+/// # Returns
+///
+/// * `bool` - Returns `true` if stdin is a directory, `false` otherwise.
+pub fn is_stdin_directory(stdin: &Stdin) -> bool {
+    #[cfg(unix)]
+    {
+        use nix::sys::stat::fstat;
+        let mode = fstat(stdin.as_fd()).unwrap().st_mode as mode_t;
+        // We use the S_IFMT mask ala S_ISDIR() to avoid mistaking
+        // sockets for directories.
+        mode & S_IFMT == S_IFDIR
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        let handle = stdin.as_raw_handle();
+        if let Ok(metadata) = fs::metadata(format!("{}", handle as usize)) {
+            return metadata.is_dir();
+        }
+        false
+    }
 }
 
 pub mod sane_blksize {
@@ -837,6 +854,37 @@ pub fn get_filename(file: &Path) -> Option<&str> {
     file.file_name().and_then(|filename| filename.to_str())
 }
 
+/// Make a FIFO, also known as a named pipe.
+///
+/// This is a safe wrapper for the unsafe [`libc::mkfifo`] function,
+/// which makes a [named
+/// pipe](https://en.wikipedia.org/wiki/Named_pipe) on Unix systems.
+///
+/// # Errors
+///
+/// If the named pipe cannot be created.
+///
+/// # Examples
+///
+/// ```ignore
+/// use uucore::fs::make_fifo;
+///
+/// make_fifo("my-pipe").expect("failed to create the named pipe");
+///
+/// std::thread::spawn(|| { std::fs::write("my-pipe", b"hello").unwrap(); });
+/// assert_eq!(std::fs::read("my-pipe").unwrap(), b"hello");
+/// ```
+#[cfg(unix)]
+pub fn make_fifo(path: &Path) -> std::io::Result<()> {
+    let name = CString::new(path.to_str().unwrap()).unwrap();
+    let err = unsafe { mkfifo(name.as_ptr(), 0o666) };
+    if err == -1 {
+        Err(std::io::Error::from_raw_os_error(err))
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
@@ -846,7 +894,9 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix;
     #[cfg(unix)]
-    use tempfile::{tempdir, NamedTempFile};
+    use std::os::unix::fs::FileTypeExt;
+    #[cfg(unix)]
+    use tempfile::{NamedTempFile, tempdir};
 
     struct NormalizePathTestCase<'a> {
         path: &'a str,
@@ -1051,6 +1101,7 @@ mod tests {
         assert!(path_ends_with_terminator(Path::new("/some/path/")));
 
         // Path ends with a backslash
+        #[cfg(windows)]
         assert!(path_ends_with_terminator(Path::new("C:\\some\\path\\")));
 
         // Path does not end with a terminator
@@ -1062,6 +1113,7 @@ mod tests {
 
         // Root path
         assert!(path_ends_with_terminator(Path::new("/")));
+        #[cfg(windows)]
         assert!(path_ends_with_terminator(Path::new("C:\\")));
     }
 
@@ -1077,5 +1129,26 @@ mod tests {
     fn test_get_file_name() {
         let file_path = PathBuf::from("~/foo.txt");
         assert!(matches!(get_filename(&file_path), Some("foo.txt")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_make_fifo() {
+        // Create the FIFO in a temporary directory.
+        let tempdir = tempdir().unwrap();
+        let path = tempdir.path().join("f");
+        assert!(make_fifo(&path).is_ok());
+
+        // Check that it is indeed a FIFO.
+        assert!(std::fs::metadata(&path).unwrap().file_type().is_fifo());
+
+        // Check that we can write to it and read from it.
+        //
+        // Write and read need to happen in different threads,
+        // otherwise `write` would block indefinitely while waiting
+        // for the `read`.
+        let path2 = path.clone();
+        std::thread::spawn(move || assert!(std::fs::write(&path2, b"foo").is_ok()));
+        assert_eq!(std::fs::read(&path).unwrap(), b"foo");
     }
 }

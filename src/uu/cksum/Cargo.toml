@@ -1,23 +1,27 @@
 [package]
 name = "uu_cksum"
-version = "0.0.26"
-authors = ["uutils developers"]
-license = "MIT"
 description = "cksum ~ (uutils) display CRC and size of input"
-
-homepage = "https://github.com/uutils/coreutils"
 repository = "https://github.com/uutils/coreutils/tree/main/src/uu/cksum"
-keywords = ["coreutils", "uutils", "cross-platform", "cli", "utility"]
-categories = ["command-line-utilities"]
-edition = "2021"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+edition.workspace = true
+readme.workspace = true
+
+[lints]
+workspace = true
 
 [lib]
 path = "src/cksum.rs"
 
 [dependencies]
 clap = { workspace = true }
-uucore = { workspace = true, features = ["encoding", "sum"] }
+uucore = { workspace = true, features = ["checksum", "encoding", "sum"] }
 hex = { workspace = true }
+fluent = { workspace = true }
 
 [[bin]]
 name = "cksum"

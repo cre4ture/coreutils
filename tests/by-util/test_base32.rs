@@ -4,7 +4,7 @@
 // file that was distributed with this source code.
 //
 
-use crate::common::util::TestScenario;
+use uutests::new_ucmd;
 
 #[test]
 fn test_encode() {
@@ -52,7 +52,7 @@ fn test_base32_encode_file() {
 
 #[test]
 fn test_decode() {
-    for decode_param in ["-d", "--decode", "--dec"] {
+    for decode_param in ["-d", "--decode", "--dec", "-D"] {
         let input = "JBSWY3DPFQQFO33SNRSCC===\n"; // spell-checker:disable-line
         new_ucmd!()
             .arg(decode_param)
@@ -113,12 +113,11 @@ fn test_wrap() {
 #[test]
 fn test_wrap_no_arg() {
     for wrap_param in ["-w", "--wrap"] {
-        let ts = TestScenario::new(util_name!());
-        let expected_stderr = "a value is required for '--wrap <COLS>' but none was supplied";
-        ts.ucmd()
+        new_ucmd!()
             .arg(wrap_param)
             .fails()
-            .stderr_contains(expected_stderr)
+            .stderr_contains("error: a value is required for '--wrap <COLS>' but none was supplied")
+            .stderr_contains("For more information, try '--help'.")
             .no_stdout();
     }
 }

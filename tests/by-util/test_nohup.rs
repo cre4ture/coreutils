@@ -3,8 +3,12 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 // spell-checker:ignore winsize Openpty openpty xpixel ypixel ptyprocess
-use crate::common::util::TestScenario;
+#[cfg(not(target_os = "openbsd"))]
 use std::thread::sleep;
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
+use uutests::util::TestScenario;
+use uutests::util_name;
 
 // General observation: nohup.out will not be created in tests run by cargo test
 // because stdin/stdout is not attached to a TTY.
@@ -12,7 +16,7 @@ use std::thread::sleep;
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(125);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(125);
 }
 
 #[test]
@@ -45,7 +49,7 @@ fn test_nohup_with_pseudo_terminal_emulation_on_stdin_stdout_stderr_get_replaced
     let result = ts
         .ucmd()
         .terminal_simulation(true)
-        .args(&["sh", "is_atty.sh"])
+        .args(&["sh", "is_a_tty.sh"])
         .succeeds();
 
     assert_eq!(
@@ -58,6 +62,6 @@ fn test_nohup_with_pseudo_terminal_emulation_on_stdin_stdout_stderr_get_replaced
     // this proves that nohup was exchanging the stdio file descriptors
     assert_eq!(
         std::fs::read_to_string(ts.fixtures.plus_as_string("nohup.out")).unwrap(),
-        "stdin is not atty\nstdout is not atty\nstderr is not atty\n"
+        "stdin is not a tty\nstdout is not a tty\nstderr is not a tty\n"
     );
 }

@@ -6,8 +6,9 @@
 //! Check if a file is ordered
 
 use crate::{
+    GlobalSettings, SortError,
     chunks::{self, Chunk, RecycledChunk},
-    compare_by, open, GlobalSettings, SortError,
+    compare_by, open,
 };
 use itertools::Itertools;
 use std::{
@@ -15,7 +16,7 @@ use std::{
     ffi::OsStr,
     io::Read,
     iter,
-    sync::mpsc::{sync_channel, Receiver, SyncSender},
+    sync::mpsc::{Receiver, SyncSender, sync_channel},
     thread,
 };
 use uucore::error::UResult;
@@ -71,7 +72,7 @@ pub fn check(path: &OsStr, settings: &GlobalSettings) -> UResult<()> {
                 return Err(SortError::Disorder {
                     file: path.to_owned(),
                     line_number: line_idx,
-                    line: new_first.line.to_owned(),
+                    line: String::from_utf8_lossy(new_first.line).into_owned(),
                     silent: settings.check_silent,
                 }
                 .into());
@@ -85,7 +86,7 @@ pub fn check(path: &OsStr, settings: &GlobalSettings) -> UResult<()> {
                 return Err(SortError::Disorder {
                     file: path.to_owned(),
                     line_number: line_idx,
-                    line: b.line.to_owned(),
+                    line: String::from_utf8_lossy(b.line).into_owned(),
                     silent: settings.check_silent,
                 }
                 .into());

@@ -2,17 +2,32 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-use crate::common::util::TestScenario;
+#![allow(clippy::cast_possible_wrap)]
+
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
+
+#[test]
+#[cfg(target_os = "linux")]
+fn test_tsort_non_utf8_paths() {
+    use std::os::unix::ffi::OsStringExt;
+    let (at, mut ucmd) = at_and_ucmd!();
+
+    let filename = std::ffi::OsString::from_vec(vec![0xFF, 0xFE]);
+    std::fs::write(at.plus(&filename), b"a b\nb c\n").unwrap();
+
+    ucmd.arg(&filename).succeeds().stdout_is("a\nb\nc\n");
+}
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 #[test]
 fn test_sort_call_graph() {
     new_ucmd!()
         .arg("call_graph.txt")
-        .run()
+        .succeeds()
         .stdout_is_fixture("call_graph.expected");
 }
 
@@ -72,4 +87,38 @@ fn test_error_on_dir() {
     ucmd.arg("tsort_test_dir")
         .fails()
         .stderr_contains("tsort: tsort_test_dir: read error: Is a directory");
+}
+
+#[test]
+fn test_split_on_any_whitespace() {
+    new_ucmd!()
+        .pipe_in("a\nb\n")
+        .succeeds()
+        .stdout_only("a\nb\n");
+}
+
+#[test]
+fn test_cycle() {
+    // The graph looks like:  a --> b <==> c --> d
+    new_ucmd!()
+        .pipe_in("a b b c c d c b")
+        .fails_with_code(1)
+        .stdout_is("a\nc\nd\nb\n")
+        .stderr_is("tsort: -: input contains a loop:\ntsort: b\ntsort: c\n");
+}
+
+#[test]
+fn test_two_cycles() {
+    // The graph looks like:
+    //
+    //        a
+    //        |
+    //        V
+    // c <==> b <==> d
+    //
+    new_ucmd!()
+        .pipe_in("a b b c c b b d d b")
+        .fails_with_code(1)
+        .stdout_is("a\nc\nd\nb\n")
+        .stderr_is("tsort: -: input contains a loop:\ntsort: b\ntsort: c\ntsort: -: input contains a loop:\ntsort: b\ntsort: d\n");
 }

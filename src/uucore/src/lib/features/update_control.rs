@@ -39,7 +39,7 @@
 //!     let update_mode = update_control::determine_update_mode(&matches);
 //!
 //!     // handle cases
-//!     if update_mode == UpdateMode::ReplaceIfOlder {
+//!     if update_mode == UpdateMode::IfOlder {
 //!         // do
 //!     } else {
 //!         unreachable!()
@@ -48,31 +48,37 @@
 //! ```
 use clap::ArgMatches;
 
-// Available update mode
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Available update mode
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
 pub enum UpdateMode {
-    // --update=`all`, ``
-    ReplaceAll,
-    // --update=`none`
-    ReplaceNone,
-    // --update=`older`
-    // -u
-    ReplaceIfOlder,
+    /// --update=`all`, ``
+    #[default]
+    All,
+    /// --update=`none`
+    None,
+
+    /// --update=`older`
+    /// -u
+    IfOlder,
+    NoneFail,
 }
 
 pub mod arguments {
-    use crate::shortcut_value_parser::ShortcutValueParser;
+    //! Pre-defined arguments for update functionality.
+    use crate::parser::shortcut_value_parser::ShortcutValueParser;
     use clap::ArgAction;
 
+    /// `--update` argument
     pub static OPT_UPDATE: &str = "update";
+    /// `-u` argument
     pub static OPT_UPDATE_NO_ARG: &str = "u";
 
-    // `--update` argument, defaults to `older` if no values are provided
+    /// `--update` argument, defaults to `older` if no values are provided
     pub fn update() -> clap::Arg {
         clap::Arg::new(OPT_UPDATE)
             .long("update")
             .help("move only when the SOURCE file is newer than the destination file or when the destination file is missing")
-            .value_parser(ShortcutValueParser::new(["none", "all", "older"]))
+            .value_parser(ShortcutValueParser::new(["none", "all", "older","none-fail"]))
             .num_args(0..=1)
             .default_missing_value("older")
             .require_equals(true)
@@ -80,7 +86,7 @@ pub mod arguments {
             .action(clap::ArgAction::Set)
     }
 
-    // `-u` argument
+    /// `-u` argument
     pub fn update_no_args() -> clap::Arg {
         clap::Arg::new(OPT_UPDATE_NO_ARG)
             .short('u')
@@ -118,21 +124,22 @@ pub mod arguments {
 ///         ]);
 ///
 ///     let update_mode = update_control::determine_update_mode(&matches);
-///     assert_eq!(update_mode, UpdateMode::ReplaceAll)
+///     assert_eq!(update_mode, UpdateMode::All)
 /// }
 pub fn determine_update_mode(matches: &ArgMatches) -> UpdateMode {
     if let Some(mode) = matches.get_one::<String>(arguments::OPT_UPDATE) {
         match mode.as_str() {
-            "all" => UpdateMode::ReplaceAll,
-            "none" => UpdateMode::ReplaceNone,
-            "older" => UpdateMode::ReplaceIfOlder,
+            "all" => UpdateMode::All,
+            "none" => UpdateMode::None,
+            "older" => UpdateMode::IfOlder,
+            "none-fail" => UpdateMode::NoneFail,
             _ => unreachable!("other args restricted by clap"),
         }
     } else if matches.get_flag(arguments::OPT_UPDATE_NO_ARG) {
         // short form of this option is equivalent to using --update=older
-        UpdateMode::ReplaceIfOlder
+        UpdateMode::IfOlder
     } else {
         // no option was present
-        UpdateMode::ReplaceAll
+        UpdateMode::All
     }
 }

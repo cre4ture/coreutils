@@ -41,18 +41,19 @@ use std::collections::VecDeque;
 /// [`push_back`]: struct.RingBuffer.html#method.push_back
 /// [`from_iter`]: struct.RingBuffer.html#method.from_iter
 pub struct RingBuffer<T> {
+    /// The data stored in the ring buffer.
     pub data: VecDeque<T>,
-    size: usize,
 }
 
 impl<T> RingBuffer<T> {
+    /// Create a new ring buffer with a maximum size of `size`.
     pub fn new(size: usize) -> Self {
         Self {
-            data: VecDeque::new(),
-            size,
+            data: VecDeque::with_capacity(size),
         }
     }
 
+    /// Create a new ring buffer from an iterator.
     pub fn from_iter(iter: impl Iterator<Item = T>, size: usize) -> Self {
         let mut ring_buffer = Self::new(size);
         for value in iter {
@@ -95,10 +96,10 @@ impl<T> RingBuffer<T> {
     /// assert_eq!(Some(2), buf.push_back(2));
     /// ```
     pub fn push_back(&mut self, value: T) -> Option<T> {
-        if self.size == 0 {
+        if self.data.capacity() == 0 {
             return Some(value);
         }
-        let result = if self.size <= self.data.len() {
+        let result = if self.data.len() == self.data.capacity() {
             self.data.pop_front()
         } else {
             None

@@ -2,12 +2,17 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-use crate::common::util::TestScenario;
+#![allow(clippy::similar_names)]
+
 use std::path::PathBuf;
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
+use uutests::util::TestScenario;
+use uutests::util_name;
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 
 #[test]
@@ -335,11 +340,13 @@ fn test_symlink_overwrite_dir_fail() {
     at.touch(path_a);
     at.mkdir(path_b);
 
-    assert!(!ucmd
-        .args(&["-s", "-T", path_a, path_b])
-        .fails()
-        .stderr_str()
-        .is_empty());
+    assert!(
+        !ucmd
+            .args(&["-s", "-T", path_a, path_b])
+            .fails()
+            .stderr_str()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -389,11 +396,13 @@ fn test_symlink_target_only() {
 
     at.mkdir(dir);
 
-    assert!(!ucmd
-        .args(&["-s", "-t", dir])
-        .fails()
-        .stderr_str()
-        .is_empty());
+    assert!(
+        !ucmd
+            .args(&["-s", "-t", dir])
+            .fails()
+            .stderr_str()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -420,7 +429,7 @@ fn test_symlink_implicit_target_dir() {
 fn test_symlink_to_dir_2args() {
     let (at, mut ucmd) = at_and_ucmd!();
     let filename = "test_symlink_to_dir_2args_file";
-    let from_file = &format!("{}/{}", at.as_string(), filename);
+    let from_file = &format!("{}/{filename}", at.as_string());
     let to_dir = "test_symlink_to_dir_2args_to_dir";
     let to_file = &format!("{to_dir}/{filename}");
 
@@ -484,7 +493,7 @@ fn test_symlink_relative_path() {
     let (at, mut ucmd) = at_and_ucmd!();
     ucmd.args(&["-s", "-v", &p.to_string_lossy(), link])
         .succeeds()
-        .stdout_only(format!("'{}' -> '{}'\n", link, &p.to_string_lossy()));
+        .stdout_only(format!("'{link}' -> '{}'\n", p.to_string_lossy()));
     assert!(at.is_symlink(link));
     assert_eq!(at.resolve_link(link), p.to_string_lossy());
 }
@@ -540,11 +549,76 @@ fn test_symlink_no_deref_dir() {
     scene.ucmd().args(&["-sn", dir1, link]).fails();
 
     // Try with the no-deref
-    scene.ucmd().args(&["-sfn", dir1, link]).succeeds();
+    scene
+        .ucmd()
+        .args(&["-sfn", dir1, link])
+        .succeeds()
+        .no_stderr();
     assert!(at.dir_exists(dir1));
     assert!(at.dir_exists(dir2));
     assert!(at.is_symlink(link));
     assert_eq!(at.resolve_link(link), dir1);
+}
+
+#[test]
+fn test_symlink_no_deref_file_in_destination_dir() {
+    let scene = TestScenario::new(util_name!());
+    let at = &scene.fixtures;
+
+    let file1 = "foo";
+    let file2 = "bar";
+
+    let dest = "baz";
+
+    let link1 = "baz/foo";
+    let link2 = "baz/bar";
+
+    at.touch(file1);
+    at.touch(file2);
+    at.mkdir(dest);
+
+    assert!(at.file_exists(file1));
+    assert!(at.file_exists(file2));
+    assert!(at.dir_exists(dest));
+
+    // -n and -f should work alone
+    scene
+        .ucmd()
+        .args(&["-sn", file1, dest])
+        .succeeds()
+        .no_stderr();
+    assert!(at.is_symlink(link1));
+    assert_eq!(at.resolve_link(link1), file1);
+
+    scene
+        .ucmd()
+        .args(&["-sf", file1, dest])
+        .succeeds()
+        .no_stderr();
+    assert!(at.is_symlink(link1));
+    assert_eq!(at.resolve_link(link1), file1);
+
+    // -n alone should fail if destination exists already (it should now)
+    scene.ucmd().args(&["-sn", file1, dest]).fails();
+
+    // -nf should also work
+    scene
+        .ucmd()
+        .args(&["-snf", file1, dest])
+        .succeeds()
+        .no_stderr();
+    assert!(at.is_symlink(link1));
+    assert_eq!(at.resolve_link(link1), file1);
+
+    scene
+        .ucmd()
+        .args(&["-snf", file1, file2, dest])
+        .succeeds()
+        .no_stderr();
+    assert!(at.is_symlink(link1));
+    assert_eq!(at.resolve_link(link1), file1);
+    assert!(at.is_symlink(link2));
+    assert_eq!(at.resolve_link(link2), file2);
 }
 
 #[test]
@@ -713,11 +787,56 @@ fn test_symlink_remove_existing_same_src_and_dest() {
     at.touch("a");
     at.write("a", "sample");
     ucmd.args(&["-sf", "a", "a"])
-        .fails()
-        .code_is(1)
+        .fails_with_code(1)
         .stderr_contains("'a' and 'a' are the same file");
     assert!(at.file_exists("a") && !at.symlink_exists("a"));
     assert_eq!(at.read("a"), "sample");
+}
+
+#[test]
+fn test_force_same_file_detected_after_canonicalization() {
+    let (at, mut ucmd) = at_and_ucmd!();
+
+    at.write("file", "hello");
+
+    ucmd.args(&["-f", "file", "./file"])
+        .fails_with_code(1)
+        .stderr_contains("are the same file");
+
+    assert!(at.file_exists("file"));
+    assert_eq!(at.read("file"), "hello");
+}
+
+#[test]
+#[cfg(not(target_os = "android"))]
+fn test_force_ln_existing_hard_link_entry() {
+    let scene = TestScenario::new(util_name!());
+    let at = &scene.fixtures;
+
+    at.write("file", "hardlink\n");
+    at.mkdir("dir");
+
+    scene.ucmd().args(&["file", "dir"]).succeeds().no_stderr();
+    assert!(at.file_exists("dir/file"));
+
+    scene
+        .ucmd()
+        .args(&["-f", "file", "dir"])
+        .succeeds()
+        .no_stderr();
+
+    assert!(at.file_exists("file"));
+    assert!(at.file_exists("dir/file"));
+    assert_eq!(at.read("file"), "hardlink\n");
+    assert_eq!(at.read("dir/file"), "hardlink\n");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let source_inode = at.metadata("file").ino();
+        let target_inode = at.metadata("dir/file").ino();
+        assert_eq!(source_inode, target_inode);
+    }
 }
 
 #[test]
@@ -735,13 +854,17 @@ fn test_ln_seen_file() {
     let result = ts.ucmd().arg("a/f").arg("b/f").arg("c").fails();
 
     #[cfg(not(unix))]
-    assert!(result
-        .stderr_str()
-        .contains("will not overwrite just-created 'c\\f' with 'b/f'"));
+    assert!(
+        result
+            .stderr_str()
+            .contains("will not overwrite just-created 'c\\f' with 'b/f'")
+    );
     #[cfg(unix)]
-    assert!(result
-        .stderr_str()
-        .contains("will not overwrite just-created 'c/f' with 'b/f'"));
+    assert!(
+        result
+            .stderr_str()
+            .contains("will not overwrite just-created 'c/f' with 'b/f'")
+    );
 
     assert!(at.plus("c").join("f").exists());
     // b/f still exists
@@ -765,4 +888,49 @@ fn test_ln_seen_file() {
             "Inode numbers of b/f and c/f should not be equal"
         );
     }
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn test_ln_non_utf8_paths() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let scene = TestScenario::new(util_name!());
+    let at = &scene.fixtures;
+
+    // Create a test file with non-UTF-8 bytes in the name
+    let non_utf8_bytes = b"test_\xFF\xFE.txt";
+    let non_utf8_name = OsStr::from_bytes(non_utf8_bytes);
+    let non_utf8_link_bytes = b"link_\xFF\xFE.txt";
+    let non_utf8_link_name = OsStr::from_bytes(non_utf8_link_bytes);
+
+    // Create the actual file
+    at.touch(non_utf8_name);
+
+    // Test creating a hard link with non-UTF-8 file names
+    scene
+        .ucmd()
+        .arg(non_utf8_name)
+        .arg(non_utf8_link_name)
+        .succeeds();
+
+    // Both files should exist
+    assert!(at.file_exists(non_utf8_name));
+    assert!(at.file_exists(non_utf8_link_name));
+
+    // Test creating a symbolic link with non-UTF-8 file names
+    let symlink_bytes = b"symlink_\xFF\xFE.txt";
+    let symlink_name = OsStr::from_bytes(symlink_bytes);
+
+    scene
+        .ucmd()
+        .args(&["-s"])
+        .arg(non_utf8_name)
+        .arg(symlink_name)
+        .succeeds();
+
+    // Check if symlink was created successfully
+    let symlink_path = at.plus(symlink_name);
+    assert!(symlink_path.is_symlink());
 }

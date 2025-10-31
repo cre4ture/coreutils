@@ -43,11 +43,9 @@ use std::io::Error as IOError;
 use std::io::ErrorKind;
 use std::io::Result as IOResult;
 use std::ptr;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
-use once_cell::sync::Lazy;
-
-extern "C" {
+unsafe extern "C" {
     /// From: `<https://man7.org/linux/man-pages/man3/getgrouplist.3.html>`
     /// > The getgrouplist() function scans the group database to obtain
     /// > the list of groups that user belongs to.
@@ -83,13 +81,13 @@ pub fn get_groups() -> IOResult<Vec<gid_t>> {
         if res == -1 {
             let err = IOError::last_os_error();
             if err.raw_os_error() == Some(libc::EINVAL) {
-                // Number of groups changed, retry
-                continue;
+                // Number of groups has increased, retry
             } else {
                 return Err(err);
             }
         } else {
-            groups.truncate(ngroups.try_into().unwrap());
+            // Number of groups may have decreased
+            groups.truncate(res.try_into().unwrap());
             return Ok(groups);
         }
     }
@@ -161,18 +159,21 @@ pub struct Passwd {
     pub expiration: time_t,
 }
 
-/// SAFETY: ptr must point to a valid C string.
+/// # Safety
+/// ptr must point to a valid C string.
+///
 /// Returns None if ptr is null.
-unsafe fn cstr2string(ptr: *const c_char) -> Option<String> {
+fn cstr2string(ptr: *const c_char) -> Option<String> {
     if ptr.is_null() {
         None
     } else {
-        Some(CStr::from_ptr(ptr).to_string_lossy().into_owned())
+        Some(unsafe { CStr::from_ptr(ptr).to_string_lossy().into_owned() })
     }
 }
 
 impl Passwd {
-    /// SAFETY: All the pointed-to strings must be valid and not change while
+    /// # Safety
+    /// All the pointed-to strings must be valid and not change while
     /// the function runs. That means PW_LOCK must be held.
     unsafe fn from_raw(raw: passwd) -> Self {
         Self {
@@ -219,8 +220,14 @@ impl Passwd {
         let name = CString::new(self.name.as_bytes()).unwrap();
         loop {
             ngroups_old = ngroups;
-            if unsafe { getgrouplist(name.as_ptr(), self.gid, groups.as_mut_ptr(), &mut ngroups) }
-                == -1
+            if unsafe {
+                getgrouplist(
+                    name.as_ptr(),
+                    self.gid,
+                    groups.as_mut_ptr(),
+                    &raw mut ngroups,
+                )
+            } == -1
             {
                 if ngroups == ngroups_old {
                     ngroups *= 2;
@@ -246,7 +253,8 @@ pub struct Group {
 }
 
 impl Group {
-    /// SAFETY: gr_name must be valid and not change while
+    /// # Safety
+    /// gr_name must be valid and not change while
     /// the function runs. That means PW_LOCK must be held.
     unsafe fn from_raw(raw: group) -> Self {
         Self {
@@ -271,7 +279,7 @@ pub trait Locate<K> {
 // to, so we must copy all the data we want before releasing the lock.
 // (Technically we must also ensure that the raw functions aren't being called
 // anywhere else in the program.)
-static PW_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+static PW_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 macro_rules! f {
     ($fnam:ident, $fid:ident, $t:ident, $st:ident) => {
@@ -291,7 +299,7 @@ macro_rules! f {
                         // The same applies for the two cases below.
                         Err(IOError::new(
                             ErrorKind::NotFound,
-                            format!("No such id: {}", k),
+                            format!("No such id: {k}"),
                         ))
                     }
                 }
@@ -301,32 +309,28 @@ macro_rules! f {
         impl<'a> Locate<&'a str> for $st {
             fn locate(k: &'a str) -> IOResult<Self> {
                 let _guard = PW_LOCK.lock();
-                if let Ok(id) = k.parse::<$t>() {
-                    // SAFETY: We're holding PW_LOCK.
-                    unsafe {
+                // SAFETY: We're holding PW_LOCK.
+                unsafe {
+                    let cstring = CString::new(k)?;
+                    // try to get user or group with name matching the input with these tow lines:
+                    // f!(getpwnam, getpwuid, uid_t, Passwd);
+                    // f!(getgrnam, getgrgid, gid_t, Group);
+                    let data = $fnam(cstring.as_ptr());
+                    if !data.is_null() {
+                        return Ok($st::from_raw(ptr::read(data as *const _)));
+                    }
+                    if let Ok(id) = k.parse::<$t>() {
                         let data = $fid(id);
                         if !data.is_null() {
                             Ok($st::from_raw(ptr::read(data as *const _)))
                         } else {
                             Err(IOError::new(
                                 ErrorKind::NotFound,
-                                format!("No such id: {}", id),
+                                format!("No such id: {id}"),
                             ))
                         }
-                    }
-                } else {
-                    // SAFETY: We're holding PW_LOCK.
-                    unsafe {
-                        let cstring = CString::new(k).unwrap();
-                        let data = $fnam(cstring.as_ptr());
-                        if !data.is_null() {
-                            Ok($st::from_raw(ptr::read(data as *const _)))
-                        } else {
-                            Err(IOError::new(
-                                ErrorKind::NotFound,
-                                format!("Not found: {}", k),
-                            ))
-                        }
+                    } else {
+                        Err(IOError::new(ErrorKind::NotFound, format!("Not found: {k}")))
                     }
                 }
             }

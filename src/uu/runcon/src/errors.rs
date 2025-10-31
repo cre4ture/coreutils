@@ -2,6 +2,8 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
+#![cfg(target_os = "linux")]
+
 use std::ffi::OsString;
 use std::fmt::{Display, Formatter, Write};
 use std::io;
@@ -9,6 +11,7 @@ use std::str::Utf8Error;
 
 use uucore::display::Quotable;
 use uucore::error::UError;
+use uucore::translate;
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
@@ -23,10 +26,10 @@ pub(crate) mod error_exit_status {
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
-    #[error("No command is specified")]
+    #[error("{}", translate!("runcon-error-no-command"))]
     MissingCommand,
 
-    #[error("runcon may be used only on a SELinux kernel")]
+    #[error("{}", translate!("runcon-error-selinux-not-enabled"))]
     SELinuxNotEnabled,
 
     #[error(transparent)]
@@ -35,19 +38,19 @@ pub(crate) enum Error {
     #[error(transparent)]
     CommandLine(#[from] clap::Error),
 
-    #[error("{operation} failed")]
+    #[error("{}", translate!("runcon-error-operation-failed", "operation" => .operation))]
     SELinux {
         operation: &'static str,
         source: selinux::errors::Error,
     },
 
-    #[error("{operation} failed")]
+    #[error("{}", translate!("runcon-error-operation-failed", "operation" => .operation))]
     Io {
         operation: &'static str,
         source: io::Error,
     },
 
-    #[error("{operation} failed on {}", .operand1.quote())]
+    #[error("{}", translate!("runcon-error-operation-failed-on", "operation" => .operation, "operand" => .operand1.quote()))]
     Io1 {
         operation: &'static str,
         operand1: OsString,
@@ -115,5 +118,19 @@ impl UError for RunconError {
 impl Display for RunconError {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         write_full_error(f, &self.inner)
+    }
+}
+
+impl UError for Error {
+    fn code(&self) -> i32 {
+        match self {
+            Self::MissingCommand => error_exit_status::ANOTHER_ERROR,
+            Self::SELinuxNotEnabled => error_exit_status::ANOTHER_ERROR,
+            Self::NotUTF8(_) => error_exit_status::ANOTHER_ERROR,
+            Self::CommandLine(e) => e.exit_code(),
+            Self::SELinux { .. } => error_exit_status::ANOTHER_ERROR,
+            Self::Io { .. } => error_exit_status::ANOTHER_ERROR,
+            Self::Io1 { .. } => error_exit_status::ANOTHER_ERROR,
+        }
     }
 }

@@ -4,15 +4,14 @@
 // file that was distributed with this source code.
 use std::fs::File;
 
-use crate::common::util::TestScenario;
+use uutests::new_ucmd;
 
 #[test]
 #[cfg(not(windows))]
 fn test_dev_null() {
     new_ucmd!()
         .set_stdin(File::open("/dev/null").unwrap())
-        .fails()
-        .code_is(1)
+        .fails_with_code(1)
         .stdout_is("not a tty\n");
 }
 
@@ -22,8 +21,7 @@ fn test_dev_null_silent() {
     new_ucmd!()
         .args(&["-s"])
         .set_stdin(File::open("/dev/null").unwrap())
-        .fails()
-        .code_is(1)
+        .fails_with_code(1)
         .stdout_is("");
 }
 
@@ -57,7 +55,7 @@ fn test_close_stdin_silent_alias() {
 
 #[test]
 fn test_wrong_argument() {
-    new_ucmd!().args(&["a"]).fails().code_is(2);
+    new_ucmd!().args(&["a"]).fails_with_code(2);
 }
 
 #[test]
@@ -70,7 +68,9 @@ fn test_help() {
 #[cfg(all(unix, not(target_os = "freebsd")))]
 fn test_stdout_fail() {
     use std::process::{Command, Stdio};
-    let ts = TestScenario::new(util_name!());
+    use uutests::at_and_ts;
+
+    let (_, ts) = at_and_ts!();
     // Sleep inside a shell to ensure the process doesn't finish before we've
     // closed its stdout
     let mut proc = Command::new("sh")

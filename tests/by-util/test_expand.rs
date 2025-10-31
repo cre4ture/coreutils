@@ -2,13 +2,13 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-use crate::common::util::TestScenario;
 use uucore::display::Quotable;
+use uutests::new_ucmd;
 // spell-checker:ignore (ToDO) taaaa tbbbb tcccc
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 
 #[test]
@@ -397,7 +397,7 @@ fn test_comma_with_plus_4() {
 fn test_args_override() {
     new_ucmd!()
         .args(&["-i", "-i", "with-trailing-tab.txt"])
-        .run()
+        .succeeds()
         .stdout_is(
             "// !note: file contains significant whitespace
 // * indentation uses <TAB> characters
@@ -425,4 +425,20 @@ fn test_nonexisting_file() {
         .fails()
         .stderr_contains("expand: nonexistent: No such file or directory")
         .stdout_contains_line("// !note: file contains significant whitespace");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn test_expand_non_utf8_paths() {
+    use std::os::unix::ffi::OsStringExt;
+    use uutests::at_and_ucmd;
+
+    let (at, mut ucmd) = at_and_ucmd!();
+
+    let filename = std::ffi::OsString::from_vec(vec![0xFF, 0xFE]);
+    std::fs::write(at.plus(&filename), b"hello\tworld\ntest\tline\n").unwrap();
+
+    ucmd.arg(&filename)
+        .succeeds()
+        .stdout_is("hello   world\ntest    line\n");
 }

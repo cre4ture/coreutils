@@ -11,20 +11,19 @@ use uu_split::uumain;
 use rand::Rng;
 use std::ffi::OsString;
 
-mod fuzz_common;
-use crate::fuzz_common::{
-    compare_result, generate_and_run_uumain, generate_random_string, run_gnu_cmd, CommandResult,
+use uufuzz::{
+    CommandResult, compare_result, generate_and_run_uumain, generate_random_string, run_gnu_cmd,
 };
 static CMD_PATH: &str = "split";
 
 fn generate_split_args() -> String {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut args = Vec::new();
 
-    match rng.gen_range(0..=9) {
+    match rng.random_range(0..=9) {
         0 => {
             args.push(String::from("-a")); // Suffix length
-            args.push(rng.gen_range(1..=8).to_string());
+            args.push(rng.random_range(1..=8).to_string());
         }
         1 => {
             args.push(String::from("--additional-suffix"));
@@ -32,17 +31,17 @@ fn generate_split_args() -> String {
         }
         2 => {
             args.push(String::from("-b")); // Bytes per output file
-            args.push(rng.gen_range(1..=1024).to_string() + "K");
+            args.push(rng.random_range(1..=1024).to_string() + "K");
         }
         3 => {
             args.push(String::from("-C")); // Line bytes
-            args.push(rng.gen_range(1..=1024).to_string());
+            args.push(rng.random_range(1..=1024).to_string());
         }
         4 => args.push(String::from("-d")), // Use numeric suffixes
         5 => args.push(String::from("-x")), // Use hex suffixes
         6 => {
             args.push(String::from("-l")); // Number of lines per output file
-            args.push(rng.gen_range(1..=1000).to_string());
+            args.push(rng.random_range(1..=1000).to_string());
         }
         7 => {
             args.push(String::from("--filter"));
@@ -59,13 +58,13 @@ fn generate_split_args() -> String {
     args.join(" ")
 }
 
-// Function to generate a random string of lines
+/// Function to generate a random string of lines
 fn generate_random_lines(count: usize) -> String {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut lines = Vec::new();
 
     for _ in 0..count {
-        lines.push(generate_random_string(rng.gen_range(1..=20)));
+        lines.push(generate_random_string(rng.random_range(1..=20)));
     }
 
     lines.join("\n")

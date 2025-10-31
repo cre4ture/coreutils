@@ -12,6 +12,7 @@ use std::fs::Metadata;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::{Path, PathBuf};
 use uucore::error::UResult;
+use uucore::translate;
 
 #[derive(Debug, Clone)]
 pub enum InputKind {
@@ -54,7 +55,7 @@ impl Input {
         let kind = string.into();
         let display_name = match kind {
             InputKind::File(_) => string.to_string_lossy().to_string(),
-            InputKind::Stdin => text::STDIN_HEADER.to_string(),
+            InputKind::Stdin => translate!("tail-stdin-header"),
         };
 
         Self { kind, display_name }
@@ -77,13 +78,17 @@ impl Input {
                 path.canonicalize().ok()
             }
             InputKind::File(_) | InputKind::Stdin => {
-                if cfg!(unix) {
-                    match PathBuf::from(text::DEV_STDIN).canonicalize().ok() {
-                        Some(path) if path != PathBuf::from(text::FD0) => Some(path),
-                        Some(_) | None => None,
-                    }
-                } else {
+                // on macOS, /dev/fd isn't backed by /proc and canonicalize()
+                // on dev/fd/0 (or /dev/stdin) will fail (NotFound),
+                // so we treat stdin as a pipe here
+                // https://github.com/rust-lang/rust/issues/95239
+                #[cfg(target_os = "macos")]
+                {
                     None
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    PathBuf::from(text::FD0).canonicalize().ok()
                 }
             }
         }
@@ -92,7 +97,7 @@ impl Input {
     pub fn is_tailable(&self) -> bool {
         match &self.kind {
             InputKind::File(path) => path_is_tailable(path),
-            InputKind::Stdin => self.resolve().map_or(false, |path| path_is_tailable(&path)),
+            InputKind::Stdin => self.resolve().is_some_and(|path| path_is_tailable(&path)),
         }
     }
 }
@@ -101,7 +106,7 @@ impl Default for Input {
     fn default() -> Self {
         Self {
             kind: InputKind::Stdin,
-            display_name: String::from(text::STDIN_HEADER),
+            display_name: translate!("tail-stdin-header"),
         }
     }
 }
@@ -127,9 +132,8 @@ impl HeaderPrinter {
     pub fn print(&mut self, string: &str) {
         if self.verbose {
             println!(
-                "{}==> {} <==",
+                "{}==> {string} <==",
                 if self.first_header { "" } else { "\n" },
-                string,
             );
             self.first_header = false;
         }
@@ -139,7 +143,6 @@ impl HeaderPrinter {
 pub trait MetadataExtTail {
     fn is_tailable(&self) -> bool;
     fn got_truncated(&self, other: &Metadata) -> UResult<bool>;
-    fn get_block_size(&self) -> u64;
     fn file_id_eq(&self, other: &Metadata) -> bool;
 }
 
@@ -159,17 +162,6 @@ impl MetadataExtTail for Metadata {
     /// Return true if the file was modified and is now shorter
     fn got_truncated(&self, other: &Metadata) -> UResult<bool> {
         Ok(other.len() < self.len() && other.modified()? != self.modified()?)
-    }
-
-    fn get_block_size(&self) -> u64 {
-        #[cfg(unix)]
-        {
-            self.blocks()
-        }
-        #[cfg(not(unix))]
-        {
-            self.len()
-        }
     }
 
     fn file_id_eq(&self, _other: &Metadata) -> bool {
@@ -203,7 +195,7 @@ impl PathExtTail for Path {
     fn is_stdin(&self) -> bool {
         self.eq(Self::new(text::DASH))
             || self.eq(Self::new(text::DEV_STDIN))
-            || self.eq(Self::new(text::STDIN_HEADER))
+            || self.eq(Self::new(&translate!("tail-stdin-header")))
     }
 
     /// Return true if `path` does not have an existing parent directory
@@ -218,7 +210,7 @@ impl PathExtTail for Path {
 }
 
 pub fn path_is_tailable(path: &Path) -> bool {
-    path.is_file() || path.exists() && path.metadata().map_or(false, |meta| meta.is_tailable())
+    path.is_file() || path.exists() && path.metadata().is_ok_and(|meta| meta.is_tailable())
 }
 
 #[inline]

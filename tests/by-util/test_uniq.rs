@@ -4,8 +4,9 @@
 // file that was distributed with this source code.
 
 // spell-checker:ignore nabcd badoption schar
-use crate::common::util::TestScenario;
 use uucore::posix::OBSOLETE;
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
 
 static INPUT: &str = "sorted.txt";
 static OUTPUT: &str = "sorted-output.txt";
@@ -15,7 +16,7 @@ static SORTED_ZERO_TERMINATED: &str = "sorted-zero-terminated.txt";
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 
 #[test]
@@ -36,7 +37,7 @@ fn test_help_and_version_on_stdout() {
 fn test_stdin_default() {
     new_ucmd!()
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("sorted-simple.expected");
 }
 
@@ -44,7 +45,7 @@ fn test_stdin_default() {
 fn test_single_default() {
     new_ucmd!()
         .arg(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("sorted-simple.expected");
 }
 
@@ -52,7 +53,7 @@ fn test_single_default() {
 fn test_single_default_output() {
     let (at, mut ucmd) = at_and_ucmd!();
     let expected = at.read("sorted-simple.expected");
-    ucmd.args(&[INPUT, OUTPUT]).run();
+    ucmd.args(&[INPUT, OUTPUT]).succeeds();
     let found = at.read(OUTPUT);
     assert_eq!(found, expected);
 }
@@ -62,7 +63,7 @@ fn test_stdin_counts() {
     new_ucmd!()
         .args(&["-c"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("sorted-counts.expected");
 }
 
@@ -71,7 +72,7 @@ fn test_stdin_skip_1_char() {
     new_ucmd!()
         .args(&["-s1"])
         .pipe_in_fixture(SKIP_CHARS)
-        .run()
+        .succeeds()
         .stdout_is_fixture("skip-1-char.expected");
 }
 
@@ -80,7 +81,7 @@ fn test_stdin_skip_5_chars() {
     new_ucmd!()
         .args(&["-s5"])
         .pipe_in_fixture(SKIP_CHARS)
-        .run()
+        .succeeds()
         .stdout_is_fixture("skip-5-chars.expected");
 }
 
@@ -89,7 +90,7 @@ fn test_stdin_skip_and_check_2_chars() {
     new_ucmd!()
         .args(&["-s3", "-w2"])
         .pipe_in_fixture(SKIP_CHARS)
-        .run()
+        .succeeds()
         .stdout_is_fixture("skip-3-check-2-chars.expected");
 }
 
@@ -98,7 +99,7 @@ fn test_stdin_skip_2_fields() {
     new_ucmd!()
         .args(&["-f2"])
         .pipe_in_fixture(SKIP_FIELDS)
-        .run()
+        .succeeds()
         .stdout_is_fixture("skip-2-fields.expected");
 }
 
@@ -107,7 +108,7 @@ fn test_stdin_skip_2_fields_obsolete() {
     new_ucmd!()
         .args(&["-2"])
         .pipe_in_fixture(SKIP_FIELDS)
-        .run()
+        .succeeds()
         .stdout_is_fixture("skip-2-fields.expected");
 }
 
@@ -116,7 +117,7 @@ fn test_stdin_skip_21_fields() {
     new_ucmd!()
         .args(&["-f21"])
         .pipe_in_fixture(SKIP_FIELDS)
-        .run()
+        .succeeds()
         .stdout_is_fixture("skip-21-fields.expected");
 }
 
@@ -125,7 +126,7 @@ fn test_stdin_skip_21_fields_obsolete() {
     new_ucmd!()
         .args(&["-21"])
         .pipe_in_fixture(SKIP_FIELDS)
-        .run()
+        .succeeds()
         .stdout_is_fixture("skip-21-fields.expected");
 }
 
@@ -133,8 +134,7 @@ fn test_stdin_skip_21_fields_obsolete() {
 fn test_stdin_skip_invalid_fields_obsolete() {
     new_ucmd!()
         .args(&["-5q"])
-        .run()
-        .failure()
+        .fails()
         .stderr_contains("error: unexpected argument '-q' found\n");
 }
 
@@ -143,22 +143,22 @@ fn test_stdin_all_repeated() {
     new_ucmd!()
         .args(&["--all-repeated"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("sorted-all-repeated.expected");
     new_ucmd!()
         .args(&["--all-repeated=none"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("sorted-all-repeated.expected");
     new_ucmd!()
         .args(&["--all-repeated=non"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("sorted-all-repeated.expected");
     new_ucmd!()
         .args(&["--all-repeated=n"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("sorted-all-repeated.expected");
 }
 
@@ -170,8 +170,7 @@ fn test_all_repeated_followed_by_filename() {
     at.write(filename, "a\na\n");
 
     ucmd.args(&["--all-repeated", filename])
-        .run()
-        .success()
+        .succeeds()
         .stdout_is("a\na\n");
 }
 
@@ -180,17 +179,17 @@ fn test_stdin_all_repeated_separate() {
     new_ucmd!()
         .args(&["--all-repeated=separate"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("sorted-all-repeated-separate.expected");
     new_ucmd!()
         .args(&["--all-repeated=separat"]) // spell-checker:disable-line
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("sorted-all-repeated-separate.expected");
     new_ucmd!()
         .args(&["--all-repeated=s"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("sorted-all-repeated-separate.expected");
 }
 
@@ -199,17 +198,17 @@ fn test_stdin_all_repeated_prepend() {
     new_ucmd!()
         .args(&["--all-repeated=prepend"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("sorted-all-repeated-prepend.expected");
     new_ucmd!()
         .args(&["--all-repeated=prepen"]) // spell-checker:disable-line
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("sorted-all-repeated-prepend.expected");
     new_ucmd!()
         .args(&["--all-repeated=p"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("sorted-all-repeated-prepend.expected");
 }
 
@@ -218,7 +217,7 @@ fn test_stdin_unique_only() {
     new_ucmd!()
         .args(&["-u"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("sorted-unique-only.expected");
 }
 
@@ -227,7 +226,7 @@ fn test_stdin_repeated_only() {
     new_ucmd!()
         .args(&["-d"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("sorted-repeated-only.expected");
 }
 
@@ -236,7 +235,7 @@ fn test_stdin_ignore_case() {
     new_ucmd!()
         .args(&["-i"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("sorted-ignore-case.expected");
 }
 
@@ -245,7 +244,7 @@ fn test_stdin_zero_terminated() {
     new_ucmd!()
         .args(&["-z"])
         .pipe_in_fixture(SORTED_ZERO_TERMINATED)
-        .run()
+        .succeeds()
         .stdout_is_fixture("sorted-zero-terminated.expected");
 }
 
@@ -254,8 +253,7 @@ fn test_gnu_locale_fr_schar() {
     new_ucmd!()
         .args(&["-f1", "locale-fr-schar.txt"])
         .env("LC_ALL", "C")
-        .run()
-        .success()
+        .succeeds()
         .stdout_is_fixture_bytes("locale-fr-schar.txt");
 }
 
@@ -264,7 +262,7 @@ fn test_group() {
     new_ucmd!()
         .args(&["--group"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("group.expected");
 }
 
@@ -276,8 +274,7 @@ fn test_group_followed_by_filename() {
     at.write(filename, "a\na\n");
 
     ucmd.args(&["--group", filename])
-        .run()
-        .success()
+        .succeeds()
         .stdout_is("a\na\n");
 }
 
@@ -286,12 +283,12 @@ fn test_group_prepend() {
     new_ucmd!()
         .args(&["--group=prepend"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("group-prepend.expected");
     new_ucmd!()
         .args(&["--group=p"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("group-prepend.expected");
 }
 
@@ -300,12 +297,12 @@ fn test_group_append() {
     new_ucmd!()
         .args(&["--group=append"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("group-append.expected");
     new_ucmd!()
         .args(&["--group=a"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("group-append.expected");
 }
 
@@ -314,17 +311,17 @@ fn test_group_both() {
     new_ucmd!()
         .args(&["--group=both"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("group-both.expected");
     new_ucmd!()
         .args(&["--group=bot"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("group-both.expected");
     new_ucmd!()
         .args(&["--group=b"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("group-both.expected");
 }
 
@@ -333,18 +330,18 @@ fn test_group_separate() {
     new_ucmd!()
         .args(&["--group=separate"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("group.expected");
     new_ucmd!()
         .args(&["--group=s"])
         .pipe_in_fixture(INPUT)
-        .run()
+        .succeeds()
         .stdout_is_fixture("group.expected");
 }
 
 #[test]
 fn test_case2() {
-    new_ucmd!().pipe_in("a\na\n").run().stdout_is("a\n");
+    new_ucmd!().pipe_in("a\na\n").succeeds().stdout_is("a\n");
 }
 
 struct TestCase {
@@ -357,6 +354,7 @@ struct TestCase {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn gnu_tests() {
     let cases = [
         TestCase {
@@ -891,12 +889,11 @@ fn gnu_tests() {
             input: "", // Note: Different from GNU test, but should not matter
             stdout: Some(""),
             stderr: Some(concat!(
-                "uniq: invalid argument 'badoption' for '--all-repeated'\n",
-                "Valid arguments are:\n",
-                "  - 'none'\n",
-                "  - 'prepend'\n",
-                "  - 'separate'\n",
-                "Try 'uniq --help' for more information.\n"
+                "error: invalid value 'badoption' for '--all-repeated[=<delimit-method>]'\n",
+                "\n",
+                "  [possible values: none, prepend, separate]\n",
+                "\n",
+                "For more information, try '--help'.\n"
             )),
             exit: Some(1),
         },
@@ -1069,8 +1066,9 @@ fn gnu_tests() {
             input: "",
             stdout: Some(""),
             stderr: Some(concat!(
-                "uniq: --group is mutually exclusive with -c/-d/-D/-u\n",
-                "Try 'uniq --help' for more information.\n"
+                "error: the argument '--group[=<group-method>]' cannot be used with '--count'\n",
+                "\n",
+                "For more information, try '--help'.\n"
             )),
             exit: Some(1),
         },
@@ -1080,8 +1078,9 @@ fn gnu_tests() {
             input: "",
             stdout: Some(""),
             stderr: Some(concat!(
-                "uniq: --group is mutually exclusive with -c/-d/-D/-u\n",
-                "Try 'uniq --help' for more information.\n"
+                "error: the argument '--group[=<group-method>]' cannot be used with '--repeated'\n",
+                "\n",
+                "For more information, try '--help'.\n"
             )),
             exit: Some(1),
         },
@@ -1091,8 +1090,9 @@ fn gnu_tests() {
             input: "",
             stdout: Some(""),
             stderr: Some(concat!(
-                "uniq: --group is mutually exclusive with -c/-d/-D/-u\n",
-                "Try 'uniq --help' for more information.\n"
+                "error: the argument '--group[=<group-method>]' cannot be used with '--unique'\n",
+                "\n",
+                "For more information, try '--help'.\n"
             )),
             exit: Some(1),
         },
@@ -1102,8 +1102,9 @@ fn gnu_tests() {
             input: "",
             stdout: Some(""),
             stderr: Some(concat!(
-                "uniq: --group is mutually exclusive with -c/-d/-D/-u\n",
-                "Try 'uniq --help' for more information.\n"
+                "error: the argument '--group[=<group-method>]' cannot be used with '--all-repeated[=<delimit-method>]'\n",
+                "\n",
+                "For more information, try '--help'.\n"
             )),
             exit: Some(1),
         },
@@ -1113,13 +1114,11 @@ fn gnu_tests() {
             input: "",
             stdout: Some(""),
             stderr: Some(concat!(
-                "uniq: invalid argument 'badoption' for '--group'\n",
-                "Valid arguments are:\n",
-                "  - 'prepend'\n",
-                "  - 'append'\n",
-                "  - 'separate'\n",
-                "  - 'both'\n",
-                "Try 'uniq --help' for more information.\n"
+                "error: invalid value 'badoption' for '--group[=<group-method>]'\n",
+                "\n",
+                "  [possible values: separate, prepend, append, both]\n",
+                "\n",
+                "For more information, try '--help'.\n"
             )),
             exit: Some(1),
         },
@@ -1170,4 +1169,25 @@ fn gnu_tests() {
             result.code_is(exit);
         }
     }
+}
+
+#[test]
+fn test_stdin_w1_multibyte() {
+    let input = "à\ná\n";
+    new_ucmd!()
+        .args(&["-w1"])
+        .pipe_in(input)
+        .succeeds()
+        .stdout_is("à\ná\n");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_failed_write_is_reported() {
+    new_ucmd!()
+        .pipe_in("hello")
+        .args(&["-z"])
+        .set_stdout(std::fs::File::create("/dev/full").unwrap())
+        .fails()
+        .stderr_is("uniq: write error: No space left on device\n");
 }

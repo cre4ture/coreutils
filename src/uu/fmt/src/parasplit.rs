@@ -26,6 +26,14 @@ fn char_width(c: char) -> usize {
     }
 }
 
+/// GNU fmt has a more restrictive definition of whitespace than Unicode.
+/// It only considers ASCII whitespace characters (space, tab, newline, etc.)
+/// and excludes many Unicode whitespace characters like non-breaking spaces.
+fn is_fmt_whitespace(c: char) -> bool {
+    // Only ASCII whitespace characters are considered whitespace in GNU fmt
+    matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0B' | '\x0C')
+}
+
 // lines with PSKIP, lacking PREFIX, or which are entirely blank are
 // NoFormatLines; otherwise, they are FormatLines
 #[derive(Debug)]
@@ -35,7 +43,7 @@ pub enum Line {
 }
 
 impl Line {
-    // when we know that it's a FormatLine, as in the ParagraphStream iterator
+    /// when we know that it's a [`Line::FormatLine`], as in the [`ParagraphStream`] iterator
     fn get_formatline(self) -> FileLine {
         match self {
             Self::FormatLine(fl) => fl,
@@ -43,7 +51,7 @@ impl Line {
         }
     }
 
-    // when we know that it's a NoFormatLine, as in the ParagraphStream iterator
+    /// when we know that it's a [`Line::NoFormatLine`], as in the [`ParagraphStream`] iterator
     fn get_noformatline(self) -> (String, bool) {
         match self {
             Self::NoFormatLine(s, b) => (s, b),
@@ -73,7 +81,7 @@ pub struct FileLines<'a> {
     lines: Lines<&'a mut FileOrStdReader>,
 }
 
-impl<'a> FileLines<'a> {
+impl FileLines<'_> {
     fn new<'b>(opts: &'b FmtOptions, lines: Lines<&'b mut FileOrStdReader>) -> FileLines<'b> {
         FileLines { opts, lines }
     }
@@ -109,7 +117,7 @@ impl<'a> FileLines<'a> {
             for (i, char) in line.char_indices() {
                 if line[i..].starts_with(pfx) {
                     return (true, i);
-                } else if !char.is_whitespace() {
+                } else if !is_fmt_whitespace(char) {
                     break;
                 }
             }
@@ -128,7 +136,7 @@ impl<'a> FileLines<'a> {
                 prefix_len = indent_len;
             }
 
-            if (os >= prefix_end) && !c.is_whitespace() {
+            if (os >= prefix_end) && !is_fmt_whitespace(c) {
                 // found first non-whitespace after prefix, this is indent_end
                 indent_end = os;
                 break;
@@ -144,7 +152,7 @@ impl<'a> FileLines<'a> {
     }
 }
 
-impl<'a> Iterator for FileLines<'a> {
+impl Iterator for FileLines<'_> {
     type Item = Line;
 
     fn next(&mut self) -> Option<Line> {
@@ -154,7 +162,7 @@ impl<'a> Iterator for FileLines<'a> {
         // emit a blank line
         // Err(true) indicates that this was a linebreak,
         // which is important to know when detecting mail headers
-        if n.chars().all(char::is_whitespace) {
+        if n.chars().all(is_fmt_whitespace) {
             return Some(Line::NoFormatLine(String::new(), true));
         }
 
@@ -174,7 +182,7 @@ impl<'a> Iterator for FileLines<'a> {
         if pmatch
             && n[poffset + self.opts.prefix.as_ref().map_or(0, |s| s.len())..]
                 .chars()
-                .all(char::is_whitespace)
+                .all(is_fmt_whitespace)
         {
             return Some(Line::NoFormatLine(n, false));
         }
@@ -199,10 +207,10 @@ impl<'a> Iterator for FileLines<'a> {
     }
 }
 
-/// A paragraph : a collection of FileLines that are to be formatted
+/// A paragraph : a collection of [`FileLines`] that are to be formatted
 /// plus info about the paragraph's indentation
 ///
-/// We only retain the String from the FileLine; the other info
+/// We only retain the String from the [`FileLine`]; the other info
 /// is only there to help us in deciding how to merge lines into Paragraphs
 #[derive(Debug)]
 pub struct Paragraph {
@@ -232,7 +240,7 @@ pub struct ParagraphStream<'a> {
     opts: &'a FmtOptions,
 }
 
-impl<'a> ParagraphStream<'a> {
+impl ParagraphStream<'_> {
     pub fn new<'b>(opts: &'b FmtOptions, reader: &'b mut FileOrStdReader) -> ParagraphStream<'b> {
         let lines = FileLines::new(opts, reader.lines()).peekable();
         // at the beginning of the file, we might find mail headers
@@ -255,9 +263,8 @@ impl<'a> ParagraphStream<'a> {
             if l_slice.starts_with("From ") {
                 true
             } else {
-                let colon_posn = match l_slice.find(':') {
-                    Some(n) => n,
-                    None => return false,
+                let Some(colon_posn) = l_slice.find(':') else {
+                    return false;
                 };
 
                 // header field must be nonzero length
@@ -273,7 +280,7 @@ impl<'a> ParagraphStream<'a> {
     }
 }
 
-impl<'a> Iterator for ParagraphStream<'a> {
+impl Iterator for ParagraphStream<'_> {
     type Item = Result<Paragraph, String>;
 
     #[allow(clippy::cognitive_complexity)]
@@ -491,7 +498,7 @@ struct WordSplit<'a> {
     prev_punct: bool,
 }
 
-impl<'a> WordSplit<'a> {
+impl WordSplit<'_> {
     fn analyze_tabs(&self, string: &str) -> (Option<usize>, usize, Option<usize>) {
         // given a string, determine (length before tab) and (printed length after first tab)
         // if there are no tabs, beforetab = -1 and aftertab is the printed length
@@ -499,7 +506,7 @@ impl<'a> WordSplit<'a> {
         let mut aftertab = 0;
         let mut word_start = None;
         for (os, c) in string.char_indices() {
-            if !c.is_whitespace() {
+            if !is_fmt_whitespace(c) {
                 word_start = Some(os);
                 break;
             } else if c == '\t' {
@@ -517,10 +524,10 @@ impl<'a> WordSplit<'a> {
     }
 }
 
-impl<'a> WordSplit<'a> {
+impl WordSplit<'_> {
     fn new<'b>(opts: &'b FmtOptions, string: &'b str) -> WordSplit<'b> {
         // wordsplits *must* start at a non-whitespace character
-        let trim_string = string.trim_start();
+        let trim_string = string.trim_start_matches(is_fmt_whitespace);
         WordSplit {
             opts,
             string: trim_string,
@@ -560,12 +567,11 @@ impl<'a> Iterator for WordSplit<'a> {
 
         // find the start of the next word, and record if we find a tab character
         let (before_tab, after_tab, word_start) =
-            match self.analyze_tabs(&self.string[old_position..]) {
-                (b, a, Some(s)) => (b, a, s + old_position),
-                (_, _, None) => {
-                    self.position = self.length;
-                    return None;
-                }
+            if let (b, a, Some(s)) = self.analyze_tabs(&self.string[old_position..]) {
+                (b, a, s + old_position)
+            } else {
+                self.position = self.length;
+                return None;
             };
 
         // find the beginning of the next whitespace
@@ -573,7 +579,7 @@ impl<'a> Iterator for WordSplit<'a> {
         // points to whitespace character OR end of string
         let mut word_nchars = 0;
         self.position = match self.string[word_start..].find(|x: char| {
-            if x.is_whitespace() {
+            if is_fmt_whitespace(x) {
                 true
             } else {
                 word_nchars += char_width(x);

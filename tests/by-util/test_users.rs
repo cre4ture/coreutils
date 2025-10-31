@@ -2,11 +2,13 @@
 //
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
-use crate::common::util::TestScenario;
+use uutests::new_ucmd;
+#[cfg(any(target_vendor = "apple", target_os = "linux"))]
+use uutests::{util::TestScenario, util_name};
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 
 #[test]
@@ -30,4 +32,13 @@ fn test_users_check_name() {
         .stdout_move_str();
 
     new_ucmd!().succeeds().stdout_is(&expected);
+}
+
+#[test]
+#[cfg(target_os = "openbsd")]
+fn test_users_check_name_openbsd() {
+    new_ucmd!()
+        .args(&["openbsd_utmp"])
+        .succeeds()
+        .stdout_contains("test");
 }

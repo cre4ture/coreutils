@@ -6,11 +6,13 @@
 
 use std::path::PathBuf;
 
-use crate::common::util::{TestScenario, UCommand};
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
+use uutests::util::UCommand;
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 
 #[test]
@@ -29,13 +31,15 @@ fn test_failed() {
 #[test]
 fn test_deleted_dir() {
     use std::process::Command;
+    use uutests::util::TestScenario;
+    use uutests::util_name;
 
     let ts = TestScenario::new(util_name!());
-    let at = ts.fixtures;
+    let at = &ts.fixtures;
     let output = Command::new("sh")
         .arg("-c")
         .arg(format!(
-            "cd '{}'; mkdir foo; cd foo; rmdir ../foo; exec '{}' {}",
+            "cd '{}'; mkdir foo; cd foo; rmdir ../foo; LANG=C exec '{}' {}",
             at.root_dir_resolved(),
             ts.bin_path.to_str().unwrap(),
             ts.util_name,
@@ -45,8 +49,8 @@ fn test_deleted_dir() {
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     assert_eq!(
-        output.stderr,
-        b"pwd: failed to get current directory: No such file or directory\n"
+        String::from_utf8_lossy(&output.stderr),
+        "pwd: failed to get current directory: No such file or directory\n"
     );
 }
 

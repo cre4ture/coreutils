@@ -6,29 +6,48 @@
 // spell-checker:ignore (ToDO) COMFOLLOW Chowner RFILE RFILE's derefer dgid nonblank nonprint nonprinting
 
 use uucore::display::Quotable;
-pub use uucore::entries;
+use uucore::entries;
 use uucore::error::{FromIo, UResult, USimpleError};
-use uucore::perms::{chown_base, options, GidUidOwnerFilter, IfFrom};
-use uucore::{format_usage, help_about, help_usage};
+use uucore::format_usage;
+use uucore::perms::{GidUidOwnerFilter, IfFrom, chown_base, options};
+use uucore::translate;
 
-use clap::{crate_version, Arg, ArgAction, ArgMatches, Command};
+use clap::{Arg, ArgAction, ArgMatches, Command};
 
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 
-const ABOUT: &str = help_about!("chgrp.md");
-const USAGE: &str = help_usage!("chgrp.md");
+fn parse_gid_from_str(group: &str) -> Result<u32, String> {
+    if let Some(gid_str) = group.strip_prefix(':') {
+        // Handle :gid format
+        gid_str
+            .parse::<u32>()
+            .map_err(|_| translate!("chgrp-error-invalid-group-id", "gid_str" => gid_str))
+    } else {
+        // Try as group name first
+        match entries::grp2gid(group) {
+            Ok(g) => Ok(g),
+            // If group name lookup fails, try parsing as raw number
+            Err(_) => group
+                .parse::<u32>()
+                .map_err(|_| translate!("chgrp-error-invalid-group", "group" => group)),
+        }
+    }
+}
 
-fn parse_gid_and_uid(matches: &ArgMatches) -> UResult<GidUidOwnerFilter> {
-    let mut raw_group: String = String::new();
-    let dest_gid = if let Some(file) = matches.get_one::<String>(options::REFERENCE) {
-        fs::metadata(file)
+fn get_dest_gid(matches: &ArgMatches) -> UResult<(Option<u32>, String)> {
+    let mut raw_group = String::new();
+    let dest_gid = if let Some(file) = matches.get_one::<std::ffi::OsString>(options::REFERENCE) {
+        let path = std::path::Path::new(file);
+        fs::metadata(path)
             .map(|meta| {
                 let gid = meta.gid();
                 raw_group = entries::gid2grp(gid).unwrap_or_else(|_| gid.to_string());
                 Some(gid)
             })
-            .map_err_context(|| format!("failed to get attributes of {}", file.quote()))?
+            .map_err_context(
+                || translate!("chgrp-error-failed-to-get-attributes", "file" => path.quote()),
+            )?
     } else {
         let group = matches
             .get_one::<String>(options::ARG_GROUP)
@@ -38,22 +57,38 @@ fn parse_gid_and_uid(matches: &ArgMatches) -> UResult<GidUidOwnerFilter> {
         if group.is_empty() {
             None
         } else {
-            match entries::grp2gid(group) {
+            match parse_gid_from_str(group) {
                 Ok(g) => Some(g),
-                _ => {
-                    return Err(USimpleError::new(
-                        1,
-                        format!("invalid group: {}", group.quote()),
-                    ))
-                }
+                Err(e) => return Err(USimpleError::new(1, e)),
             }
         }
     };
+    Ok((dest_gid, raw_group))
+}
+
+fn parse_gid_and_uid(matches: &ArgMatches) -> UResult<GidUidOwnerFilter> {
+    let (dest_gid, raw_group) = get_dest_gid(matches)?;
+
+    // Handle --from option
+    let filter = if let Some(from_group) = matches.get_one::<String>(options::FROM) {
+        match parse_gid_from_str(from_group) {
+            Ok(g) => IfFrom::Group(g),
+            Err(_) => {
+                return Err(USimpleError::new(
+                    1,
+                    translate!("chgrp-error-invalid-user", "from_group" => from_group),
+                ));
+            }
+        }
+    } else {
+        IfFrom::All
+    };
+
     Ok(GidUidOwnerFilter {
         dest_gid,
         dest_uid: None,
         raw_owner: raw_group,
-        filter: IfFrom::All,
+        filter,
     })
 }
 
@@ -63,23 +98,24 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
 }
 
 pub fn uu_app() -> Command {
-    Command::new(uucore::util_name())
-        .version(crate_version!())
-        .about(ABOUT)
-        .override_usage(format_usage(USAGE))
-        .infer_long_args(true)
+    let cmd = Command::new(uucore::util_name())
+        .version(uucore::crate_version!())
+        .about(translate!("chgrp-about"))
+        .override_usage(format_usage(&translate!("chgrp-usage")))
+        .infer_long_args(true);
+    uucore::clap_localization::configure_localized_command(cmd)
         .disable_help_flag(true)
         .arg(
             Arg::new(options::HELP)
                 .long(options::HELP)
-                .help("Print help information.")
-                .action(ArgAction::Help)
+                .help(translate!("chgrp-help-print-help"))
+                .action(ArgAction::Help),
         )
         .arg(
             Arg::new(options::verbosity::CHANGES)
                 .short('c')
                 .long(options::verbosity::CHANGES)
-                .help("like verbose but report only when a change is made")
+                .help(translate!("chgrp-help-changes"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
@@ -91,40 +127,26 @@ pub fn uu_app() -> Command {
         .arg(
             Arg::new(options::verbosity::QUIET)
                 .long(options::verbosity::QUIET)
-                .help("suppress most error messages")
+                .help(translate!("chgrp-help-quiet"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new(options::verbosity::VERBOSE)
                 .short('v')
                 .long(options::verbosity::VERBOSE)
-                .help("output a diagnostic for every file processed")
+                .help(translate!("chgrp-help-verbose"))
                 .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new(options::dereference::DEREFERENCE)
-                .long(options::dereference::DEREFERENCE)
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-           Arg::new(options::dereference::NO_DEREFERENCE)
-               .short('h')
-               .long(options::dereference::NO_DEREFERENCE)
-               .help(
-                   "affect symbolic links instead of any referenced file (useful only on systems that can change the ownership of a symlink)",
-               )
-               .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new(options::preserve_root::PRESERVE)
                 .long(options::preserve_root::PRESERVE)
-                .help("fail to operate recursively on '/'")
+                .help(translate!("chgrp-help-preserve-root"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new(options::preserve_root::NO_PRESERVE)
                 .long(options::preserve_root::NO_PRESERVE)
-                .help("do not treat '/' specially (the default)")
+                .help(translate!("chgrp-help-no-preserve-root"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
@@ -132,32 +154,22 @@ pub fn uu_app() -> Command {
                 .long(options::REFERENCE)
                 .value_name("RFILE")
                 .value_hint(clap::ValueHint::FilePath)
-                .help("use RFILE's group rather than specifying GROUP values"),
+                .value_parser(clap::value_parser!(std::ffi::OsString))
+                .help(translate!("chgrp-help-reference")),
+        )
+        .arg(
+            Arg::new(options::FROM)
+                .long(options::FROM)
+                .value_name("GROUP")
+                .help(translate!("chgrp-help-from")),
         )
         .arg(
             Arg::new(options::RECURSIVE)
                 .short('R')
                 .long(options::RECURSIVE)
-                .help("operate on files and directories recursively")
+                .help(translate!("chgrp-help-recursive"))
                 .action(ArgAction::SetTrue),
         )
-        .arg(
-            Arg::new(options::traverse::TRAVERSE)
-                .short(options::traverse::TRAVERSE.chars().next().unwrap())
-                .help("if a command line argument is a symbolic link to a directory, traverse it")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new(options::traverse::NO_TRAVERSE)
-                .short(options::traverse::NO_TRAVERSE.chars().next().unwrap())
-                .help("do not traverse any symbolic links (default)")
-                .overrides_with_all([options::traverse::TRAVERSE, options::traverse::EVERY])
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new(options::traverse::EVERY)
-                .short(options::traverse::EVERY.chars().next().unwrap())
-                .help("traverse every symbolic link to a directory encountered")
-                .action(ArgAction::SetTrue),
-        )
+        // Add common arguments with chgrp, chown & chmod
+        .args(uucore::perms::common_args())
 }

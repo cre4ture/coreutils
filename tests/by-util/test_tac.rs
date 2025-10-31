@@ -3,11 +3,29 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 // spell-checker:ignore axxbxx bxxaxx axxx axxxx xxaxx xxax xxxxa axyz zyax zyxa
-use crate::common::util::TestScenario;
+#[cfg(target_os = "linux")]
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
+use uutests::util::TestScenario;
+use uutests::util_name;
+
+#[test]
+#[cfg(target_os = "linux")]
+fn test_tac_non_utf8_paths() {
+    use std::os::unix::ffi::OsStringExt;
+    let (at, mut ucmd) = at_and_ucmd!();
+
+    let filename = std::ffi::OsString::from_vec(vec![0xFF, 0xFE]);
+    std::fs::write(at.plus(&filename), b"line1\nline2\nline3\n").unwrap();
+
+    ucmd.arg(&filename)
+        .succeeds()
+        .stdout_is("line3\nline2\nline1\n");
+}
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 
 #[test]
@@ -16,7 +34,7 @@ fn test_invalid_arg() {
 fn test_stdin_default() {
     new_ucmd!()
         .pipe_in("100\n200\n300\n400\n500")
-        .run()
+        .succeeds()
         .stdout_is("500400\n300\n200\n100\n");
 }
 
@@ -27,7 +45,7 @@ fn test_stdin_non_newline_separator() {
     new_ucmd!()
         .args(&["-s", ":"])
         .pipe_in("100:200:300:400:500")
-        .run()
+        .succeeds()
         .stdout_is("500400:300:200:100:");
 }
 
@@ -38,7 +56,7 @@ fn test_stdin_non_newline_separator_before() {
     new_ucmd!()
         .args(&["-b", "-s", ":"])
         .pipe_in("100:200:300:400:500")
-        .run()
+        .succeeds()
         .stdout_is(":500:400:300:200100");
 }
 
@@ -46,7 +64,7 @@ fn test_stdin_non_newline_separator_before() {
 fn test_single_default() {
     new_ucmd!()
         .arg("prime_per_line.txt")
-        .run()
+        .succeeds()
         .stdout_is_fixture("prime_per_line.expected");
 }
 
@@ -54,7 +72,7 @@ fn test_single_default() {
 fn test_single_non_newline_separator() {
     new_ucmd!()
         .args(&["-s", ":", "delimited_primes.txt"])
-        .run()
+        .succeeds()
         .stdout_is_fixture("delimited_primes.expected");
 }
 
@@ -62,7 +80,7 @@ fn test_single_non_newline_separator() {
 fn test_single_non_newline_separator_before() {
     new_ucmd!()
         .args(&["-b", "-s", ":", "delimited_primes.txt"])
-        .run()
+        .succeeds()
         .stdout_is_fixture("delimited_primes_before.expected");
 }
 
@@ -306,4 +324,14 @@ fn test_regex_before() {
         //   line       2        1    0
         //          |--------||----||---|
         .stdout_is("+---+c+d-e+--++b+-+a+");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_failed_write_is_reported() {
+    new_ucmd!()
+        .pipe_in("hello")
+        .set_stdout(std::fs::File::create("/dev/full").unwrap())
+        .fails()
+        .stderr_is("tac: failed to write to stdout: No space left on device (os error 28)\n");
 }

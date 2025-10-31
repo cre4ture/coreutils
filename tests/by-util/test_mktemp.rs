@@ -4,13 +4,16 @@
 // file that was distributed with this source code.
 // spell-checker:ignore (words) gpghome
 
-use crate::common::util::TestScenario;
+use uutests::at_and_ucmd;
+use uutests::new_ucmd;
+use uutests::util::TestScenario;
+use uutests::util_name;
 
 use uucore::display::Quotable;
 
-use std::path::PathBuf;
 #[cfg(not(windows))]
 use std::path::MAIN_SEPARATOR;
+use std::path::PathBuf;
 use tempfile::tempdir;
 
 #[cfg(unix)]
@@ -54,9 +57,8 @@ macro_rules! assert_suffix_matches_template {
         let suffix = &$s[n - m..n];
         assert!(
             matches_template($template, suffix),
-            "\"{}\" does not end with \"{}\"",
+            "\"{}\" does not end with \"{suffix}\"",
             $template,
-            suffix
         );
     }};
 }
@@ -425,6 +427,26 @@ fn test_mktemp_tmpdir() {
 }
 
 #[test]
+fn test_mktemp_empty_tmpdir() {
+    let scene = TestScenario::new(util_name!());
+    let pathname = scene.fixtures.as_string();
+
+    let result = scene
+        .ucmd()
+        .env(TMPDIR, &pathname)
+        .args(&["-p", ""])
+        .succeeds();
+    assert!(result.stdout_str().trim().starts_with(&pathname));
+
+    let result = scene
+        .ucmd()
+        .env(TMPDIR, &pathname)
+        .arg("--tmpdir=")
+        .succeeds();
+    assert!(result.stdout_str().trim().starts_with(&pathname));
+}
+
+#[test]
 fn test_mktemp_tmpdir_one_arg() {
     let scene = TestScenario::new(util_name!());
 
@@ -644,8 +666,7 @@ fn test_too_few_xs_suffix_directory() {
 fn test_too_many_arguments() {
     new_ucmd!()
         .args(&["-q", "a", "b"])
-        .fails()
-        .code_is(1)
+        .fails_with_code(1)
         .usage_error("too many templates");
 }
 
@@ -778,13 +799,11 @@ fn test_nonexistent_tmpdir_env_var() {
         let stderr = result.stderr_str();
         assert!(
             stderr.starts_with("mktemp: failed to create file via template"),
-            "{}",
-            stderr
+            "{stderr}",
         );
         assert!(
             stderr.ends_with("no\\such\\dir\\tmp.XXXXXXXXXX': No such file or directory\n"),
-            "{}",
-            stderr
+            "{stderr}",
         );
     }
 
@@ -797,13 +816,11 @@ fn test_nonexistent_tmpdir_env_var() {
         let stderr = result.stderr_str();
         assert!(
             stderr.starts_with("mktemp: failed to create directory via template"),
-            "{}",
-            stderr
+            "{stderr}",
         );
         assert!(
             stderr.ends_with("no\\such\\dir\\tmp.XXXXXXXXXX': No such file or directory\n"),
-            "{}",
-            stderr
+            "{stderr}",
         );
     }
 }
@@ -821,13 +838,11 @@ fn test_nonexistent_dir_prefix() {
         let stderr = result.stderr_str();
         assert!(
             stderr.starts_with("mktemp: failed to create file via template"),
-            "{}",
-            stderr
+            "{stderr}",
         );
         assert!(
             stderr.ends_with("d\\XXX': No such file or directory\n"),
-            "{}",
-            stderr
+            "{stderr}",
         );
     }
 
@@ -842,13 +857,11 @@ fn test_nonexistent_dir_prefix() {
         let stderr = result.stderr_str();
         assert!(
             stderr.starts_with("mktemp: failed to create directory via template"),
-            "{}",
-            stderr
+            "{stderr}",
         );
         assert!(
             stderr.ends_with("d\\XXX': No such file or directory\n"),
-            "{}",
-            stderr
+            "{stderr}",
         );
     }
 }
@@ -983,4 +996,67 @@ fn test_missing_short_tmpdir_flag() {
         .fails()
         .no_stdout()
         .stderr_contains("a value is required for '-p <DIR>' but none was supplied");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn test_non_utf8_template() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let ts = TestScenario::new(util_name!());
+
+    // Test that mktemp gracefully handles non-UTF-8 templates with an error instead of panicking
+    let template = OsStr::from_bytes(b"test_\xFF\xFE_XXXXXX");
+
+    ts.ucmd().arg(template).fails().stderr_contains("invalid");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn test_non_utf8_tmpdir_path() {
+    use std::os::unix::ffi::OsStrExt;
+    let (at, mut ucmd) = at_and_ucmd!();
+
+    // Create a directory with non-UTF8 bytes
+    let dir_name = std::ffi::OsStr::from_bytes(b"test_dir_\xFF\xFE");
+    std::fs::create_dir(at.plus(dir_name)).unwrap();
+
+    // Test that mktemp can handle non-UTF8 directory paths with -p option
+    ucmd.arg("-p").arg(at.plus(dir_name)).succeeds();
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn test_non_utf8_tmpdir_long_option() {
+    use std::os::unix::ffi::OsStrExt;
+    let (at, mut ucmd) = at_and_ucmd!();
+
+    // Create a directory with non-UTF8 bytes
+    let dir_name = std::ffi::OsStr::from_bytes(b"test_dir_\xFF\xFE");
+    std::fs::create_dir(at.plus(dir_name)).unwrap();
+
+    // Test that mktemp can handle non-UTF8 directory paths with --tmpdir option
+    // Note: Due to test framework limitations with non-UTF8 arguments and --tmpdir= syntax,
+    // we'll test a more limited scenario that still validates non-UTF8 path handling
+    ucmd.arg("-p")
+        .arg(at.plus(dir_name))
+        .arg("tmpXXXXXX")
+        .succeeds();
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn test_non_utf8_tmpdir_directory_creation() {
+    use std::os::unix::ffi::OsStrExt;
+    let (at, mut ucmd) = at_and_ucmd!();
+
+    // Create a directory with non-UTF8 bytes
+    let dir_name = std::ffi::OsStr::from_bytes(b"test_dir_\xFF\xFE");
+    std::fs::create_dir(at.plus(dir_name)).unwrap();
+
+    // Test directory creation (-d flag) with non-UTF8 directory paths
+    // We can't easily verify the exact output path because of UTF8 conversion issues,
+    // but we can verify the command succeeds
+    ucmd.arg("-d").arg("-p").arg(at.plus(dir_name)).succeeds();
 }

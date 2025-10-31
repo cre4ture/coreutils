@@ -7,6 +7,7 @@
 # restrict following config to systems with matching environment variables.
 COLORTERM ?*
 TERM Eterm
+TERM alacritty*
 TERM ansi
 TERM *color*
 TERM con[0-9]*x[0-9]*
@@ -15,6 +16,7 @@ TERM console
 TERM cygwin
 TERM *direct*
 TERM dtterm
+TERM foot
 TERM gnome
 TERM hurd
 TERM jfbterm
@@ -30,6 +32,7 @@ TERM st
 TERM terminator
 TERM tmux*
 TERM vt100
+TERM wezterm*
 TERM xterm*
 # Below are the color init strings for the basic file types.
 # One can use codes for 256 or more colors supported by modern terminals.

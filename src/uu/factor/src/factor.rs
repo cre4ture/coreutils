@@ -7,17 +7,15 @@
 
 use std::collections::BTreeMap;
 use std::io::BufRead;
-use std::io::{self, stdin, stdout, Write};
+use std::io::{self, Write, stdin, stdout};
 
-use clap::{crate_version, Arg, ArgAction, Command};
+use clap::{Arg, ArgAction, Command};
 use num_bigint::BigUint;
 use num_traits::FromPrimitive;
 use uucore::display::Quotable;
-use uucore::error::{set_exit_code, FromIo, UResult, USimpleError};
-use uucore::{format_usage, help_about, help_usage, show_error, show_warning};
-
-const ABOUT: &str = help_about!("factor.md");
-const USAGE: &str = help_usage!("factor.md");
+use uucore::error::{FromIo, UResult, USimpleError, set_exit_code};
+use uucore::translate;
+use uucore::{format_usage, show_error, show_warning};
 
 mod options {
     pub static EXPONENTS: &str = "exponents";
@@ -27,10 +25,10 @@ mod options {
 
 fn print_factors_str(
     num_str: &str,
-    w: &mut io::BufWriter<impl io::Write>,
+    w: &mut io::BufWriter<impl Write>,
     print_exponents: bool,
 ) -> UResult<()> {
-    let rx = num_str.trim().parse::<num_bigint::BigUint>();
+    let rx = num_str.trim().parse::<BigUint>();
     let Ok(x) = rx else {
         // return Ok(). it's non-fatal and we should try the next number.
         show_warning!("{}: {}", num_str.maybe_quote(), rx.unwrap_err());
@@ -47,18 +45,19 @@ fn print_factors_str(
     if let Some(_remaining) = remaining {
         return Err(USimpleError::new(
             1,
-            "Factorization incomplete. Remainders exists.",
+            translate!("factor-error-factorization-incomplete"),
         ));
     }
 
-    write_result(w, x, factorization, print_exponents).map_err_context(|| "write error".into())?;
+    write_result(w, &x, factorization, print_exponents)
+        .map_err_context(|| translate!("factor-error-write-error"))?;
 
     Ok(())
 }
 
 fn write_result(
     w: &mut io::BufWriter<impl Write>,
-    x: BigUint,
+    x: &BigUint,
     factorization: BTreeMap<BigUint, usize>,
     print_exponents: bool,
 ) -> io::Result<()> {
@@ -66,12 +65,12 @@ fn write_result(
     for (factor, n) in factorization {
         if print_exponents {
             if n > 1 {
-                write!(w, " {}^{}", factor, n)?;
+                write!(w, " {factor}^{n}")?;
             } else {
-                write!(w, " {}", factor)?;
+                write!(w, " {factor}")?;
             }
         } else {
-            w.write_all(format!(" {}", factor).repeat(n).as_bytes())?;
+            w.write_all(format!(" {factor}").repeat(n).as_bytes())?;
         }
     }
     writeln!(w)?;
@@ -80,7 +79,7 @@ fn write_result(
 
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-    let matches = uu_app().try_get_matches_from(args)?;
+    let matches = uucore::clap_localization::handle_clap_result(uu_app(), args)?;
 
     // If matches find --exponents flag than variable print_exponents is true and p^e output format will be used.
     let print_exponents = matches.get_flag(options::EXPONENTS);
@@ -105,7 +104,7 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
                 }
                 Err(e) => {
                     set_exit_code(1);
-                    show_error!("error reading input: {}", e);
+                    show_error!("{}", translate!("factor-error-reading-input", "error" => e));
                     return Ok(());
                 }
             }
@@ -113,7 +112,7 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
     }
 
     if let Err(e) = w.flush() {
-        show_error!("{}", e);
+        show_error!("{e}");
     }
 
     Ok(())
@@ -121,9 +120,10 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
 
 pub fn uu_app() -> Command {
     Command::new(uucore::util_name())
-        .version(crate_version!())
-        .about(ABOUT)
-        .override_usage(format_usage(USAGE))
+        .version(uucore::crate_version!())
+        .help_template(uucore::localized_help_template(uucore::util_name()))
+        .about(translate!("factor-about"))
+        .override_usage(format_usage(&translate!("factor-usage")))
         .infer_long_args(true)
         .disable_help_flag(true)
         .args_override_self(true)
@@ -132,13 +132,13 @@ pub fn uu_app() -> Command {
             Arg::new(options::EXPONENTS)
                 .short('h')
                 .long(options::EXPONENTS)
-                .help("Print factors in the form p^e")
+                .help(translate!("factor-help-exponents"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new(options::HELP)
                 .long(options::HELP)
-                .help("Print help information.")
+                .help(translate!("factor-help-help"))
                 .action(ArgAction::Help),
         )
 }

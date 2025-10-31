@@ -5,22 +5,31 @@
 
 // spell-checker:ignore (ToDO) coreutil
 
-use crate::common::util::{check_coreutil_version, expected_result, is_ci, whoami, TestScenario};
+use std::process::{Command, Stdio};
+use uutests::new_ucmd;
+use uutests::unwrap_or_return;
+use uutests::util::{TestScenario, check_coreutil_version, expected_result, is_ci, whoami};
+use uutests::util_name;
 
 const VERSION_MIN_MULTIPLE_USERS: &str = "8.31"; // this feature was introduced in GNU's coreutils 8.31
 
 #[test]
 fn test_invalid_arg() {
-    new_ucmd!().arg("--definitely-invalid").fails().code_is(1);
+    new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
 }
 
 #[test]
-#[cfg(unix)]
+fn test_id_ignore() {
+    new_ucmd!().arg("-a").succeeds();
+}
+
+#[test]
+#[allow(unused_mut)]
 fn test_id_no_specified_user() {
     let ts = TestScenario::new(util_name!());
     let result = ts.ucmd().run();
     let exp_result = unwrap_or_return!(expected_result(&ts, &[]));
-    let mut _exp_stdout = exp_result.stdout_str().to_string();
+    let mut exp_stdout = exp_result.stdout_str().to_string();
 
     #[cfg(not(feature = "feat_selinux"))]
     {
@@ -29,18 +38,17 @@ fn test_id_no_specified_user() {
         // uid=1001(runner) gid=121(docker) groups=121(docker),4(adm),101(systemd-journal) \
         // context=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023
         if let Some(context_offset) = exp_result.stdout_str().find(" context=") {
-            _exp_stdout.replace_range(context_offset.._exp_stdout.len() - 1, "");
+            exp_stdout.replace_range(context_offset..exp_stdout.len() - 1, "");
         }
     }
 
     result
-        .stdout_is(_exp_stdout)
+        .stdout_is(exp_stdout)
         .stderr_is(exp_result.stderr_str())
         .code_is(exp_result.code());
 }
 
 #[test]
-#[cfg(unix)]
 fn test_id_single_user() {
     let test_users = [&whoami()[..]];
 
@@ -92,7 +100,6 @@ fn test_id_single_user() {
 }
 
 #[test]
-#[cfg(unix)]
 fn test_id_single_user_non_existing() {
     let args = &["hopefully_non_existing_username"];
     let ts = TestScenario::new(util_name!());
@@ -110,7 +117,6 @@ fn test_id_single_user_non_existing() {
 }
 
 #[test]
-#[cfg(unix)]
 fn test_id_name() {
     let ts = TestScenario::new(util_name!());
     for opt in ["--user", "--group", "--groups"] {
@@ -129,7 +135,6 @@ fn test_id_name() {
 }
 
 #[test]
-#[cfg(unix)]
 fn test_id_real() {
     let ts = TestScenario::new(util_name!());
     for opt in ["--user", "--group", "--groups"] {
@@ -144,27 +149,16 @@ fn test_id_real() {
 }
 
 #[test]
-#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn test_id_pretty_print() {
     // `-p` is BSD only and not supported on GNU's `id`
     let username = whoami();
-
     let result = new_ucmd!().arg("-p").run();
-    if result.stdout_str().trim().is_empty() {
-        // this fails only on: "MinRustV (ubuntu-latest, feat_os_unix)"
-        // `rustc 1.40.0 (73528e339 2019-12-16)`
-        // run: /home/runner/work/coreutils/coreutils/target/debug/coreutils id -p
-        // thread 'test_id::test_id_pretty_print' panicked at 'Command was expected to succeed.
-        // stdout =
-        // stderr = ', tests/common/util.rs:157:13
-        println!("test skipped:");
-    } else {
-        result.success().stdout_contains(username);
-    }
+    result.success().stdout_contains(username);
 }
 
 #[test]
-#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn test_id_password_style() {
     // `-P` is BSD only and not supported on GNU's `id`
     let username = whoami();
@@ -173,7 +167,6 @@ fn test_id_password_style() {
 }
 
 #[test]
-#[cfg(unix)]
 fn test_id_multiple_users() {
     unwrap_or_return!(check_coreutil_version(
         util_name!(),
@@ -231,7 +224,6 @@ fn test_id_multiple_users() {
 }
 
 #[test]
-#[cfg(unix)]
 fn test_id_multiple_users_non_existing() {
     unwrap_or_return!(check_coreutil_version(
         util_name!(),
@@ -299,16 +291,19 @@ fn test_id_multiple_users_non_existing() {
 }
 
 #[test]
-#[cfg(unix)]
+fn test_id_name_or_real_with_default_format() {
+    for flag in ["-n", "--name", "-r", "--real"] {
+        new_ucmd!()
+            .arg(flag)
+            .fails()
+            .stderr_only("id: printing only names or real IDs requires -u, -g, or -G\n");
+    }
+}
+
+#[test]
 fn test_id_default_format() {
     let ts = TestScenario::new(util_name!());
     for opt1 in ["--name", "--real"] {
-        // id: cannot print only names or real IDs in default format
-        let args = [opt1];
-        ts.ucmd()
-            .args(&args)
-            .fails()
-            .stderr_only(unwrap_or_return!(expected_result(&ts, &args)).stderr_str());
         for opt2 in ["--user", "--group", "--groups"] {
             // u/g/G n/r
             let args = [opt2, opt1];
@@ -336,22 +331,32 @@ fn test_id_default_format() {
 }
 
 #[test]
-#[cfg(unix)]
+fn test_id_zero_with_default_format() {
+    for z_flag in ["-z", "--zero"] {
+        new_ucmd!()
+            .arg(z_flag)
+            .fails()
+            .stderr_only("id: option --zero not permitted in default format\n");
+    }
+}
+
+#[test]
+fn test_id_zero_with_name_or_real() {
+    for z_flag in ["-z", "--zero"] {
+        for flag in ["-n", "--name", "-r", "--real"] {
+            new_ucmd!()
+                .args(&[z_flag, flag])
+                .fails()
+                .stderr_only("id: printing only names or real IDs requires -u, -g, or -G\n");
+        }
+    }
+}
+
+#[test]
 fn test_id_zero() {
     let ts = TestScenario::new(util_name!());
     for z_flag in ["-z", "--zero"] {
-        // id: option --zero not permitted in default format
-        ts.ucmd()
-            .args(&[z_flag])
-            .fails()
-            .stderr_only(unwrap_or_return!(expected_result(&ts, &[z_flag])).stderr_str());
         for opt1 in ["--name", "--real"] {
-            // id: cannot print only names or real IDs in default format
-            let args = [opt1, z_flag];
-            ts.ucmd()
-                .args(&args)
-                .fails()
-                .stderr_only(unwrap_or_return!(expected_result(&ts, &args)).stderr_str());
             for opt2 in ["--user", "--group", "--groups"] {
                 // u/g/G n/r z
                 let args = [opt2, z_flag, opt1];
@@ -377,9 +382,8 @@ fn test_id_zero() {
 #[test]
 #[cfg(feature = "feat_selinux")]
 fn test_id_context() {
-    use selinux::{self, KernelSupport};
-    if selinux::kernel_support() == KernelSupport::Unsupported {
-        println!("test skipped: Kernel has no support for SElinux context",);
+    if !uucore::selinux::is_selinux_enabled() {
+        println!("test skipped: Kernel has no support for SElinux context");
         return;
     }
     let ts = TestScenario::new(util_name!());
@@ -436,7 +440,6 @@ fn test_id_context() {
 }
 
 #[test]
-#[cfg(unix)]
 fn test_id_no_specified_user_posixly() {
     // gnu/tests/id/no-context.sh
 
@@ -452,18 +455,17 @@ fn test_id_no_specified_user_posixly() {
         feature = "feat_selinux"
     ))]
     {
-        use selinux::{self, KernelSupport};
-        if selinux::kernel_support() == KernelSupport::Unsupported {
-            println!("test skipped: Kernel has no support for SElinux context",);
-        } else {
+        if uucore::selinux::is_selinux_enabled() {
             let result = ts.ucmd().succeeds();
             assert!(result.stdout_str().contains("context="));
+        } else {
+            println!("test skipped: Kernel has no support for SElinux context");
         }
     }
 }
 
 #[test]
-#[cfg(all(unix, not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 fn test_id_pretty_print_password_record() {
     // `-p` is BSD only and not supported on GNU's `id`.
     // `-P` is our own extension, and not supported by either GNU nor BSD.
@@ -473,4 +475,28 @@ fn test_id_pretty_print_password_record() {
         .arg("-P")
         .fails()
         .stderr_contains("the argument '-p' cannot be used with '-P'");
+}
+
+/// This test requires user with username 200 on system
+#[test]
+#[cfg(unix)]
+fn test_id_digital_username() {
+    match Command::new("id")
+        .arg("200")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+    {
+        Ok(ret) if ret.success() => {}
+        Ok(_) => {
+            println!("Test skipped; requires user with username 200 on system");
+            return;
+        }
+        Err(e) => {
+            println!("failed to run id command: {e}");
+            return;
+        }
+    }
+
+    new_ucmd!().arg("200").succeeds();
 }

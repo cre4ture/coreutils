@@ -3,19 +3,99 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-// spell-checker:ignore (path) eacces inacc
+// spell-checker:ignore (path) eacces inacc rm-r4 unlinkat fstatat
 
-use clap::{builder::ValueParser, crate_version, parser::ValueSource, Arg, ArgAction, Command};
-use std::collections::VecDeque;
+use clap::builder::{PossibleValue, ValueParser};
+use clap::{Arg, ArgAction, Command, parser::ValueSource};
 use std::ffi::{OsStr, OsString};
-use std::fs::{self, File, Metadata};
-use std::io::ErrorKind;
+use std::fs::{self, Metadata};
+use std::io::{IsTerminal, stdin};
 use std::ops::BitOr;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+use std::path::MAIN_SEPARATOR;
 use std::path::{Path, PathBuf};
+use thiserror::Error;
 use uucore::display::Quotable;
-use uucore::error::{UResult, USimpleError, UUsageError};
-use uucore::{format_usage, help_about, help_section, help_usage, prompt_yes, show_error};
-use walkdir::{DirEntry, WalkDir};
+use uucore::error::{FromIo, UError, UResult};
+use uucore::parser::shortcut_value_parser::ShortcutValueParser;
+use uucore::translate;
+use uucore::{format_usage, os_str_as_bytes, prompt_yes, show_error};
+
+mod platform;
+#[cfg(target_os = "linux")]
+use platform::{safe_remove_dir_recursive, safe_remove_empty_dir, safe_remove_file};
+
+#[derive(Debug, Error)]
+enum RmError {
+    #[error("{}", translate!("rm-error-missing-operand", "util_name" => uucore::execution_phrase()))]
+    MissingOperand,
+    #[error("{}", translate!("rm-error-cannot-remove-no-such-file", "file" => _0.quote()))]
+    CannotRemoveNoSuchFile(OsString),
+    #[error("{}", translate!("rm-error-cannot-remove-permission-denied", "file" => _0.quote()))]
+    CannotRemovePermissionDenied(OsString),
+    #[error("{}", translate!("rm-error-cannot-remove-is-directory", "file" => _0.quote()))]
+    CannotRemoveIsDirectory(OsString),
+    #[error("{}", translate!("rm-error-dangerous-recursive-operation"))]
+    DangerousRecursiveOperation,
+    #[error("{}", translate!("rm-error-use-no-preserve-root"))]
+    UseNoPreserveRoot,
+    #[error("{}", translate!("rm-error-refusing-to-remove-directory", "path" => _0.to_string_lossy()))]
+    RefusingToRemoveDirectory(OsString),
+}
+
+impl UError for RmError {}
+
+/// Helper function to print verbose message for removed file
+fn verbose_removed_file(path: &Path, options: &Options) {
+    if options.verbose {
+        println!(
+            "{}",
+            translate!("rm-verbose-removed", "file" => normalize(path).quote())
+        );
+    }
+}
+
+/// Helper function to print verbose message for removed directory
+fn verbose_removed_directory(path: &Path, options: &Options) {
+    if options.verbose {
+        println!(
+            "{}",
+            translate!("rm-verbose-removed-directory", "file" => normalize(path).quote())
+        );
+    }
+}
+
+/// Helper function to show error with context and return error status
+fn show_removal_error(error: std::io::Error, path: &Path) -> bool {
+    if error.kind() == std::io::ErrorKind::PermissionDenied {
+        show_error!("cannot remove {}: Permission denied", path.quote());
+    } else {
+        let e =
+            error.map_err_context(|| translate!("rm-error-cannot-remove", "file" => path.quote()));
+        show_error!("{e}");
+    }
+    true
+}
+
+/// Helper function for permission denied errors
+fn show_permission_denied_error(path: &Path) -> bool {
+    show_error!("cannot remove {}: Permission denied", path.quote());
+    true
+}
+
+/// Helper function to remove a directory and handle results
+fn remove_dir_with_feedback(path: &Path, options: &Options) -> bool {
+    match fs::remove_dir(path) {
+        Ok(_) => {
+            verbose_removed_directory(path, options);
+            false
+        }
+        Err(e) => show_removal_error(e, path),
+    }
+}
 
 #[derive(Eq, PartialEq, Clone, Copy)]
 /// Enum, determining when the `rm` will prompt the user about the file deletion
@@ -29,6 +109,20 @@ pub enum InteractiveMode {
     Always,
     /// Prompt only on write-protected files
     PromptProtected,
+}
+
+// We implement `From` instead of `TryFrom` because clap guarantees that we only receive valid values.
+//
+// The `PromptProtected` variant is not supposed to be created from a string.
+impl From<&str> for InteractiveMode {
+    fn from(s: &str) -> Self {
+        match s {
+            "never" => Self::Never,
+            "once" => Self::Once,
+            "always" => Self::Always,
+            _ => unreachable!("should be prevented by clap"),
+        }
+    }
 }
 
 /// Options for the `rm` command
@@ -64,11 +158,26 @@ pub struct Options {
     pub dir: bool,
     /// `-v`, `--verbose`
     pub verbose: bool,
+    #[doc(hidden)]
+    /// `---presume-input-tty`
+    /// Always use `None`; GNU flag for testing use only
+    pub __presume_input_tty: Option<bool>,
 }
 
-const ABOUT: &str = help_about!("rm.md");
-const USAGE: &str = help_usage!("rm.md");
-const AFTER_HELP: &str = help_section!("after help", "rm.md");
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            force: false,
+            interactive: InteractiveMode::PromptProtected,
+            one_fs: false,
+            preserve_root: true,
+            recursive: false,
+            dir: false,
+            verbose: false,
+            __presume_input_tty: None,
+        }
+    }
+}
 
 static OPT_DIR: &str = "dir";
 static OPT_INTERACTIVE: &str = "interactive";
@@ -76,8 +185,8 @@ static OPT_FORCE: &str = "force";
 static OPT_NO_PRESERVE_ROOT: &str = "no-preserve-root";
 static OPT_ONE_FILE_SYSTEM: &str = "one-file-system";
 static OPT_PRESERVE_ROOT: &str = "preserve-root";
-static OPT_PROMPT: &str = "prompt";
-static OPT_PROMPT_MORE: &str = "prompt-more";
+static OPT_PROMPT_ALWAYS: &str = "prompt-always";
+static OPT_PROMPT_ONCE: &str = "prompt-once";
 static OPT_RECURSIVE: &str = "recursive";
 static OPT_VERBOSE: &str = "verbose";
 static PRESUME_INPUT_TTY: &str = "-presume-input-tty";
@@ -86,19 +195,25 @@ static ARG_FILES: &str = "files";
 
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-    let matches = uu_app().after_help(AFTER_HELP).try_get_matches_from(args)?;
+    let matches = uucore::clap_localization::handle_clap_result(uu_app(), args)?;
 
-    let files: Vec<&OsStr> = matches
+    let files: Vec<_> = matches
         .get_many::<OsString>(ARG_FILES)
         .map(|v| v.map(OsString::as_os_str).collect())
         .unwrap_or_default();
 
     let force_flag = matches.get_flag(OPT_FORCE);
 
+    if files.is_empty() && !force_flag {
+        // Still check by hand and not use clap
+        // Because "rm -f" is a thing
+        return Err(RmError::MissingOperand.into());
+    }
+
     // If -f(--force) is before any -i (or variants) we want prompts else no prompts
-    let force_prompt_never: bool = force_flag && {
+    let force_prompt_never = force_flag && {
         let force_index = matches.index_of(OPT_FORCE).unwrap_or(0);
-        ![OPT_PROMPT, OPT_PROMPT_MORE, OPT_INTERACTIVE]
+        ![OPT_PROMPT_ALWAYS, OPT_PROMPT_ONCE, OPT_INTERACTIVE]
             .iter()
             .any(|flag| {
                 matches.value_source(flag) == Some(ValueSource::CommandLine)
@@ -106,130 +221,120 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
             })
     };
 
-    if files.is_empty() && !force_flag {
-        // Still check by hand and not use clap
-        // Because "rm -f" is a thing
-        return Err(UUsageError::new(1, "missing operand"));
-    } else {
-        let options = Options {
-            force: force_flag,
-            interactive: {
-                if force_prompt_never {
-                    InteractiveMode::Never
-                } else if matches.get_flag(OPT_PROMPT) {
-                    InteractiveMode::Always
-                } else if matches.get_flag(OPT_PROMPT_MORE) {
-                    InteractiveMode::Once
-                } else if matches.contains_id(OPT_INTERACTIVE) {
-                    match matches.get_one::<String>(OPT_INTERACTIVE).unwrap().as_str() {
-                        "never" => InteractiveMode::Never,
-                        "once" => InteractiveMode::Once,
-                        "always" => InteractiveMode::Always,
-                        val => {
-                            return Err(USimpleError::new(
-                                1,
-                                format!("Invalid argument to interactive ({val})"),
-                            ))
-                        }
-                    }
-                } else {
-                    InteractiveMode::PromptProtected
-                }
-            },
-            one_fs: matches.get_flag(OPT_ONE_FILE_SYSTEM),
-            preserve_root: !matches.get_flag(OPT_NO_PRESERVE_ROOT),
-            recursive: matches.get_flag(OPT_RECURSIVE),
-            dir: matches.get_flag(OPT_DIR),
-            verbose: matches.get_flag(OPT_VERBOSE),
-        };
-        if options.interactive == InteractiveMode::Once && (options.recursive || files.len() > 3) {
-            let msg: String = format!(
-                "remove {} {}{}",
-                files.len(),
-                if files.len() > 1 {
-                    "arguments"
-                } else {
-                    "argument"
-                },
-                if options.recursive {
-                    " recursively?"
-                } else {
-                    "?"
-                }
-            );
-            if !prompt_yes!("{}", msg) {
-                return Ok(());
+    let options = Options {
+        force: force_flag,
+        interactive: {
+            if force_prompt_never {
+                InteractiveMode::Never
+            } else if matches.get_flag(OPT_PROMPT_ALWAYS) {
+                InteractiveMode::Always
+            } else if matches.get_flag(OPT_PROMPT_ONCE) {
+                InteractiveMode::Once
+            } else if matches.contains_id(OPT_INTERACTIVE) {
+                InteractiveMode::from(matches.get_one::<String>(OPT_INTERACTIVE).unwrap().as_str())
+            } else {
+                InteractiveMode::PromptProtected
             }
-        }
-
-        if remove(&files, &options) {
-            return Err(1.into());
+        },
+        one_fs: matches.get_flag(OPT_ONE_FILE_SYSTEM),
+        preserve_root: !matches.get_flag(OPT_NO_PRESERVE_ROOT),
+        recursive: matches.get_flag(OPT_RECURSIVE),
+        dir: matches.get_flag(OPT_DIR),
+        verbose: matches.get_flag(OPT_VERBOSE),
+        __presume_input_tty: if matches.get_flag(PRESUME_INPUT_TTY) {
+            Some(true)
+        } else {
+            None
+        },
+    };
+    if options.interactive == InteractiveMode::Once && (options.recursive || files.len() > 3) {
+        let msg: String = format!(
+            "remove {} {}{}",
+            files.len(),
+            if files.len() > 1 {
+                "arguments"
+            } else {
+                "argument"
+            },
+            if options.recursive {
+                " recursively?"
+            } else {
+                "?"
+            }
+        );
+        if !prompt_yes!("{msg}") {
+            return Ok(());
         }
     }
+
+    if remove(&files, &options) {
+        return Err(1.into());
+    }
+
     Ok(())
 }
 
 pub fn uu_app() -> Command {
     Command::new(uucore::util_name())
-        .version(crate_version!())
-        .about(ABOUT)
-        .override_usage(format_usage(USAGE))
+        .version(uucore::crate_version!())
+        .about(translate!("rm-about"))
+        .help_template(uucore::localized_help_template(uucore::util_name()))
+        .override_usage(format_usage(&translate!("rm-usage")))
+        .after_help(translate!("rm-after-help"))
         .infer_long_args(true)
         .args_override_self(true)
         .arg(
             Arg::new(OPT_FORCE)
                 .short('f')
                 .long(OPT_FORCE)
-                .help("ignore nonexistent files and arguments, never prompt")
+                .help(translate!("rm-help-force"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
-            Arg::new(OPT_PROMPT)
+            Arg::new(OPT_PROMPT_ALWAYS)
                 .short('i')
-                .help("prompt before every removal")
-                .overrides_with_all([OPT_PROMPT_MORE, OPT_INTERACTIVE])
+                .help(translate!("rm-help-prompt-always"))
+                .overrides_with_all([OPT_PROMPT_ONCE, OPT_INTERACTIVE])
                 .action(ArgAction::SetTrue),
         )
         .arg(
-            Arg::new(OPT_PROMPT_MORE)
+            Arg::new(OPT_PROMPT_ONCE)
                 .short('I')
-                .help("prompt once before removing more than three files, or when removing recursively. \
-                Less intrusive than -i, while still giving some protection against most mistakes")
-                .overrides_with_all([OPT_PROMPT, OPT_INTERACTIVE])
+                .help(translate!("rm-help-prompt-once"))
+                .overrides_with_all([OPT_PROMPT_ALWAYS, OPT_INTERACTIVE])
                 .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new(OPT_INTERACTIVE)
                 .long(OPT_INTERACTIVE)
-                .help(
-                    "prompt according to WHEN: never, once (-I), or always (-i). Without WHEN, \
-                    prompts always",
-                )
+                .help(translate!("rm-help-interactive"))
                 .value_name("WHEN")
+                .value_parser(ShortcutValueParser::new([
+                    PossibleValue::new("always").alias("yes"),
+                    PossibleValue::new("once"),
+                    PossibleValue::new("never").alias("no").alias("none"),
+                ]))
                 .num_args(0..=1)
                 .require_equals(true)
                 .default_missing_value("always")
-                .overrides_with_all([OPT_PROMPT, OPT_PROMPT_MORE]),
+                .overrides_with_all([OPT_PROMPT_ALWAYS, OPT_PROMPT_ONCE]),
         )
         .arg(
             Arg::new(OPT_ONE_FILE_SYSTEM)
                 .long(OPT_ONE_FILE_SYSTEM)
-                .help(
-                    "when removing a hierarchy recursively, skip any directory that is on a file \
-                    system different from that of the corresponding command line argument (NOT \
-                    IMPLEMENTED)",
-                ).action(ArgAction::SetTrue),
+                .help(translate!("rm-help-one-file-system"))
+                .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new(OPT_NO_PRESERVE_ROOT)
                 .long(OPT_NO_PRESERVE_ROOT)
-                .help("do not treat '/' specially")
+                .help(translate!("rm-help-no-preserve-root"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new(OPT_PRESERVE_ROOT)
                 .long(OPT_PRESERVE_ROOT)
-                .help("do not remove '/' (default)")
+                .help(translate!("rm-help-preserve-root"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
@@ -237,21 +342,21 @@ pub fn uu_app() -> Command {
                 .short('r')
                 .visible_short_alias('R')
                 .long(OPT_RECURSIVE)
-                .help("remove directories and their contents recursively")
+                .help(translate!("rm-help-recursive"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new(OPT_DIR)
                 .short('d')
                 .long(OPT_DIR)
-                .help("remove empty directories")
+                .help(translate!("rm-help-dir"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new(OPT_VERBOSE)
                 .short('v')
                 .long(OPT_VERBOSE)
-                .help("explain what is being done")
+                .help(translate!("rm-help-verbose"))
                 .action(ArgAction::SetTrue),
         )
         // From the GNU source code:
@@ -290,6 +395,7 @@ pub fn remove(files: &[&OsStr], options: &Options) -> bool {
 
     for filename in files {
         let file = Path::new(filename);
+
         had_err = match file.symlink_metadata() {
             Ok(metadata) => {
                 if metadata.is_dir() {
@@ -300,6 +406,7 @@ pub fn remove(files: &[&OsStr], options: &Options) -> bool {
                     remove_file(file, options)
                 }
             }
+
             Err(_e) => {
                 // TODO: actually print out the specific error
                 // TODO: When the error is not about missing files
@@ -309,8 +416,8 @@ pub fn remove(files: &[&OsStr], options: &Options) -> bool {
                     false
                 } else {
                     show_error!(
-                        "cannot remove {}: No such file or directory",
-                        filename.quote()
+                        "{}",
+                        RmError::CannotRemoveNoSuchFile(filename.to_os_string())
                     );
                     true
                 }
@@ -322,86 +429,187 @@ pub fn remove(files: &[&OsStr], options: &Options) -> bool {
     had_err
 }
 
-#[allow(clippy::cognitive_complexity)]
+/// Whether the given directory is empty.
+///
+/// `path` must be a directory. If there is an error reading the
+/// contents of the directory, this returns `false`.
+fn is_dir_empty(path: &Path) -> bool {
+    fs::read_dir(path).is_ok_and(|mut iter| iter.next().is_none())
+}
+
+#[cfg(unix)]
+fn is_readable_metadata(metadata: &Metadata) -> bool {
+    let mode = metadata.permissions().mode();
+    (mode & 0o400) > 0
+}
+
+/// Whether the given file or directory is readable.
+#[cfg(unix)]
+#[cfg(not(target_os = "linux"))]
+fn is_readable(path: &Path) -> bool {
+    match fs::metadata(path) {
+        Err(_) => false,
+        Ok(metadata) => is_readable_metadata(&metadata),
+    }
+}
+
+/// Whether the given file or directory is readable.
+#[cfg(not(unix))]
+fn is_readable(_path: &Path) -> bool {
+    true
+}
+
+#[cfg(unix)]
+fn is_writable_metadata(metadata: &Metadata) -> bool {
+    let mode = metadata.permissions().mode();
+    (mode & 0o200) > 0
+}
+
+/// Whether the given file or directory is writable.
+#[cfg(unix)]
+fn is_writable(path: &Path) -> bool {
+    match fs::metadata(path) {
+        Err(_) => false,
+        Ok(metadata) => is_writable_metadata(&metadata),
+    }
+}
+
+/// Whether the given file or directory is writable.
+#[cfg(not(unix))]
+fn is_writable(_path: &Path) -> bool {
+    // TODO Not yet implemented.
+    true
+}
+
+/// Recursively remove the directory tree rooted at the given path.
+///
+/// If `path` is a file or a symbolic link, just remove it. If it is a
+/// directory, remove all of its entries recursively and then remove the
+/// directory itself. In case of an error, print the error message to
+/// `stderr` and return `true`. If there were no errors, return `false`.
+fn remove_dir_recursive(path: &Path, options: &Options) -> bool {
+    // Base case 1: this is a file or a symbolic link.
+    //
+    // The symbolic link case is important because it could be a link to
+    // a directory and we don't want to recurse. In particular, this
+    // avoids an infinite recursion in the case of a link to the current
+    // directory, like `ln -s . link`.
+    if !path.is_dir() || path.is_symlink() {
+        return remove_file(path, options);
+    }
+
+    // Base case 2: this is a non-empty directory, but the user
+    // doesn't want to descend into it.
+    if options.interactive == InteractiveMode::Always
+        && !is_dir_empty(path)
+        && !prompt_descend(path)
+    {
+        return false;
+    }
+
+    // Use secure traversal on Linux for all recursive directory removals
+    #[cfg(target_os = "linux")]
+    {
+        safe_remove_dir_recursive(path, options)
+    }
+
+    // Fallback for non-Linux or use fs::remove_dir_all for very long paths
+    #[cfg(not(target_os = "linux"))]
+    {
+        if let Some(s) = path.to_str() {
+            if s.len() > 1000 {
+                match fs::remove_dir_all(path) {
+                    Ok(_) => return false,
+                    Err(e) => {
+                        let e = e.map_err_context(
+                            || translate!("rm-error-cannot-remove", "file" => path.quote()),
+                        );
+                        show_error!("{e}");
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // Recursive case: this is a directory.
+        let mut error = false;
+        match fs::read_dir(path) {
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                // This is not considered an error.
+            }
+            Err(_) => error = true,
+            Ok(iter) => {
+                for entry in iter {
+                    match entry {
+                        Err(_) => error = true,
+                        Ok(entry) => {
+                            let child_error = remove_dir_recursive(&entry.path(), options);
+                            error = error || child_error;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Ask the user whether to remove the current directory.
+        if options.interactive == InteractiveMode::Always && !prompt_dir(path, options) {
+            return false;
+        }
+
+        // Try removing the directory itself.
+        match fs::remove_dir(path) {
+            Err(_) if !error && !is_readable(path) => {
+                // For compatibility with GNU test case
+                // `tests/rm/unread2.sh`, show "Permission denied" in this
+                // case instead of "Directory not empty".
+                show_permission_denied_error(path);
+                error = true;
+            }
+            Err(e) if !error => {
+                let e = e.map_err_context(
+                    || translate!("rm-error-cannot-remove", "file" => path.quote()),
+                );
+                show_error!("{e}");
+                error = true;
+            }
+            Err(_) => {
+                // If there has already been at least one error when
+                // trying to remove the children, then there is no need to
+                // show another error message as we return from each level
+                // of the recursion.
+            }
+            Ok(_) => verbose_removed_directory(path, options),
+        }
+
+        error
+    }
+}
+
 fn handle_dir(path: &Path, options: &Options) -> bool {
     let mut had_err = false;
 
+    let path = clean_trailing_slashes(path);
+    if path_is_current_or_parent_directory(path) {
+        show_error!(
+            "{}",
+            RmError::RefusingToRemoveDirectory(path.as_os_str().to_os_string())
+        );
+        return true;
+    }
+
     let is_root = path.has_root() && path.parent().is_none();
     if options.recursive && (!is_root || !options.preserve_root) {
-        if options.interactive != InteractiveMode::Always && !options.verbose {
-            if let Err(e) = fs::remove_dir_all(path) {
-                // GNU compatibility (rm/empty-inacc.sh)
-                // remove_dir_all failed. maybe it is because of the permissions
-                // but if the directory is empty, remove_dir might work.
-                // So, let's try that before failing for real
-                if fs::remove_dir(path).is_err() {
-                    had_err = true;
-                    if e.kind() == std::io::ErrorKind::PermissionDenied {
-                        // GNU compatibility (rm/fail-eacces.sh)
-                        // here, GNU doesn't use some kind of remove_dir_all
-                        // It will show directory+file
-                        show_error!("cannot remove {}: {}", path.quote(), "Permission denied");
-                    } else {
-                        show_error!("cannot remove {}: {}", path.quote(), e);
-                    }
-                }
-            }
-        } else {
-            let mut dirs: VecDeque<DirEntry> = VecDeque::new();
-            // The Paths to not descend into. We need to this because WalkDir doesn't have a way, afaik, to not descend into a directory
-            // So we have to just ignore paths as they come up if they start with a path we aren't descending into
-            let mut not_descended: Vec<PathBuf> = Vec::new();
-
-            'outer: for entry in WalkDir::new(path) {
-                match entry {
-                    Ok(entry) => {
-                        if options.interactive == InteractiveMode::Always {
-                            for not_descend in &not_descended {
-                                if entry.path().starts_with(not_descend) {
-                                    // We don't need to continue the rest of code in this loop if we are in a directory we don't want to descend into
-                                    continue 'outer;
-                                }
-                            }
-                        }
-                        let file_type = entry.file_type();
-                        if file_type.is_dir() {
-                            // If we are in Interactive Mode Always and the directory isn't empty we ask if we should descend else we push this directory onto dirs vector
-                            if options.interactive == InteractiveMode::Always
-                                && fs::read_dir(entry.path()).unwrap().count() != 0
-                            {
-                                // If we don't descend we push this directory onto our not_descended vector else we push this directory onto dirs vector
-                                if prompt_descend(entry.path()) {
-                                    dirs.push_back(entry);
-                                } else {
-                                    not_descended.push(entry.path().to_path_buf());
-                                }
-                            } else {
-                                dirs.push_back(entry);
-                            }
-                        } else {
-                            had_err = remove_file(entry.path(), options).bitor(had_err);
-                        }
-                    }
-                    Err(e) => {
-                        had_err = true;
-                        show_error!("recursing in {}: {}", path.quote(), e);
-                    }
-                }
-            }
-
-            for dir in dirs.iter().rev() {
-                had_err = remove_dir(dir.path(), options).bitor(had_err);
-            }
-        }
+        had_err = remove_dir_recursive(path, options);
     } else if options.dir && (!is_root || !options.preserve_root) {
         had_err = remove_dir(path, options).bitor(had_err);
     } else if options.recursive {
-        show_error!("could not remove directory {}", path.quote());
+        show_error!("{}", RmError::DangerousRecursiveOperation);
+        show_error!("{}", RmError::UseNoPreserveRoot);
         had_err = true;
     } else {
         show_error!(
-            "cannot remove {}: Is a directory", // GNU's rm error message does not include help
-            path.quote()
+            "{}",
+            RmError::CannotRemoveIsDirectory(path.as_os_str().to_os_string())
         );
         had_err = true;
     }
@@ -409,65 +617,60 @@ fn handle_dir(path: &Path, options: &Options) -> bool {
     had_err
 }
 
+/// Remove the given directory, asking the user for permission if necessary.
+///
+/// Returns true if it has encountered an error.
 fn remove_dir(path: &Path, options: &Options) -> bool {
-    if prompt_dir(path, options) {
-        if let Ok(mut read_dir) = fs::read_dir(path) {
-            if options.dir || options.recursive {
-                if read_dir.next().is_none() {
-                    match fs::remove_dir(path) {
-                        Ok(_) => {
-                            if options.verbose {
-                                println!("removed directory {}", normalize(path).quote());
-                            }
-                        }
-                        Err(e) => {
-                            if e.kind() == std::io::ErrorKind::PermissionDenied {
-                                // GNU compatibility (rm/fail-eacces.sh)
-                                show_error!(
-                                    "cannot remove {}: {}",
-                                    path.quote(),
-                                    "Permission denied"
-                                );
-                            } else {
-                                show_error!("cannot remove {}: {}", path.quote(), e);
-                            }
-                            return true;
-                        }
-                    }
-                } else {
-                    // directory can be read but is not empty
-                    show_error!("cannot remove {}: Directory not empty", path.quote());
-                    return true;
-                }
-            } else {
-                // called to remove a symlink_dir (windows) without "-r"/"-R" or "-d"
-                show_error!("cannot remove {}: Is a directory", path.quote());
-                return true;
-            }
-        } else {
-            // GNU's rm shows this message if directory is empty but not readable
-            show_error!("cannot remove {}: Directory not empty", path.quote());
-            return true;
+    // Ask the user for permission.
+    if !prompt_dir(path, options) {
+        return false;
+    }
+
+    // Called to remove a symlink_dir (windows) without "-r"/"-R" or "-d".
+    if !options.dir && !options.recursive {
+        show_error!(
+            "{}",
+            RmError::CannotRemoveIsDirectory(path.as_os_str().to_os_string())
+        );
+        return true;
+    }
+
+    // Use safe traversal on Linux for empty directory removal
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(result) = safe_remove_empty_dir(path, options) {
+            return result;
         }
     }
 
-    false
+    // Fallback method for non-Linux or when safe traversal is unavailable
+    remove_dir_with_feedback(path, options)
 }
 
 fn remove_file(path: &Path, options: &Options) -> bool {
     if prompt_file(path, options) {
+        // Use safe traversal on Linux for individual file removal
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(result) = safe_remove_file(path, options) {
+                return result;
+            }
+        }
+
+        // Fallback method for non-Linux or when safe traversal is unavailable
         match fs::remove_file(path) {
             Ok(_) => {
-                if options.verbose {
-                    println!("removed {}", normalize(path).quote());
-                }
+                verbose_removed_file(path, options);
             }
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::PermissionDenied {
                     // GNU compatibility (rm/fail-eacces.sh)
-                    show_error!("cannot remove {}: {}", path.quote(), "Permission denied");
+                    show_error!(
+                        "{}",
+                        RmError::CannotRemovePermissionDenied(path.as_os_str().to_os_string())
+                    );
                 } else {
-                    show_error!("cannot remove {}: {}", path.quote(), e);
+                    return show_removal_error(e, path);
                 }
                 return true;
             }
@@ -505,35 +708,27 @@ fn prompt_file(path: &Path, options: &Options) -> bool {
             }
         }
     }
-    // File::open(path) doesn't open the file in write mode so we need to use file options to open it in also write mode to check if it can written too
-    match File::options().read(true).write(true).open(path) {
-        Ok(file) => {
-            let Ok(metadata) = file.metadata() else {
-                return true;
-            };
 
-            if options.interactive == InteractiveMode::Always && !metadata.permissions().readonly()
-            {
-                return if metadata.len() == 0 {
-                    prompt_yes!("remove regular empty file {}?", path.quote())
-                } else {
-                    prompt_yes!("remove file {}?", path.quote())
-                };
-            }
-        }
-        Err(err) => {
-            if err.kind() != ErrorKind::PermissionDenied {
-                return true;
-            }
-        }
+    let Ok(metadata) = fs::metadata(path) else {
+        return true;
+    };
+
+    if options.interactive == InteractiveMode::Always && is_writable(path) {
+        return if metadata.len() == 0 {
+            prompt_yes!("remove regular empty file {}?", path.quote())
+        } else {
+            prompt_yes!("remove file {}?", path.quote())
+        };
     }
-    prompt_file_permission_readonly(path)
+    prompt_file_permission_readonly(path, options)
 }
 
-fn prompt_file_permission_readonly(path: &Path) -> bool {
-    match fs::metadata(path) {
-        Ok(metadata) if !metadata.permissions().readonly() => true,
-        Ok(metadata) if metadata.len() == 0 => prompt_yes!(
+fn prompt_file_permission_readonly(path: &Path, options: &Options) -> bool {
+    let stdin_ok = options.__presume_input_tty.unwrap_or(false) || stdin().is_terminal();
+    match (stdin_ok, fs::metadata(path), options.interactive) {
+        (false, _, InteractiveMode::PromptProtected) => true,
+        (_, Ok(_), _) if is_writable(path) => true,
+        (_, Ok(metadata), _) if metadata.len() == 0 => prompt_yes!(
             "remove write-protected regular empty file {}?",
             path.quote()
         ),
@@ -541,22 +736,45 @@ fn prompt_file_permission_readonly(path: &Path) -> bool {
     }
 }
 
-// For directories finding if they are writable or not is a hassle. In Unix we can use the built-in rust crate to to check mode bits. But other os don't have something similar afaik
+/// Checks if the path is referring to current or parent directory , if it is referring to current or any parent directory in the file tree e.g  '/../..' , '../..'
+fn path_is_current_or_parent_directory(path: &Path) -> bool {
+    let path_str = os_str_as_bytes(path.as_os_str());
+    let dir_separator = MAIN_SEPARATOR as u8;
+    if let Ok(path_bytes) = path_str {
+        return path_bytes == ([b'.'])
+            || path_bytes == ([b'.', b'.'])
+            || path_bytes.ends_with(&[dir_separator, b'.'])
+            || path_bytes.ends_with(&[dir_separator, b'.', b'.'])
+            || path_bytes.ends_with(&[dir_separator, b'.', dir_separator])
+            || path_bytes.ends_with(&[dir_separator, b'.', b'.', dir_separator]);
+    }
+    false
+}
+
+// For directories finding if they are writable or not is a hassle. In Unix we can use the built-in rust crate to check mode bits. But other os don't have something similar afaik
 // Most cases are covered by keep eye out for edge cases
 #[cfg(unix)]
 fn handle_writable_directory(path: &Path, options: &Options, metadata: &Metadata) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    let mode = metadata.permissions().mode();
-    // Check if directory has user write permissions
-    // Why is S_IWUSR showing up as a u16 on macos?
-    #[allow(clippy::unnecessary_cast)]
-    let user_writable = (mode & (libc::S_IWUSR as u32)) != 0;
-    if !user_writable {
-        prompt_yes!("remove write-protected directory {}?", path.quote())
-    } else if options.interactive == InteractiveMode::Always {
-        prompt_yes!("remove directory {}?", path.quote())
-    } else {
-        true
+    let stdin_ok = options.__presume_input_tty.unwrap_or(false) || stdin().is_terminal();
+    match (
+        stdin_ok,
+        is_readable_metadata(metadata),
+        is_writable_metadata(metadata),
+        options.interactive,
+    ) {
+        (false, _, _, InteractiveMode::PromptProtected) => true,
+        (false, false, false, InteractiveMode::Never) => true, // Don't prompt when interactive is never
+        (_, false, false, _) => prompt_yes!(
+            "attempt removal of inaccessible directory {}?",
+            path.quote()
+        ),
+        (_, false, true, InteractiveMode::Always) => prompt_yes!(
+            "attempt removal of inaccessible directory {}?",
+            path.quote()
+        ),
+        (_, true, false, _) => prompt_yes!("remove write-protected directory {}?", path.quote()),
+        (_, _, _, InteractiveMode::Always) => prompt_yes!("remove directory {}?", path.quote()),
+        (_, _, _, _) => true,
     }
 }
 
@@ -566,24 +784,58 @@ fn handle_writable_directory(path: &Path, options: &Options, metadata: &Metadata
     use std::os::windows::prelude::MetadataExt;
     use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_READONLY;
     let not_user_writable = (metadata.file_attributes() & FILE_ATTRIBUTE_READONLY) != 0;
-    if not_user_writable {
-        prompt_yes!("remove write-protected directory {}?", path.quote())
-    } else if options.interactive == InteractiveMode::Always {
-        prompt_yes!("remove directory {}?", path.quote())
-    } else {
-        true
+    let stdin_ok = options.__presume_input_tty.unwrap_or(false) || stdin().is_terminal();
+    match (stdin_ok, not_user_writable, options.interactive) {
+        (false, _, InteractiveMode::PromptProtected) => true,
+        (_, true, _) => prompt_yes!("remove write-protected directory {}?", path.quote()),
+        (_, _, InteractiveMode::Always) => prompt_yes!("remove directory {}?", path.quote()),
+        (_, _, _) => true,
     }
 }
 
 // I have this here for completeness but it will always return "remove directory {}" because metadata.permissions().readonly() only works for file not directories
 #[cfg(not(windows))]
 #[cfg(not(unix))]
-fn handle_writable_directory(path: &Path, options: &Options, metadata: &Metadata) -> bool {
+fn handle_writable_directory(path: &Path, options: &Options, _metadata: &Metadata) -> bool {
     if options.interactive == InteractiveMode::Always {
         prompt_yes!("remove directory {}?", path.quote())
     } else {
         true
     }
+}
+
+/// Removes trailing slashes, for example 'd/../////' yield 'd/../' required to fix rm-r4 GNU test
+fn clean_trailing_slashes(path: &Path) -> &Path {
+    let path_str = os_str_as_bytes(path.as_os_str());
+    let dir_separator = MAIN_SEPARATOR as u8;
+
+    if let Ok(path_bytes) = path_str {
+        let mut idx = if path_bytes.len() > 1 {
+            path_bytes.len() - 1
+        } else {
+            return path;
+        };
+        // Checks if element at the end is a '/'
+        if path_bytes[idx] == dir_separator {
+            for i in (1..path_bytes.len()).rev() {
+                // Will break at the start of the continuous sequence of '/', eg: "abc//////" , will break at
+                // "abc/", this will clean ////// to the root '/', so we have to be careful to not
+                // delete the root.
+                if path_bytes[i - 1] != dir_separator {
+                    idx = i;
+                    break;
+                }
+            }
+            #[cfg(unix)]
+            return Path::new(OsStr::from_bytes(&path_bytes[0..=idx]));
+
+            #[cfg(not(unix))]
+            // Unwrapping is fine here as os_str_as_bytes() would return an error on non unix
+            // systems with non utf-8 characters and thus bypass the if let Ok branch
+            return Path::new(std::str::from_utf8(&path_bytes[0..=idx]).unwrap());
+        }
+    }
+    path
 }
 
 fn prompt_descend(path: &Path) -> bool {
@@ -610,4 +862,18 @@ fn is_symlink_dir(metadata: &Metadata) -> bool {
 
     metadata.file_type().is_symlink()
         && ((metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY) != 0)
+}
+
+mod tests {
+
+    #[test]
+    // Testing whether path the `/////` collapses to `/`
+    fn test_collapsible_slash_path() {
+        use std::path::Path;
+
+        use crate::clean_trailing_slashes;
+        let path = Path::new("/////");
+
+        assert_eq!(Path::new("/"), clean_trailing_slashes(path));
+    }
 }

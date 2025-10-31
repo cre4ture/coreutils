@@ -3,14 +3,14 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 //
-// spell-checker:ignore (words) splitted FFFD
+// spell-checker:ignore (words) FFFD
 #![forbid(unsafe_code)]
 
 use std::{borrow::Cow, ffi::OsStr};
 
 use crate::native_int_str::{
-    from_native_int_representation, get_char_from_native_int, get_single_native_int_value,
-    NativeCharInt, NativeIntStr,
+    NativeCharInt, NativeIntStr, from_native_int_representation, get_char_from_native_int,
+    get_single_native_int_value,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -25,18 +25,18 @@ pub enum ErrorType {
     InternalError,
 }
 
-/// Provides a valid char or a invalid sequence of bytes.
+/// Provides a valid char or an invalid sequence of bytes.
 ///
-/// Invalid byte sequences can't be splitted in any meaningful way.
+/// Invalid byte sequences can't be split in any meaningful way.
 /// Thus, they need to be consumed as one piece.
 pub enum Chunk<'a> {
     InvalidEncoding(&'a NativeIntStr),
     ValidSingleIntChar((char, NativeCharInt)),
 }
 
-/// This class makes parsing a OsString char by char more convenient.
+/// This class makes parsing a [`std::ffi::OsString`] char by char more convenient.
 ///
-/// It also allows to capturing of intermediate positions for later splitting.
+/// It also allows capturing the intermediate positions for later splitting.
 pub struct StringParser<'a> {
     input: &'a NativeIntStr,
     pointer: usize,
@@ -114,10 +114,9 @@ impl<'a> StringParser<'a> {
     }
 
     pub fn peek_chunk(&self) -> Option<Chunk<'a>> {
-        return self
-            .get_chunk_with_length_at(self.pointer)
+        self.get_chunk_with_length_at(self.pointer)
             .ok()
-            .map(|(chunk, _)| chunk);
+            .map(|(chunk, _)| chunk)
     }
 
     pub fn consume_chunk(&mut self) -> Result<Chunk<'a>, Error> {

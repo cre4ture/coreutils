@@ -19,7 +19,7 @@ Now follows a very important warning:
 > other implementations. This means that **we cannot accept any changes based on
 > the GNU source code**. To make sure that cannot happen, **you cannot link to
 > the GNU source code** either. It is however possible to look at other implementations
-> under a BSD or MIT license like [Apple's implementation](https://opensource.apple.com/source/file_cmds/)
+> under a BSD or MIT license like [Apple's implementation](https://github.com/apple-oss-distributions/file_cmds/)
 > or [OpenBSD](https://github.com/openbsd/src/tree/master/bin).
 
 Finally, feel free to join our [Discord](https://discord.gg/wQVJbvJ)!
@@ -29,13 +29,15 @@ Finally, feel free to join our [Discord](https://discord.gg/wQVJbvJ)!
 uutils is a big project consisting of many parts. Here are the most important
 parts for getting started:
 
-- [`src/uu`](./src/uu/): The code for all utilities
-- [`src/uucore`](./src/uucore/): Crate containing all the shared code between
+- [`src/uu`](https://github.com/uutils/coreutils/tree/main/src/uu/): The code for all utilities
+- [`src/uucore`](https://github.com/uutils/coreutils/tree/main/src/uucore/): Crate containing all the shared code between
   the utilities.
-- [`tests/by-util`](./tests/by-util/): The tests for all utilities.
-- [`src/bin/coreutils.rs`](./src/bin/coreutils.rs): Code for the multicall
+- [`tests/by-util`](https://github.com/uutils/coreutils/tree/main/tests/by-util/): The tests for all utilities.
+- [`src/bin/coreutils.rs`](https://github.com/uutils/coreutils/tree/main/src/bin/coreutils.rs): Code for the multicall
   binary.
-- [`docs`](./docs/src): the documentation for the website
+- [`docs`](https://github.com/uutils/coreutils/tree/main/docs/src): the documentation for the website
+- [`tests/uutests/`](https://github.com/uutils/coreutils/tree/main/tests/uutests/):
+  Crate implementing the various functions to test uutils commands.
 
 Each utility is defined as a separate crate. The structure of each of these
 crates is as follows:
@@ -204,8 +206,8 @@ To ensure easy collaboration, we have guidelines for using Git and GitHub.
 
 ### Commit messages
 
-You can read this section in the Git book to learn how to write good commit
-messages: https://git-scm.com/book/ch5-2.html.
+You can read [this section in the Git book](https://git-scm.com/book/ms/v2/Distributed-Git-Contributing-to-a-Project) to learn how to write good commit
+messages.
 
 In addition, here are a few examples for a summary line when committing to
 uutils:
@@ -257,8 +259,7 @@ CI. However, you can use `#[cfg(...)]` attributes to create platform dependent
 features.
 
 **Tip:** For Windows, Microsoft provides some images (VMWare, Hyper-V,
-VirtualBox and Parallels) for development:
-<https://developer.microsoft.com/windows/downloads/virtual-machines/>
+VirtualBox and Parallels) for development [on their official download page](https://developer.microsoft.com/windows/downloads/virtual-machines/).
 
 ## Improving the GNU compatibility
 
@@ -305,7 +306,7 @@ completions:
 - [OpenBSD](https://github.com/openbsd/src/tree/master/bin)
 - [Busybox](https://github.com/mirror/busybox/tree/master/coreutils)
 - [Toybox (Android)](https://github.com/landley/toybox/tree/master/toys/posix)
-- [Mac OS](https://opensource.apple.com/source/file_cmds/)
+- [Mac OS](https://github.com/apple-oss-distributions/file_cmds/)
 - [V lang](https://github.com/vlang/coreutils)
 - [SerenityOS](https://github.com/SerenityOS/serenity/tree/master/Userland/Utilities)
 - [Initial Unix](https://github.com/dspinellis/unix-history-repo)

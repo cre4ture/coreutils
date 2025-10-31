@@ -3,25 +3,25 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-// spell-checker:ignore (ToDO) allocs bset dflag cflag sflag tflag
-
 mod operation;
+mod simd;
 mod unicode_table;
 
-use clap::{crate_version, Arg, ArgAction, Command};
+use clap::{Arg, ArgAction, Command, value_parser};
 use operation::{
-    translate_input, Sequence, SqueezeOperation, SymbolTranslator, TranslateOperation,
+    DeleteOperation, Sequence, SqueezeOperation, SymbolTranslator, TranslateOperation,
+    flush_output, translate_input,
 };
-use std::io::{stdin, stdout, BufWriter};
-use uucore::{format_usage, help_about, help_section, help_usage, show};
-
-use crate::operation::DeleteOperation;
+use simd::process_input;
+use std::ffi::OsString;
+use std::io::{stdin, stdout};
 use uucore::display::Quotable;
 use uucore::error::{UResult, USimpleError, UUsageError};
-
-const ABOUT: &str = help_about!("tr.md");
-const AFTER_HELP: &str = help_section!("after help", "tr.md");
-const USAGE: &str = help_usage!("tr.md");
+use uucore::fs::is_stdin_directory;
+#[cfg(not(target_os = "windows"))]
+use uucore::libc;
+use uucore::translate;
+use uucore::{format_usage, os_str_as_bytes, show};
 
 mod options {
     pub const COMPLEMENT: &str = "complement";
@@ -33,7 +33,16 @@ mod options {
 
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-    let matches = uu_app().after_help(AFTER_HELP).try_get_matches_from(args)?;
+    // When we receive a SIGPIPE signal, we want to terminate the process so
+    // that we don't print any error messages to stderr. Rust ignores SIGPIPE
+    // (see https://github.com/rust-lang/rust/issues/62569), so we restore it's
+    // default action here.
+    #[cfg(not(target_os = "windows"))]
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+
+    let matches = uucore::clap_localization::handle_clap_result(uu_app(), args)?;
 
     let delete_flag = matches.get_flag(options::DELETE);
     let complement_flag = matches.get_flag(options::COMPLEMENT);
@@ -43,114 +52,119 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
     // Ultimately this should be OsString, but we might want to wait for the
     // pattern API on OsStr
     let sets: Vec<_> = matches
-        .get_many::<String>(options::SETS)
+        .get_many::<OsString>(options::SETS)
         .into_iter()
         .flatten()
         .map(ToOwned::to_owned)
         .collect();
 
-    let sets_len = sets.len();
-
     if sets.is_empty() {
-        return Err(UUsageError::new(1, "missing operand"));
+        return Err(UUsageError::new(1, translate!("tr-error-missing-operand")));
     }
 
-    if !(delete_flag || squeeze_flag) && sets_len < 2 {
+    let sets_len = sets.len();
+
+    if !(delete_flag || squeeze_flag) && sets_len == 1 {
         return Err(UUsageError::new(
             1,
-            format!(
-                "missing operand after {}\nTwo strings must be given when translating.",
-                sets[0].quote()
-            ),
+            translate!("tr-error-missing-operand-translating", "set" => sets[0].quote()),
         ));
     }
 
-    if delete_flag & squeeze_flag && sets_len < 2 {
+    if delete_flag && squeeze_flag && sets_len == 1 {
         return Err(UUsageError::new(
             1,
-            format!(
-                "missing operand after {}\nTwo strings must be given when deleting and squeezing.",
-                sets[0].quote()
-            ),
+            translate!("tr-error-missing-operand-deleting-squeezing", "set" => sets[0].quote()),
         ));
     }
 
     if sets_len > 1 {
-        let start = "extra operand";
         if delete_flag && !squeeze_flag {
             let op = sets[1].quote();
             let msg = if sets_len == 2 {
-                format!(
-                    "{} {}\nOnly one string may be given when deleting without squeezing repeats.",
-                    start, op,
-                )
+                translate!("tr-error-extra-operand-deleting-without-squeezing", "operand" => op)
             } else {
-                format!("{} {}", start, op,)
+                translate!("tr-error-extra-operand-simple", "operand" => op)
             };
             return Err(UUsageError::new(1, msg));
         }
         if sets_len > 2 {
             let op = sets[2].quote();
-            let msg = format!("{} {}", start, op);
+            let msg = translate!("tr-error-extra-operand-simple", "operand" => op);
             return Err(UUsageError::new(1, msg));
         }
     }
 
     if let Some(first) = sets.first() {
-        if first.ends_with('\\') {
+        let slice = os_str_as_bytes(first)?;
+        let trailing_backslashes = slice.iter().rev().take_while(|&&c| c == b'\\').count();
+        if trailing_backslashes % 2 == 1 {
+            // The trailing backslash has a non-backslash character before it.
             show!(USimpleError::new(
                 0,
-                "warning: an unescaped backslash at end of string is not portable"
+                translate!("tr-warning-unescaped-backslash")
             ));
         }
     }
 
     let stdin = stdin();
     let mut locked_stdin = stdin.lock();
-    let stdout = stdout();
-    let locked_stdout = stdout.lock();
-    let mut buffered_stdout = BufWriter::new(locked_stdout);
+    let mut locked_stdout = stdout().lock();
 
-    let mut sets_iter = sets.iter().map(|c| c.as_str());
+    // According to the man page: translating only happens if deleting or if a second set is given
+    let translating = !delete_flag && sets.len() > 1;
+    let mut sets_iter = sets.iter().map(|c| c.as_os_str());
     let (set1, set2) = Sequence::solve_set_characters(
-        sets_iter.next().unwrap_or_default().as_bytes(),
-        sets_iter.next().unwrap_or_default().as_bytes(),
-        truncate_set1_flag,
+        os_str_as_bytes(sets_iter.next().unwrap_or_default())?,
+        os_str_as_bytes(sets_iter.next().unwrap_or_default())?,
+        complement_flag,
+        // if we are not translating then we don't truncate set1
+        truncate_set1_flag && translating,
+        translating,
     )?;
+
+    if is_stdin_directory(&stdin) {
+        return Err(USimpleError::new(1, translate!("tr-error-read-directory")));
+    }
 
     // '*_op' are the operations that need to be applied, in order.
     if delete_flag {
         if squeeze_flag {
-            let delete_op = DeleteOperation::new(set1, complement_flag);
-            let squeeze_op = SqueezeOperation::new(set2, false);
+            let delete_op = DeleteOperation::new(set1);
+            let squeeze_op = SqueezeOperation::new(set2);
             let op = delete_op.chain(squeeze_op);
-            translate_input(&mut locked_stdin, &mut buffered_stdout, op);
+            translate_input(&mut locked_stdin, &mut locked_stdout, op)?;
         } else {
-            let op = DeleteOperation::new(set1, complement_flag);
-            translate_input(&mut locked_stdin, &mut buffered_stdout, op);
+            let op = DeleteOperation::new(set1);
+            process_input(&mut locked_stdin, &mut locked_stdout, &op)?;
         }
     } else if squeeze_flag {
-        if sets_len < 2 {
-            let op = SqueezeOperation::new(set1, complement_flag);
-            translate_input(&mut locked_stdin, &mut buffered_stdout, op);
+        if sets_len == 1 {
+            let op = SqueezeOperation::new(set1);
+            translate_input(&mut locked_stdin, &mut locked_stdout, op)?;
         } else {
-            let translate_op = TranslateOperation::new(set1, set2.clone(), complement_flag)?;
-            let squeeze_op = SqueezeOperation::new(set2, false);
+            let translate_op = TranslateOperation::new(set1, set2.clone())?;
+            let squeeze_op = SqueezeOperation::new(set2);
             let op = translate_op.chain(squeeze_op);
-            translate_input(&mut locked_stdin, &mut buffered_stdout, op);
+            translate_input(&mut locked_stdin, &mut locked_stdout, op)?;
         }
     } else {
-        let op = TranslateOperation::new(set1, set2, complement_flag)?;
-        translate_input(&mut locked_stdin, &mut buffered_stdout, op);
+        let op = TranslateOperation::new(set1, set2)?;
+        process_input(&mut locked_stdin, &mut locked_stdout, &op)?;
     }
+
+    flush_output(&mut locked_stdout)?;
+
     Ok(())
 }
 
 pub fn uu_app() -> Command {
     Command::new(uucore::util_name())
-        .version(crate_version!())
-        .about(ABOUT)
-        .override_usage(format_usage(USAGE))
+        .version(uucore::crate_version!())
+        .help_template(uucore::localized_help_template(uucore::util_name()))
+        .about(translate!("tr-about"))
+        .override_usage(format_usage(&translate!("tr-usage")))
+        .after_help(translate!("tr-after-help"))
         .infer_long_args(true)
         .trailing_var_arg(true)
         .arg(
@@ -158,7 +172,7 @@ pub fn uu_app() -> Command {
                 .visible_short_alias('C')
                 .short('c')
                 .long(options::COMPLEMENT)
-                .help("use the complement of SET1")
+                .help(translate!("tr-help-complement"))
                 .action(ArgAction::SetTrue)
                 .overrides_with(options::COMPLEMENT),
         )
@@ -166,7 +180,7 @@ pub fn uu_app() -> Command {
             Arg::new(options::DELETE)
                 .short('d')
                 .long(options::DELETE)
-                .help("delete characters in SET1, do not translate")
+                .help(translate!("tr-help-delete"))
                 .action(ArgAction::SetTrue)
                 .overrides_with(options::DELETE),
         )
@@ -174,11 +188,7 @@ pub fn uu_app() -> Command {
             Arg::new(options::SQUEEZE)
                 .long(options::SQUEEZE)
                 .short('s')
-                .help(
-                    "replace each sequence of a repeated character that is \
-                     listed in the last specified SET, with a single occurrence \
-                     of that character",
-                )
+                .help(translate!("tr-help-squeeze"))
                 .action(ArgAction::SetTrue)
                 .overrides_with(options::SQUEEZE),
         )
@@ -186,9 +196,13 @@ pub fn uu_app() -> Command {
             Arg::new(options::TRUNCATE_SET1)
                 .long(options::TRUNCATE_SET1)
                 .short('t')
-                .help("first truncate SET1 to length of SET2")
+                .help(translate!("tr-help-truncate-set1"))
                 .action(ArgAction::SetTrue)
                 .overrides_with(options::TRUNCATE_SET1),
         )
-        .arg(Arg::new(options::SETS).num_args(1..))
+        .arg(
+            Arg::new(options::SETS)
+                .num_args(1..)
+                .value_parser(value_parser!(OsString)),
+        )
 }

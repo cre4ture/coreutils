@@ -6,17 +6,18 @@
 #![allow(rustdoc::private_intra_doc_links)]
 
 use std::cmp::Ordering;
-use std::io::{self, BufReader};
+use std::ffi::OsString;
+use std::io::{self, BufReader, ErrorKind};
 use std::{
-    fs::{remove_file, File},
+    fs::{File, remove_file},
     io::{BufRead, BufWriter, Write},
 };
 
-use clap::{crate_version, Arg, ArgAction, ArgMatches, Command};
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use regex::Regex;
 use uucore::display::Quotable;
 use uucore::error::{FromIo, UResult};
-use uucore::{crash_if_err, format_usage, help_about, help_section, help_usage};
+use uucore::format_usage;
 
 mod csplit_error;
 mod patterns;
@@ -25,9 +26,7 @@ mod split_name;
 use crate::csplit_error::CsplitError;
 use crate::split_name::SplitName;
 
-const ABOUT: &str = help_about!("csplit.md");
-const AFTER_HELP: &str = help_section!("after help", "csplit.md");
-const USAGE: &str = help_usage!("csplit.md");
+use uucore::translate;
 
 mod options {
     pub const SUFFIX_FORMAT: &str = "suffix-format";
@@ -43,7 +42,7 @@ mod options {
 
 /// Command line options for csplit.
 pub struct CsplitOptions {
-    split_name: crate::SplitName,
+    split_name: SplitName,
     keep_files: bool,
     quiet: bool,
     elide_empty_files: bool,
@@ -51,25 +50,51 @@ pub struct CsplitOptions {
 }
 
 impl CsplitOptions {
-    fn new(matches: &ArgMatches) -> Self {
+    fn new(matches: &ArgMatches) -> Result<Self, CsplitError> {
         let keep_files = matches.get_flag(options::KEEP_FILES);
         let quiet = matches.get_flag(options::QUIET);
         let elide_empty_files = matches.get_flag(options::ELIDE_EMPTY_FILES);
         let suppress_matched = matches.get_flag(options::SUPPRESS_MATCHED);
 
-        Self {
-            split_name: crash_if_err!(
-                1,
-                SplitName::new(
-                    matches.get_one::<String>(options::PREFIX).cloned(),
-                    matches.get_one::<String>(options::SUFFIX_FORMAT).cloned(),
-                    matches.get_one::<String>(options::DIGITS).cloned()
-                )
-            ),
+        Ok(Self {
+            split_name: SplitName::new(
+                matches.get_one::<String>(options::PREFIX).cloned(),
+                matches.get_one::<String>(options::SUFFIX_FORMAT).cloned(),
+                matches.get_one::<String>(options::DIGITS).cloned(),
+            )?,
             keep_files,
             quiet,
             elide_empty_files,
             suppress_matched,
+        })
+    }
+}
+
+pub struct LinesWithNewlines<T: BufRead> {
+    inner: T,
+}
+
+impl<T: BufRead> LinesWithNewlines<T> {
+    fn new(s: T) -> Self {
+        Self { inner: s }
+    }
+}
+
+impl<T: BufRead> Iterator for LinesWithNewlines<T> {
+    type Item = io::Result<String>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        fn ret(v: Vec<u8>) -> io::Result<String> {
+            String::from_utf8(v).map_err(|_| {
+                io::Error::new(ErrorKind::InvalidData, translate!("csplit-stream-not-utf8"))
+            })
+        }
+
+        let mut v = Vec::new();
+        match self.inner.read_until(b'\n', &mut v) {
+            Ok(0) => None,
+            Ok(_) => Some(ret(v)),
+            Err(e) => Some(Err(e)),
         }
     }
 }
@@ -86,28 +111,36 @@ impl CsplitOptions {
 /// - [`CsplitError::MatchNotFound`] if no line matched a regular expression.
 /// - [`CsplitError::MatchNotFoundOnRepetition`], like previous but after applying the pattern
 ///   more than once.
-pub fn csplit<T>(
-    options: &CsplitOptions,
-    patterns: Vec<String>,
-    input: T,
-) -> Result<(), CsplitError>
+pub fn csplit<T>(options: &CsplitOptions, patterns: &[String], input: T) -> Result<(), CsplitError>
 where
     T: BufRead,
 {
-    let mut input_iter = InputSplitter::new(input.lines().enumerate());
+    let enumerated_input_lines = LinesWithNewlines::new(input)
+        .map(|line| line.map_err_context(|| translate!("csplit-read-error")))
+        .enumerate();
+    let mut input_iter = InputSplitter::new(enumerated_input_lines);
     let mut split_writer = SplitWriter::new(options);
-    let patterns: Vec<patterns::Pattern> = patterns::get_patterns(&patterns[..])?;
-    let ret = do_csplit(&mut split_writer, patterns, &mut input_iter);
+    let patterns_vec: Vec<patterns::Pattern> = patterns::get_patterns(patterns)?;
+    let all_up_to_line = patterns_vec
+        .iter()
+        .all(|p| matches!(p, patterns::Pattern::UpToLine(_, _)));
+    let ret = do_csplit(&mut split_writer, patterns_vec, &mut input_iter);
 
     // consume the rest, unless there was an error
     if ret.is_ok() {
         input_iter.rewind_buffer();
         if let Some((_, line)) = input_iter.next() {
+            // There is remaining input: create a final split and copy remainder
             split_writer.new_writer()?;
             split_writer.writeln(&line?)?;
             for (_, line) in input_iter {
                 split_writer.writeln(&line?)?;
             }
+            split_writer.finish_split();
+        } else if all_up_to_line && options.suppress_matched {
+            // GNU semantics for integer patterns with --suppress-matched:
+            // even if no remaining input, create a final (possibly empty) split
+            split_writer.new_writer()?;
             split_writer.finish_split();
         }
     }
@@ -124,7 +157,7 @@ fn do_csplit<I>(
     input_iter: &mut InputSplitter<I>,
 ) -> Result<(), CsplitError>
 where
-    I: Iterator<Item = (usize, io::Result<String>)>,
+    I: Iterator<Item = (usize, UResult<String>)>,
 {
     // split the file based on patterns
     for pattern in patterns {
@@ -178,10 +211,10 @@ where
                         (Err(err), _) => return Err(err),
                         // continue the splitting process
                         (Ok(()), _) => (),
-                    };
+                    }
                 }
             }
-        };
+        }
     }
     Ok(())
 }
@@ -201,17 +234,22 @@ struct SplitWriter<'a> {
     dev_null: bool,
 }
 
-impl<'a> Drop for SplitWriter<'a> {
+impl Drop for SplitWriter<'_> {
     fn drop(&mut self) {
         if self.options.elide_empty_files && self.size == 0 {
             let file_name = self.options.split_name.get(self.counter);
-            remove_file(file_name).expect("Failed to elide split");
+            // In the case of `echo a | csplit -z - %a%1`, the file
+            // `xx00` does not exist because the positive offset
+            // advanced past the end of the input. Since there is no
+            // file to remove in that case, `remove_file` would return
+            // an error, so we just ignore it.
+            let _ = remove_file(file_name);
         }
     }
 }
 
-impl<'a> SplitWriter<'a> {
-    fn new(options: &CsplitOptions) -> SplitWriter {
+impl SplitWriter<'_> {
+    fn new(options: &CsplitOptions) -> SplitWriter<'_> {
         SplitWriter {
             options,
             counter: 0,
@@ -241,7 +279,7 @@ impl<'a> SplitWriter<'a> {
         self.dev_null = true;
     }
 
-    /// Writes the line to the current split, appending a newline character.
+    /// Writes the line to the current split.
     /// If [`self.dev_null`] is true, then the line is discarded.
     ///
     /// # Errors
@@ -253,10 +291,9 @@ impl<'a> SplitWriter<'a> {
                 Some(ref mut current_writer) => {
                     let bytes = line.as_bytes();
                     current_writer.write_all(bytes)?;
-                    current_writer.write_all(b"\n")?;
-                    self.size += bytes.len() + 1;
+                    self.size += bytes.len();
                 }
-                None => panic!("trying to write to a split that was not created"),
+                None => panic!("{}", translate!("csplit-write-split-not-created")),
             }
         }
         Ok(())
@@ -312,18 +349,18 @@ impl<'a> SplitWriter<'a> {
         input_iter: &mut InputSplitter<I>,
     ) -> Result<(), CsplitError>
     where
-        I: Iterator<Item = (usize, io::Result<String>)>,
+        I: Iterator<Item = (usize, UResult<String>)>,
     {
         input_iter.rewind_buffer();
         input_iter.set_size_of_buffer(1);
 
         let mut ret = Err(CsplitError::LineOutOfRange(pattern_as_str.to_string()));
         while let Some((ln, line)) = input_iter.next() {
-            let l = line?;
+            let line = line?;
             match n.cmp(&(&ln + 1)) {
                 Ordering::Less => {
                     assert!(
-                        input_iter.add_line_to_buffer(ln, l).is_none(),
+                        input_iter.add_line_to_buffer(ln, line).is_none(),
                         "the buffer is big enough to contain 1 line"
                     );
                     ret = Ok(());
@@ -332,7 +369,7 @@ impl<'a> SplitWriter<'a> {
                 Ordering::Equal => {
                     assert!(
                         self.options.suppress_matched
-                            || input_iter.add_line_to_buffer(ln, l).is_none(),
+                            || input_iter.add_line_to_buffer(ln, line).is_none(),
                         "the buffer is big enough to contain 1 line"
                     );
                     ret = Ok(());
@@ -340,7 +377,7 @@ impl<'a> SplitWriter<'a> {
                 }
                 Ordering::Greater => (),
             }
-            self.writeln(&l)?;
+            self.writeln(&line)?;
         }
         self.finish_split();
         ret
@@ -355,7 +392,7 @@ impl<'a> SplitWriter<'a> {
     /// In addition to errors reading/writing from/to a file, the following errors may be returned:
     /// - if no line matched, an [`CsplitError::MatchNotFound`].
     /// - if there are not enough lines to accommodate the offset, an
-    /// [`CsplitError::LineOutOfRange`].
+    ///   [`CsplitError::LineOutOfRange`].
     #[allow(clippy::cognitive_complexity)]
     fn do_to_match<I>(
         &mut self,
@@ -365,7 +402,7 @@ impl<'a> SplitWriter<'a> {
         input_iter: &mut InputSplitter<I>,
     ) -> Result<(), CsplitError>
     where
-        I: Iterator<Item = (usize, io::Result<String>)>,
+        I: Iterator<Item = (usize, UResult<String>)>,
     {
         if offset >= 0 {
             // The offset is zero or positive, no need for a buffer on the lines read.
@@ -377,20 +414,29 @@ impl<'a> SplitWriter<'a> {
             input_iter.set_size_of_buffer(1);
 
             while let Some((ln, line)) = input_iter.next() {
-                let l = line?;
-                if regex.is_match(&l) {
+                let line = line?;
+                let l = line
+                    .strip_suffix("\r\n")
+                    .unwrap_or_else(|| line.strip_suffix('\n').unwrap_or(&line));
+                if regex.is_match(l) {
+                    let mut next_line_suppress_matched = false;
                     match (self.options.suppress_matched, offset) {
                         // no offset, add the line to the next split
                         (false, 0) => {
                             assert!(
-                                input_iter.add_line_to_buffer(ln, l).is_none(),
+                                input_iter.add_line_to_buffer(ln, line).is_none(),
                                 "the buffer is big enough to contain 1 line"
                             );
                         }
                         // a positive offset, some more lines need to be added to the current split
-                        (false, _) => self.writeln(&l)?,
+                        (false, _) => self.writeln(&line)?,
+                        // suppress matched option true, but there is a positive offset, so the line is printed
+                        (true, 1..) => {
+                            next_line_suppress_matched = true;
+                            self.writeln(&line)?;
+                        }
                         _ => (),
-                    };
+                    }
                     offset -= 1;
 
                     // write the extra lines required by the offset
@@ -405,13 +451,18 @@ impl<'a> SplitWriter<'a> {
                                     pattern_as_str.to_string(),
                                 ));
                             }
-                        };
+                        }
                         offset -= 1;
                     }
                     self.finish_split();
+
+                    // if we have to suppress one line after we take the next and do nothing
+                    if next_line_suppress_matched {
+                        input_iter.next();
+                    }
                     return Ok(());
                 }
-                self.writeln(&l)?;
+                self.writeln(&line)?;
             }
         } else {
             // With a negative offset we use a buffer to keep the lines within the offset.
@@ -422,26 +473,35 @@ impl<'a> SplitWriter<'a> {
             let offset_usize = -offset as usize;
             input_iter.set_size_of_buffer(offset_usize);
             while let Some((ln, line)) = input_iter.next() {
-                let l = line?;
-                if regex.is_match(&l) {
+                let line = line?;
+                let l = line
+                    .strip_suffix("\r\n")
+                    .unwrap_or_else(|| line.strip_suffix('\n').unwrap_or(&line));
+                if regex.is_match(l) {
                     for line in input_iter.shrink_buffer_to_size() {
                         self.writeln(&line)?;
                     }
-                    if !self.options.suppress_matched {
+                    if self.options.suppress_matched {
+                        // since offset_usize is for sure greater than 0
+                        // the first element of the buffer should be removed and this
+                        // line inserted to be coherent with GNU implementation
+                        input_iter.add_line_to_buffer(ln, line);
+                    } else {
                         // add 1 to the buffer size to make place for the matched line
                         input_iter.set_size_of_buffer(offset_usize + 1);
                         assert!(
-                            input_iter.add_line_to_buffer(ln, l).is_none(),
+                            input_iter.add_line_to_buffer(ln, line).is_none(),
                             "should be big enough to hold every lines"
                         );
                     }
+
                     self.finish_split();
                     if input_iter.buffer_len() < offset_usize {
                         return Err(CsplitError::LineOutOfRange(pattern_as_str.to_string()));
                     }
                     return Ok(());
                 }
-                if let Some(line) = input_iter.add_line_to_buffer(ln, l) {
+                if let Some(line) = input_iter.add_line_to_buffer(ln, line) {
                     self.writeln(&line)?;
                 }
             }
@@ -460,7 +520,7 @@ impl<'a> SplitWriter<'a> {
 /// This is used to pass matching lines to the next split and to support patterns with a negative offset.
 struct InputSplitter<I>
 where
-    I: Iterator<Item = (usize, io::Result<String>)>,
+    I: Iterator<Item = (usize, UResult<String>)>,
 {
     iter: I,
     buffer: Vec<<I as Iterator>::Item>,
@@ -473,7 +533,7 @@ where
 
 impl<I> InputSplitter<I>
 where
-    I: Iterator<Item = (usize, io::Result<String>)>,
+    I: Iterator<Item = (usize, UResult<String>)>,
 {
     fn new(iter: I) -> Self {
         Self {
@@ -537,7 +597,7 @@ where
 
 impl<I> Iterator for InputSplitter<I>
 where
-    I: Iterator<Item = (usize, io::Result<String>)>,
+    I: Iterator<Item = (usize, UResult<String>)>,
 {
     type Item = <I as Iterator>::Item;
 
@@ -554,10 +614,10 @@ where
 
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-    let matches = uu_app().try_get_matches_from(args)?;
+    let matches = uucore::clap_localization::handle_clap_result(uu_app(), args)?;
 
     // get the file to split
-    let file_name = matches.get_one::<String>(options::FILE).unwrap();
+    let file_name = matches.get_one::<OsString>(options::FILE).unwrap();
 
     // get the patterns to split on
     let patterns: Vec<String> = matches
@@ -565,28 +625,23 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
         .unwrap()
         .map(|s| s.to_string())
         .collect();
-    let options = CsplitOptions::new(&matches);
+    let options = CsplitOptions::new(&matches)?;
     if file_name == "-" {
         let stdin = io::stdin();
-        Ok(csplit(&options, patterns, stdin.lock())?)
+        Ok(csplit(&options, &patterns, stdin.lock())?)
     } else {
         let file = File::open(file_name)
-            .map_err_context(|| format!("cannot access {}", file_name.quote()))?;
-        let file_metadata = file
-            .metadata()
-            .map_err_context(|| format!("cannot access {}", file_name.quote()))?;
-        if !file_metadata.is_file() {
-            return Err(CsplitError::NotRegularFile(file_name.to_string()).into());
-        }
-        Ok(csplit(&options, patterns, BufReader::new(file))?)
+            .map_err_context(|| format!("cannot open {} for reading", file_name.quote()))?;
+        Ok(csplit(&options, &patterns, BufReader::new(file))?)
     }
 }
 
 pub fn uu_app() -> Command {
     Command::new(uucore::util_name())
-        .version(crate_version!())
-        .about(ABOUT)
-        .override_usage(format_usage(USAGE))
+        .version(uucore::crate_version!())
+        .help_template(uucore::localized_help_template(uucore::util_name()))
+        .about(translate!("csplit-about"))
+        .override_usage(format_usage(&translate!("csplit-usage")))
         .args_override_self(true)
         .infer_long_args(true)
         .arg(
@@ -594,26 +649,26 @@ pub fn uu_app() -> Command {
                 .short('b')
                 .long(options::SUFFIX_FORMAT)
                 .value_name("FORMAT")
-                .help("use sprintf FORMAT instead of %02d"),
+                .help(translate!("csplit-help-suffix-format")),
         )
         .arg(
             Arg::new(options::PREFIX)
                 .short('f')
                 .long(options::PREFIX)
                 .value_name("PREFIX")
-                .help("use PREFIX instead of 'xx'"),
+                .help(translate!("csplit-help-prefix")),
         )
         .arg(
             Arg::new(options::KEEP_FILES)
                 .short('k')
                 .long(options::KEEP_FILES)
-                .help("do not remove output files on errors")
+                .help(translate!("csplit-help-keep-files"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new(options::SUPPRESS_MATCHED)
                 .long(options::SUPPRESS_MATCHED)
-                .help("suppress the lines matching PATTERN")
+                .help(translate!("csplit-help-suppress-matched"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
@@ -621,36 +676,38 @@ pub fn uu_app() -> Command {
                 .short('n')
                 .long(options::DIGITS)
                 .value_name("DIGITS")
-                .help("use specified number of digits instead of 2"),
+                .help(translate!("csplit-help-digits")),
         )
         .arg(
             Arg::new(options::QUIET)
-                .short('s')
+                .short('q')
                 .long(options::QUIET)
+                .visible_short_alias('s')
                 .visible_alias("silent")
-                .help("do not print counts of output file sizes")
+                .help(translate!("csplit-help-quiet"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new(options::ELIDE_EMPTY_FILES)
                 .short('z')
                 .long(options::ELIDE_EMPTY_FILES)
-                .help("remove empty output files")
+                .help(translate!("csplit-help-elide-empty-files"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new(options::FILE)
                 .hide(true)
                 .required(true)
-                .value_hint(clap::ValueHint::FilePath),
+                .value_hint(clap::ValueHint::FilePath)
+                .value_parser(clap::value_parser!(OsString)),
         )
         .arg(
             Arg::new(options::PATTERN)
                 .hide(true)
-                .action(clap::ArgAction::Append)
+                .action(ArgAction::Append)
                 .required(true),
         )
-        .after_help(AFTER_HELP)
+        .after_help(translate!("csplit-after-help"))
 }
 
 #[cfg(test)]
@@ -678,7 +735,7 @@ mod tests {
                 assert_eq!(input_splitter.buffer_len(), 1);
             }
             item => panic!("wrong item: {item:?}"),
-        };
+        }
 
         match input_splitter.next() {
             Some((1, Ok(line))) => {
@@ -687,7 +744,7 @@ mod tests {
                 assert_eq!(input_splitter.buffer_len(), 2);
             }
             item => panic!("wrong item: {item:?}"),
-        };
+        }
 
         match input_splitter.next() {
             Some((2, Ok(line))) => {
@@ -699,7 +756,7 @@ mod tests {
                 assert_eq!(input_splitter.buffer_len(), 2);
             }
             item => panic!("wrong item: {item:?}"),
-        };
+        }
 
         input_splitter.rewind_buffer();
 
@@ -709,7 +766,7 @@ mod tests {
                 assert_eq!(input_splitter.buffer_len(), 1);
             }
             item => panic!("wrong item: {item:?}"),
-        };
+        }
 
         match input_splitter.next() {
             Some((2, Ok(line))) => {
@@ -717,7 +774,7 @@ mod tests {
                 assert_eq!(input_splitter.buffer_len(), 0);
             }
             item => panic!("wrong item: {item:?}"),
-        };
+        }
 
         match input_splitter.next() {
             Some((3, Ok(line))) => {
@@ -725,7 +782,7 @@ mod tests {
                 assert_eq!(input_splitter.buffer_len(), 0);
             }
             item => panic!("wrong item: {item:?}"),
-        };
+        }
 
         assert!(input_splitter.next().is_none());
     }
@@ -751,7 +808,7 @@ mod tests {
                 assert_eq!(input_splitter.buffer_len(), 1);
             }
             item => panic!("wrong item: {item:?}"),
-        };
+        }
 
         match input_splitter.next() {
             Some((1, Ok(line))) => {
@@ -760,7 +817,7 @@ mod tests {
                 assert_eq!(input_splitter.buffer_len(), 2);
             }
             item => panic!("wrong item: {item:?}"),
-        };
+        }
 
         match input_splitter.next() {
             Some((2, Ok(line))) => {
@@ -769,7 +826,7 @@ mod tests {
                 assert_eq!(input_splitter.buffer_len(), 3);
             }
             item => panic!("wrong item: {item:?}"),
-        };
+        }
 
         input_splitter.rewind_buffer();
 
@@ -780,7 +837,7 @@ mod tests {
                 assert_eq!(input_splitter.buffer_len(), 3);
             }
             item => panic!("wrong item: {item:?}"),
-        };
+        }
 
         match input_splitter.next() {
             Some((0, Ok(line))) => {
@@ -788,7 +845,7 @@ mod tests {
                 assert_eq!(input_splitter.buffer_len(), 2);
             }
             item => panic!("wrong item: {item:?}"),
-        };
+        }
 
         match input_splitter.next() {
             Some((1, Ok(line))) => {
@@ -796,7 +853,7 @@ mod tests {
                 assert_eq!(input_splitter.buffer_len(), 1);
             }
             item => panic!("wrong item: {item:?}"),
-        };
+        }
 
         match input_splitter.next() {
             Some((2, Ok(line))) => {
@@ -804,7 +861,7 @@ mod tests {
                 assert_eq!(input_splitter.buffer_len(), 0);
             }
             item => panic!("wrong item: {item:?}"),
-        };
+        }
 
         match input_splitter.next() {
             Some((3, Ok(line))) => {
@@ -812,7 +869,7 @@ mod tests {
                 assert_eq!(input_splitter.buffer_len(), 0);
             }
             item => panic!("wrong item: {item:?}"),
-        };
+        }
 
         assert!(input_splitter.next().is_none());
     }

@@ -3,22 +3,24 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-// spell-checker:ignore (ToDO) MAKEWORD addrs hashset
+// spell-checker:ignore hashset Addrs addrs
 
+#[cfg(not(any(target_os = "freebsd", target_os = "openbsd")))]
 use std::net::ToSocketAddrs;
 use std::str;
 use std::{collections::hash_set::HashSet, ffi::OsString};
 
 use clap::builder::ValueParser;
-use clap::{crate_version, Arg, ArgAction, ArgMatches, Command};
+use clap::{Arg, ArgAction, ArgMatches, Command};
+
+#[cfg(any(target_os = "freebsd", target_os = "openbsd"))]
+use dns_lookup::lookup_host;
+use uucore::translate;
 
 use uucore::{
     error::{FromIo, UResult},
-    format_usage, help_about, help_usage,
+    format_usage,
 };
-
-const ABOUT: &str = help_about!("hostname.md");
-const USAGE: &str = help_usage!("hostname.md");
 
 static OPT_DOMAIN: &str = "domain";
 static OPT_IP_ADDRESS: &str = "ip-address";
@@ -30,7 +32,7 @@ static OPT_HOST: &str = "host";
 mod wsa {
     use std::io;
 
-    use windows_sys::Win32::Networking::WinSock::{WSACleanup, WSAStartup, WSADATA};
+    use windows_sys::Win32::Networking::WinSock::{WSACleanup, WSADATA, WSAStartup};
 
     pub(super) struct WsaHandle(());
 
@@ -58,29 +60,32 @@ mod wsa {
 
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-    let matches = uu_app().try_get_matches_from(args)?;
+    let matches = uucore::clap_localization::handle_clap_result(uu_app(), args)?;
 
     #[cfg(windows)]
-    let _handle = wsa::start().map_err_context(|| "failed to start Winsock".to_owned())?;
+    let _handle = wsa::start().map_err_context(|| translate!("hostname-error-winsock"))?;
 
     match matches.get_one::<OsString>(OPT_HOST) {
         None => display_hostname(&matches),
-        Some(host) => hostname::set(host).map_err_context(|| "failed to set hostname".to_owned()),
+        Some(host) => {
+            hostname::set(host).map_err_context(|| translate!("hostname-error-set-hostname"))
+        }
     }
 }
 
 pub fn uu_app() -> Command {
     Command::new(uucore::util_name())
-        .version(crate_version!())
-        .about(ABOUT)
-        .override_usage(format_usage(USAGE))
+        .version(uucore::crate_version!())
+        .help_template(uucore::localized_help_template(uucore::util_name()))
+        .about(translate!("hostname-about"))
+        .override_usage(format_usage(&translate!("hostname-usage")))
         .infer_long_args(true)
         .arg(
             Arg::new(OPT_DOMAIN)
                 .short('d')
                 .long("domain")
                 .overrides_with_all([OPT_DOMAIN, OPT_IP_ADDRESS, OPT_FQDN, OPT_SHORT])
-                .help("Display the name of the DNS domain if possible")
+                .help(translate!("hostname-help-domain"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
@@ -88,7 +93,7 @@ pub fn uu_app() -> Command {
                 .short('i')
                 .long("ip-address")
                 .overrides_with_all([OPT_DOMAIN, OPT_IP_ADDRESS, OPT_FQDN, OPT_SHORT])
-                .help("Display the network address(es) of the host")
+                .help(translate!("hostname-help-ip-address"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
@@ -96,7 +101,7 @@ pub fn uu_app() -> Command {
                 .short('f')
                 .long("fqdn")
                 .overrides_with_all([OPT_DOMAIN, OPT_IP_ADDRESS, OPT_FQDN, OPT_SHORT])
-                .help("Display the FQDN (Fully Qualified Domain Name) (default)")
+                .help(translate!("hostname-help-fqdn"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
@@ -104,7 +109,7 @@ pub fn uu_app() -> Command {
                 .short('s')
                 .long("short")
                 .overrides_with_all([OPT_DOMAIN, OPT_IP_ADDRESS, OPT_FQDN, OPT_SHORT])
-                .help("Display the short hostname (the portion before the first dot) if possible")
+                .help(translate!("hostname-help-short"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
@@ -121,13 +126,27 @@ fn display_hostname(matches: &ArgMatches) -> UResult<()> {
         .into_owned();
 
     if matches.get_flag(OPT_IP_ADDRESS) {
-        // XXX: to_socket_addrs needs hostname:port so append a dummy port and remove it later.
-        // This was originally supposed to use std::net::lookup_host, but that seems to be
-        // deprecated.  Perhaps we should use the dns-lookup crate?
-        let hostname = hostname + ":1";
-        let addresses = hostname
-            .to_socket_addrs()
-            .map_err_context(|| "failed to resolve socket addresses".to_owned())?;
+        let addresses;
+
+        #[cfg(not(any(target_os = "freebsd", target_os = "openbsd")))]
+        {
+            let hostname = hostname + ":1";
+            let addrs = hostname
+                .to_socket_addrs()
+                .map_err_context(|| "failed to resolve socket addresses".to_owned())?;
+            addresses = addrs;
+        }
+
+        // DNS reverse lookup via "hostname:1" does not work on FreeBSD and OpenBSD
+        // use dns-lookup crate instead
+        #[cfg(any(target_os = "freebsd", target_os = "openbsd"))]
+        {
+            let addrs: Vec<std::net::IpAddr> = lookup_host(hostname.as_str())
+                .map_err_context(|| "failed to lookup hostname".to_owned())?
+                .collect();
+            addresses = addrs;
+        }
+
         let mut hashset = HashSet::new();
         let mut output = String::new();
         for addr in addresses {

@@ -3,17 +3,16 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-use clap::{crate_version, Arg, ArgAction, Command};
-use std::io::{self, Write};
-use std::iter::Peekable;
-use std::ops::ControlFlow;
-use std::str::Chars;
-use uucore::error::{FromIo, UResult};
-use uucore::{format_usage, help_about, help_section, help_usage};
+use clap::builder::ValueParser;
+use clap::{Arg, ArgAction, Command};
+use std::env;
+use std::ffi::{OsStr, OsString};
+use std::io::{self, StdoutLock, Write};
+use uucore::error::UResult;
+use uucore::format::{FormatChar, OctalParsing, parse_escape_only};
+use uucore::{format_usage, os_str_as_bytes};
 
-const ABOUT: &str = help_about!("echo.md");
-const USAGE: &str = help_usage!("echo.md");
-const AFTER_HELP: &str = help_section!("after help", "echo.md");
+use uucore::translate;
 
 mod options {
     pub const STRING: &str = "STRING";
@@ -22,113 +21,162 @@ mod options {
     pub const DISABLE_BACKSLASH_ESCAPE: &str = "disable_backslash_escape";
 }
 
-#[repr(u8)]
-#[derive(Clone, Copy)]
-enum Base {
-    Oct = 8,
-    Hex = 16,
+/// Options for the echo command.
+#[derive(Debug, Clone, Copy)]
+struct Options {
+    /// Whether the output should have a trailing newline.
+    ///
+    /// True by default. `-n` disables it.
+    pub trailing_newline: bool,
+
+    /// Whether given string literals should be parsed for
+    /// escape characters.
+    ///
+    /// False by default, can be enabled with `-e`. Always true if
+    /// `POSIXLY_CORRECT` (cannot be disabled with `-E`).
+    pub escape: bool,
 }
 
-impl Base {
-    fn max_digits(&self) -> u8 {
-        match self {
-            Self::Oct => 3,
-            Self::Hex => 2,
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            trailing_newline: true,
+            escape: false,
         }
     }
 }
 
-/// Parse the numeric part of the `\xHHH` and `\0NNN` escape sequences
-fn parse_code(input: &mut Peekable<Chars>, base: Base) -> Option<char> {
-    // All arithmetic on `ret` needs to be wrapping, because octal input can
-    // take 3 digits, which is 9 bits, and therefore more than what fits in a
-    // `u8`. GNU just seems to wrap these values.
-    // Note that if we instead make `ret` a `u32` and use `char::from_u32` will
-    // yield incorrect results because it will interpret values larger than
-    // `u8::MAX` as unicode.
-    let mut ret = input.peek().and_then(|c| c.to_digit(base as u32))? as u8;
-
-    // We can safely ignore the None case because we just peeked it.
-    let _ = input.next();
-
-    for _ in 1..base.max_digits() {
-        match input.peek().and_then(|c| c.to_digit(base as u32)) {
-            Some(n) => ret = ret.wrapping_mul(base as u8).wrapping_add(n as u8),
-            None => break,
+impl Options {
+    fn posixly_correct_default() -> Self {
+        Self {
+            trailing_newline: true,
+            escape: true,
         }
-        // We can safely ignore the None case because we just peeked it.
-        let _ = input.next();
     }
-
-    Some(ret.into())
 }
 
-fn print_escaped(input: &str, mut output: impl Write) -> io::Result<ControlFlow<()>> {
-    let mut iter = input.chars().peekable();
-    while let Some(c) = iter.next() {
-        if c != '\\' {
-            write!(output, "{c}")?;
-            continue;
-        }
+/// Checks if an argument is a valid echo flag, and if
+/// it is records the changes in [`Options`].
+fn is_flag(arg: &OsStr, options: &mut Options) -> bool {
+    let arg = arg.as_encoded_bytes();
 
-        // This is for the \NNN syntax for octal sequences.
-        // Note that '0' is intentionally omitted because that
-        // would be the \0NNN syntax.
-        if let Some('1'..='8') = iter.peek() {
-            if let Some(parsed) = parse_code(&mut iter, Base::Oct) {
-                write!(output, "{parsed}")?;
-                continue;
-            }
-        }
+    if arg.first() != Some(&b'-') || arg == b"-" {
+        // Argument doesn't start with '-' or is '-' => not a flag.
+        return false;
+    }
 
-        if let Some(next) = iter.next() {
-            let unescaped = match next {
-                '\\' => '\\',
-                'a' => '\x07',
-                'b' => '\x08',
-                'c' => return Ok(ControlFlow::Break(())),
-                'e' => '\x1b',
-                'f' => '\x0c',
-                'n' => '\n',
-                'r' => '\r',
-                't' => '\t',
-                'v' => '\x0b',
-                'x' => {
-                    if let Some(c) = parse_code(&mut iter, Base::Hex) {
-                        c
-                    } else {
-                        write!(output, "\\")?;
-                        'x'
-                    }
-                }
-                '0' => parse_code(&mut iter, Base::Oct).unwrap_or('\0'),
-                c => {
-                    write!(output, "\\")?;
-                    c
-                }
-            };
-            write!(output, "{unescaped}")?;
-        } else {
-            write!(output, "\\")?;
+    // We don't modify the given options until after
+    // the loop because there is a chance the flag isn't
+    // valid after all & shouldn't affect the options.
+    let mut options_: Options = *options;
+
+    // Skip the '-' when processing characters.
+    for c in &arg[1..] {
+        match c {
+            b'e' => options_.escape = true,
+            b'E' => options_.escape = false,
+            b'n' => options_.trailing_newline = false,
+
+            // If there is any character in an supposed flag
+            // that is not a valid flag character, it is not
+            // a flag.
+            //
+            // "-eeEnEe" => is a flag.
+            // "-eeBne" => not a flag, short circuit at the B.
+            _ => return false,
         }
     }
 
-    Ok(ControlFlow::Continue(()))
+    // We are now sure that the argument is a
+    // flag, and can apply the modified options.
+    *options = options_;
+    true
+}
+
+/// Processes command line arguments, separating flags from normal arguments.
+///
+/// # Returns
+///
+/// - Vector of non-flag arguments.
+/// - [`Options`], describing how teh arguments should be interpreted.
+fn filter_flags(mut args: impl Iterator<Item = OsString>) -> (Vec<OsString>, Options) {
+    let mut arguments = Vec::with_capacity(args.size_hint().0);
+    let mut options = Options::default();
+
+    // Process arguments until first non-flag is found.
+    for arg in &mut args {
+        // We parse flags and aggregate the options in `options`.
+        // First call to `is_echo_flag` to return false will break the loop.
+        if !is_flag(&arg, &mut options) {
+            // Not a flag. Can break out of flag-processing loop.
+            // Don't forget to push it to the arguments too.
+            arguments.push(arg);
+            break;
+        }
+    }
+
+    // Collect remaining non-flag arguments.
+    arguments.extend(args);
+
+    (arguments, options)
 }
 
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-    let matches = uu_app().get_matches_from(args);
+    // args[0] is the name of the binary.
+    let args: Vec<OsString> = args.skip(1).collect();
 
-    let no_newline = matches.get_flag(options::NO_NEWLINE);
-    let escaped = matches.get_flag(options::ENABLE_BACKSLASH_ESCAPE);
-    let values: Vec<String> = match matches.get_many::<String>(options::STRING) {
-        Some(s) => s.map(|s| s.to_string()).collect(),
-        None => vec![String::new()],
+    // Check POSIX compatibility mode
+    //
+    // From the GNU manual, on what it should do:
+    //
+    // > If the POSIXLY_CORRECT environment variable is set, then when
+    // > echo’s first argument is not -n it outputs option-like arguments
+    // > instead of treating them as options. For example, echo -ne hello
+    // > outputs ‘-ne hello’ instead of plain ‘hello’. Also backslash
+    // > escapes are always enabled. To echo the string ‘-n’, one of the
+    // > characters can be escaped in either octal or hexadecimal
+    // > representation. For example, echo -e '\x2dn'.
+    let is_posixly_correct = env::var_os("POSIXLY_CORRECT").is_some();
+
+    let (args, options) = if is_posixly_correct {
+        if args.first().is_some_and(|arg| arg == "-n") {
+            // if POSIXLY_CORRECT is set and the first argument is the "-n" flag
+            // we filter flags normally but 'escaped' is activated nonetheless.
+            let (args, _) = filter_flags(args.into_iter());
+            (
+                args,
+                Options {
+                    trailing_newline: false,
+                    ..Options::posixly_correct_default()
+                },
+            )
+        } else {
+            // if POSIXLY_CORRECT is set and the first argument is not the "-n" flag
+            // we just collect all arguments as no arguments are interpreted as flags.
+            (args, Options::posixly_correct_default())
+        }
+    } else if args.len() == 1 && args[0] == "--help" {
+        // If POSIXLY_CORRECT is not set and the first argument
+        // is `--help`, GNU coreutils prints the help message.
+        //
+        // Verify this using:
+        //
+        //   POSIXLY_CORRECT=1 echo --help
+        //                     echo --help
+        uu_app().print_help()?;
+        return Ok(());
+    } else if args.len() == 1 && args[0] == "--version" {
+        print!("{}", uu_app().render_version());
+        return Ok(());
+    } else {
+        // if POSIXLY_CORRECT is not set we filter the flags normally
+        filter_flags(args.into_iter())
     };
 
-    execute(no_newline, escaped, &values)
-        .map_err_context(|| "could not write to stdout".to_string())
+    execute(&mut io::stdout().lock(), args, options)?;
+
+    Ok(())
 }
 
 pub fn uu_app() -> Command {
@@ -141,52 +189,60 @@ pub fn uu_app() -> Command {
         // Final argument must have multiple(true) or the usage string equivalent.
         .trailing_var_arg(true)
         .allow_hyphen_values(true)
-        .version(crate_version!())
-        .about(ABOUT)
-        .after_help(AFTER_HELP)
-        .override_usage(format_usage(USAGE))
+        .version(uucore::crate_version!())
+        .about(translate!("echo-about"))
+        .after_help(translate!("echo-after-help"))
+        .override_usage(format_usage(&translate!("echo-usage")))
+        .help_template(uucore::localized_help_template(uucore::util_name()))
         .arg(
             Arg::new(options::NO_NEWLINE)
                 .short('n')
-                .help("do not output the trailing newline")
+                .help(translate!("echo-help-no-newline"))
                 .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new(options::ENABLE_BACKSLASH_ESCAPE)
                 .short('e')
-                .help("enable interpretation of backslash escapes")
+                .help(translate!("echo-help-enable-escapes"))
                 .action(ArgAction::SetTrue)
                 .overrides_with(options::DISABLE_BACKSLASH_ESCAPE),
         )
         .arg(
             Arg::new(options::DISABLE_BACKSLASH_ESCAPE)
                 .short('E')
-                .help("disable interpretation of backslash escapes (default)")
+                .help(translate!("echo-help-disable-escapes"))
                 .action(ArgAction::SetTrue)
                 .overrides_with(options::ENABLE_BACKSLASH_ESCAPE),
         )
-        .arg(Arg::new(options::STRING).action(ArgAction::Append))
+        .arg(
+            Arg::new(options::STRING)
+                .action(ArgAction::Append)
+                .value_parser(ValueParser::os_string()),
+        )
 }
 
-fn execute(no_newline: bool, escaped: bool, free: &[String]) -> io::Result<()> {
-    let stdout = io::stdout();
-    let mut output = stdout.lock();
+fn execute(stdout: &mut StdoutLock, args: Vec<OsString>, options: Options) -> UResult<()> {
+    for (i, arg) in args.into_iter().enumerate() {
+        let bytes = os_str_as_bytes(&arg)?;
 
-    for (i, input) in free.iter().enumerate() {
+        // Don't print a space before the first argument
         if i > 0 {
-            write!(output, " ")?;
+            stdout.write_all(b" ")?;
         }
-        if escaped {
-            if print_escaped(input, &mut output)?.is_break() {
-                return Ok(());
+
+        if options.escape {
+            for item in parse_escape_only(bytes, OctalParsing::ThreeDigits) {
+                if item.write(&mut *stdout)?.is_break() {
+                    return Ok(());
+                }
             }
         } else {
-            write!(output, "{input}")?;
+            stdout.write_all(bytes)?;
         }
     }
 
-    if !no_newline {
-        writeln!(output)?;
+    if options.trailing_newline {
+        stdout.write_all(b"\n")?;
     }
 
     Ok(())

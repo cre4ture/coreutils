@@ -4,29 +4,34 @@
 // file that was distributed with this source code.
 // spell-checker:ignore reflink
 use std::ffi::CString;
-use std::fs::{self, File};
-use std::io;
+use std::fs::{self, File, OpenOptions};
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
-use quick_error::ResultExt;
+use uucore::buf_copy;
+use uucore::translate;
 
-use crate::{CopyDebug, CopyResult, OffloadReflinkDebug, ReflinkMode, SparseDebug, SparseMode};
+use uucore::mode::get_umask;
+
+use crate::{
+    CopyDebug, CopyResult, CpError, OffloadReflinkDebug, ReflinkMode, SparseDebug, SparseMode,
+    is_stream,
+};
 
 /// Copies `source` to `dest` using copy-on-write if possible.
-///
-/// The `source_is_fifo` flag must be set to `true` if and only if
-/// `source` is a FIFO (also known as a named pipe).
 pub(crate) fn copy_on_write(
     source: &Path,
     dest: &Path,
     reflink_mode: ReflinkMode,
     sparse_mode: SparseMode,
     context: &str,
-    source_is_fifo: bool,
+    source_is_stream: bool,
 ) -> CopyResult<CopyDebug> {
     if sparse_mode != SparseMode::Auto {
-        return Err("--sparse is only supported on linux".to_string().into());
+        return Err(translate!("cp-error-sparse-not-supported")
+            .to_string()
+            .into());
     }
     let mut copy_debug = CopyDebug {
         offload: OffloadReflinkDebug::Unknown,
@@ -64,7 +69,7 @@ pub(crate) fn copy_on_write(
                 // clonefile(2) fails if the destination exists.  Remove it and try again.  Do not
                 // bother to check if removal worked because we're going to try to clone again.
                 // first lets make sure the dest file is not read only
-                if fs::metadata(dest).map_or(false, |md| !md.permissions().readonly()) {
+                if fs::metadata(dest).is_ok_and(|md| !md.permissions().readonly()) {
                     // remove and copy again
                     // TODO: rewrite this to better match linux behavior
                     // linux first opens the source file and destination file then uses the file
@@ -81,16 +86,32 @@ pub(crate) fn copy_on_write(
         // support COW).
         match reflink_mode {
             ReflinkMode::Always => {
-                return Err(format!("failed to clone {source:?} from {dest:?}: {error}").into())
+                return Err(translate!("cp-error-failed-to-clone", "source" => source.display(), "dest" => dest.display(), "error" => error)
+                .into());
             }
             _ => {
                 copy_debug.reflink = OffloadReflinkDebug::Yes;
-                if source_is_fifo {
+                if source_is_stream {
                     let mut src_file = File::open(source)?;
-                    let mut dst_file = File::create(dest)?;
-                    io::copy(&mut src_file, &mut dst_file).context(context)?
+                    let mode = 0o622 & !get_umask();
+                    let mut dst_file = OpenOptions::new()
+                        .create(true)
+                        .write(true)
+                        .mode(mode)
+                        .open(dest)?;
+
+                    let dest_is_stream = is_stream(&dst_file.metadata()?);
+                    if !dest_is_stream {
+                        // `copy_stream` doesn't clear the dest file, if dest is not a stream, we should clear it manually.
+                        dst_file.set_len(0)?;
+                    }
+
+                    buf_copy::copy_stream(&mut src_file, &mut dst_file)
+                        .map_err(|_| std::io::Error::from(std::io::ErrorKind::Other))
+                        .map_err(|e| CpError::IoErrContext(e, context.to_owned()))?
                 } else {
-                    fs::copy(source, dest).context(context)?
+                    fs::copy(source, dest)
+                        .map_err(|e| CpError::IoErrContext(e, context.to_owned()))?
                 }
             }
         };

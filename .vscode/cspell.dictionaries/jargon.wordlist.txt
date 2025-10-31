@@ -10,8 +10,10 @@ bytewise
 canonicalization
 canonicalize
 canonicalizing
+capget
 codepoint
 codepoints
+codeready
 codegen
 colorizable
 colorize
@@ -37,6 +39,7 @@ executable
 executables
 exponentiate
 eval
+esac
 falsey
 fileio
 filesystem
@@ -45,6 +48,8 @@ flamegraph
 fsxattr
 fullblock
 getfacl
+getfattr
+getopt
 gibi
 gibibytes
 glob
@@ -64,6 +69,8 @@ kibi
 kibibytes
 libacl
 lcase
+listxattr
+llistxattr
 lossily
 lstat
 mebi
@@ -74,6 +81,7 @@ microbenchmarks
 microbenchmarking
 multibyte
 multicall
+nmerge
 noatime
 nocache
 nocreat
@@ -84,6 +92,7 @@ nolinks
 nonblock
 nonportable
 nonprinting
+nonseekable
 notrunc
 noxfer
 ofile
@@ -106,7 +115,9 @@ seedable
 semver
 semiprime
 semiprimes
+setcap
 setfacl
+setfattr
 shortcode
 shortcodes
 siginfo
@@ -135,11 +146,14 @@ whitespace
 wordlist
 wordlists
 xattrs
+xpass
 
 # * abbreviations
 consts
 deps
 dev
+fdlimit
+inacc
 maint
 proc
 procs
@@ -155,3 +169,9 @@ retval
 subdir
 val
 vals
+inval
+nofield
+
+# * clippy
+uninlined
+nonminimal

@@ -7,7 +7,7 @@
 
 // spell-checker:ignore (vars) fperm srwx
 
-use libc::{mode_t, umask, S_IRGRP, S_IROTH, S_IRUSR, S_IWGRP, S_IWOTH, S_IWUSR};
+use libc::{S_IRGRP, S_IROTH, S_IRUSR, S_IWGRP, S_IWOTH, S_IWUSR, mode_t, umask};
 
 pub fn parse_numeric(fperm: u32, mut mode: &str, considering_dir: bool) -> Result<u32, String> {
     let (op, pos) = parse_op(mode).map_or_else(|_| (None, 0), |(op, pos)| (Some(op), pos));
@@ -180,29 +180,6 @@ pub fn get_umask() -> u32 {
         target_os = "redox"
     ))]
     return mask as u32;
-}
-
-// Iterate 'args' and delete the first occurrence
-// of a prefix '-' if it's associated with MODE
-// e.g. "chmod -v -xw -R FILE" -> "chmod -v xw -R FILE"
-pub fn strip_minus_from_mode(args: &mut Vec<String>) -> bool {
-    for arg in args {
-        if arg == "--" {
-            break;
-        }
-        if let Some(arg_stripped) = arg.strip_prefix('-') {
-            if let Some(second) = arg.chars().nth(1) {
-                match second {
-                    'r' | 'w' | 'x' | 'X' | 's' | 't' | 'u' | 'g' | 'o' | '0'..='7' => {
-                        *arg = arg_stripped.to_string();
-                        return true;
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-    false
 }
 
 #[cfg(test)]
